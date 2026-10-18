@@ -1,5 +1,15 @@
-import { Menu, Search, Bell, ChevronDown } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Menu, Search, Bell, ChevronDown, Check } from 'lucide-react';
 import { useApp } from '../store/AppContext';
+import { USERS } from '../data/seed';
+import type { Role } from '../types';
+
+const roleLabel: Record<Role, string> = {
+  admin: 'System Admin',
+  sales: 'Sales Agent',
+  finance: 'Accountant',
+  client: 'Client',
+};
 
 const titles: Record<string, string> = {
   dashboard: 'Executive Dashboard',
@@ -33,7 +43,30 @@ export default function Topbar({
   page: string;
   onMenu: () => void;
 }) {
-  const { user } = useApp();
+  const { user, setUser } = useApp();
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!profileOpen) return;
+
+    const dismissOnOutsideClick = (event: MouseEvent) => {
+      if (event.target instanceof Node && !profileRef.current?.contains(event.target)) {
+        setProfileOpen(false);
+      }
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setProfileOpen(false);
+    };
+
+    document.addEventListener('mousedown', dismissOnOutsideClick);
+    document.addEventListener('keydown', dismissOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', dismissOnOutsideClick);
+      document.removeEventListener('keydown', dismissOnEscape);
+    };
+  }, [profileOpen]);
+
   return (
     <header className="sticky top-0 z-20 bg-ink-900/80 backdrop-blur-xl border-b border-ink-600">
       <div className="flex items-center gap-3 px-4 lg:px-6 h-14">
@@ -57,15 +90,55 @@ export default function Topbar({
           <Bell size={18} />
           <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-hot rounded-full animate-pulseSoft" />
         </button>
-        <div className="flex items-center gap-2 pl-2 border-l border-ink-600">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-xs font-bold text-white">
-            {user.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
-          </div>
-          <div className="hidden sm:block leading-tight">
-            <div className="text-sm text-white">{user.name}</div>
-            <div className="text-[10px] text-muted">{user.title}</div>
-          </div>
-          <ChevronDown size={14} className="text-muted hidden sm:block" />
+        <div className="relative pl-2 border-l border-ink-600" ref={profileRef}>
+          <button
+            type="button"
+            onClick={() => setProfileOpen((open) => !open)}
+            aria-haspopup="menu"
+            aria-expanded={profileOpen}
+            aria-label={`Account menu for ${user.name}`}
+            className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-ink-700 transition"
+          >
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-xs font-bold text-white">
+              {user.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
+            </div>
+            <div className="hidden sm:block leading-tight text-left">
+              <div className="text-sm text-white">{user.name}</div>
+              <div className="text-[10px] text-muted">{user.title}</div>
+            </div>
+            <ChevronDown size={14} className={`text-muted hidden sm:block transition-transform ${profileOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {profileOpen && (
+            <div role="menu" aria-label="Account menu" className="absolute right-0 top-full mt-2 w-64 rounded-xl border border-ink-600 bg-ink-900 p-2 shadow-xl">
+              <div className="px-3 py-2 border-b border-ink-700">
+                <div className="text-sm text-white">{user.name}</div>
+                <div className="text-xs text-muted truncate">{user.email}</div>
+                <div className="text-[10px] text-brand-400 mt-1">{roleLabel[user.role]}</div>
+              </div>
+              <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-muted/70">Switch account</div>
+              {USERS.map((account) => (
+                <button
+                  key={account.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setUser(account);
+                    setProfileOpen(false);
+                  }}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-ink-700 transition"
+                >
+                  <span className="w-7 h-7 shrink-0 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-[10px] font-bold text-white">
+                    {account.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-xs text-white truncate">{account.name}</span>
+                    <span className="block text-[10px] text-muted">{roleLabel[account.role]}</span>
+                  </span>
+                  {account.id === user.id && <Check size={14} className="text-brand-400" />}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </header>

@@ -103,9 +103,9 @@ export default function Sidebar({
         <div className="px-4 py-4 border-b border-ink-600">
           <div className="flex items-center gap-2.5">
             <img
-              src="/WhatsApp_Image_2026-10-18_at_9.51.24_AM.jpeg"
+              src="/logo.jpeg"
               alt="IBMS"
-              className="w-10 h-10 rounded-xl object-cover ring-1 ring-ink-600 shadow-glow"
+              className="w-24 h-10 shrink-0 rounded-xl object-contain ring-1 ring-ink-600 shadow-glow"
             />
             <div className="leading-tight">
               <div className="text-white font-bold tracking-wide">IBMS</div>
