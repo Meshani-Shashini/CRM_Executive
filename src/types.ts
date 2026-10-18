@@ -1,77 +1,151 @@
-export type Stage = 'New' | 'Meeting' | 'Proposal' | 'Won';
-export type Region = 'Europe' | 'UK' | 'APAC' | 'Maldives & Sri Lanka';
+// Domain types for IBMS
 
-export interface Jurisdiction {
+export type Role = 'admin' | 'sales' | 'finance' | 'client';
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  avatar?: string;
+  title?: string;
+}
+
+export type LeadTemperature = 'HOT' | 'WARM' | 'COLD';
+export type ActivityStatus = 'IN-PROGRESS' | 'TO-DO' | 'BACKLOG' | 'COMPLETED';
+
+export interface Lead {
+  id: string;
+  client: string;
+  contact: string;
+  country: string;
+  insuranceClass: string;
+  productCode: string;
+  temperature: LeadTemperature;
+  status: ActivityStatus;
+  funnelStage: string;
+  renewalDate: string;
+  sumInsured: number;
+  premium: number;
+  ownerId: string;
+  lastActivity: string;
+}
+
+export interface Client {
+  id: string;
+  name: string;
+  tin: string;
+  country: string;
+  phone: string;
+  email: string;
+  address: string;
+  sumInsured: number;
+  premium: number;
+  expiry: string;
+  insurer: string;
+  productCode: string;
+  class: string;
+  ownerId: string;
+  tags: string[];
+}
+
+export interface Activity {
+  id: string;
+  clientId: string;
+  type: 'call' | 'meeting' | 'email' | 'upload' | 'note' | 'quote';
+  title: string;
+  description: string;
+  date: string;
+  userId: string;
+}
+
+export interface Insurer {
+  id: string;
+  name: string;
+  shortName: string;
+  commissionRate: number;
+  address: string;
+}
+
+export interface ProductCode {
   code: string;
   name: string;
-  currency: string;
-  currencySymbol: string;
-  flag: string;
-  taxRates: { label: string; rate: number }[];
+  category: string;
+}
+
+export interface InvoiceItem {
+  description: string;
+  qty: number;
+  unitPrice: number;
+  vatRate: number;
+}
+
+export interface Invoice {
+  id: string;
+  number: string;
+  clientId: string;
+  clientName: string;
+  insurer: string;
+  policyNo: string;
+  issueDate: string;
+  dueDate: string;
+  status: 'Pending' | 'Paid' | 'Partial' | 'Overdue' | 'Archived';
+  items: InvoiceItem[];
+  installments: { id: string; label: string; due: string; amount: number; paid: boolean }[];
+  currency: 'MVR' | 'USD';
+}
+
+export interface Payment {
+  id: string;
+  receiptNo: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  clientName: string;
+  amount: number;
+  date: string;
+  type: 'Premium' | 'Commission' | 'Fee';
+  method: 'Bank Transfer' | 'Cash' | 'Card';
+  status: 'Completed' | 'Pending';
+}
+
+export interface TaxRate {
+  id: string;
+  name: string;
+  rate: number;
+  category: 'Standard' | 'Tourism' | 'Zero-rated';
+  active: boolean;
+}
+
+export interface MiraRow {
+  id: string;
+  date: string;
+  insured: string;
+  insurer: string;
+  sumInsured: number;
+  premium: number;
+  commissionPct: number;
+  commissionAmount: number;
+  brokerageFee: number;
 }
 
 export interface Deal {
   id: string;
-  company: string;
-  contact: string;
-  title: string;
+  client: string;
+  product: string;
   value: number;
-  currency: string;
-  stage: Stage;
-  region: Region;
-  jurisdictionCode: string;
-  momentum: number;
-  lastActivity: string;
-  closeTarget: string;
-  tags: string[];
-  riskFlags: string[];
-  owner: string;
+  weighted: number;
+  stage: string;
+  probability: number;
+  ownerId: string;
+  closeDate: string;
+  insurer: string;
 }
 
-export interface ComplianceAlert {
+export interface CalendarEvent {
   id: string;
-  severity: 'critical' | 'warning' | 'info';
-  title: string;
-  detail: string;
-  dealId?: string;
-  jurisdictionCode?: string;
-}
-
-export interface RegionMetric {
-  region: Region;
-  pipelineValue: number;
-  wonMTD: number;
-  activeDeals: number;
-  velocityDays: number;
-  complianceScore: number;
-}
-
-export interface Invoice {
-  number: string;
   date: string;
-  customer: string;
-  jurisdictionCode: string;
-  items: { description: string; qty: number; unitPrice: number }[];
-  taxRate: number;
-  currency: string;
-}
-
-export interface CommLogEntry {
-  id: string;
-  channel: 'whatsapp' | 'email' | 'call' | 'note';
-  from: string;
-  timestamp: string;
-  body: string;
-}
-
-export interface CustomerRecord {
-  id: string;
-  company: string;
-  contact: string;
-  email: string;
-  phone: string;
-  country: string;
-  taxId: string;
-  industry: string;
-  lifetimeValue: number;
+  title: string;
+  type: 'renewal' | 'reminder' | 'meeting' | 'task';
+  client: string;
+  days: number; // 30/60/90 trigger
 }
