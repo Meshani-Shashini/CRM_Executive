@@ -130,6 +130,7 @@ export interface MiraRow {
 
 export interface Deal {
   id: string;
+  pipelineId?: string;
   client: string;
   product: string;
   value: number;
@@ -139,6 +140,38 @@ export interface Deal {
   ownerId: string;
   closeDate: string;
   insurer: string;
+  proposalSummary?: string;
+  lossReason?: string;
+}
+
+export interface Pipeline {
+  id: string;
+  tenantId: string;
+  name: string;
+  code: string;
+  isActive: boolean;
+}
+
+export interface PipelineStage {
+  id: string;
+  pipelineId: string;
+  name: string;
+  stageOrder: number;
+  winProbabilityPct: number;
+  stagnationDaysThreshold: number;
+}
+
+export interface StageHistoryAudit {
+  id: string;
+  tenantId: string;
+  dealId: string;
+  fromStageId: string | null;
+  toStageId: string;
+  enteredAt: string;
+  exitedAt: string | null;
+  durationSeconds: number | null;
+  lossReason?: string;
+  details?: string;
 }
 
 export interface CalendarEvent {

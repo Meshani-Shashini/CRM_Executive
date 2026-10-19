@@ -38,6 +38,8 @@ const GROUPS: NavGroup[] = [
       { key: 'clients', label: 'Clients', icon: Users, roles: ['admin', 'sales', 'finance', 'client'] },
       { key: 'calendar', label: 'Calendar', icon: CalendarDays, roles: ['admin', 'sales'] },
       { key: 'reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'finance'] },
+      { key: 'funnels', label: 'Funnels', icon: BarChart3, roles: ['admin', 'sales', 'finance'] },
+      { key: 'pipelines', label: 'Pipelines', icon: FileSliders, roles: ['admin', 'sales'] },
       { key: 'documents', label: 'Documents', icon: Files, roles: ['admin', 'sales', 'finance', 'client'] },
     ],
   },
@@ -59,8 +61,6 @@ const GROUPS: NavGroup[] = [
     label: 'Admin Portal', icon: Settings,
     items: [
       { key: 'settings', label: 'Settings', icon: Settings, roles: ['admin'] },
-      { key: 'funnels', label: 'Funnels', icon: FolderKanban, roles: ['admin'] },
-      { key: 'pipelines', label: 'Pipelines', icon: FileSliders, roles: ['admin'] },
       { key: 'targets', label: 'Targets', icon: Target, roles: ['admin'] },
       { key: 'audit-log', label: 'Audit Log', icon: ScrollText, roles: ['admin'] },
     ],

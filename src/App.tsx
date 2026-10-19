@@ -13,6 +13,8 @@ import MiraPage from './pages/MiraPage';
 import SettingsPage from './pages/SettingsPage';
 import CalendarPage from './pages/CalendarPage';
 import Placeholder from './pages/Placeholder';
+import PipelinesPage from './pages/PipelinesPage';
+import FunnelsPage from './pages/FunnelsPage';
 import { useApp } from './store/AppContext';
 import type { Role } from './types';
 
@@ -35,8 +37,8 @@ const accessMap: Record<NavKey, Role[]> = {
   'info-requests': ['admin', 'sales'],
   'rate-cards': ['admin', 'sales'],
   settings: ['admin'],
-  funnels: ['admin'],
-  pipelines: ['admin'],
+  funnels: ['admin', 'sales', 'finance'],
+  pipelines: ['admin', 'sales'],
   targets: ['admin'],
   'audit-log': ['admin'],
   mira: ['admin', 'finance'],
@@ -59,14 +61,12 @@ const placeholders: Partial<Record<NavKey, { title: string; subtitle: string }>>
   renewals: { title: 'Renewals', subtitle: 'Upcoming policy renewals with 30/60/90 day tracking.' },
   'info-requests': { title: 'Info Requests', subtitle: 'Requests for additional underwriting information.' },
   'rate-cards': { title: 'Commission Rate Cards', subtitle: 'Insurer commission and brokerage rate cards.' },
-  funnels: { title: 'Funnels', subtitle: 'Configure CRM funnels and their stages.' },
-  pipelines: { title: 'Pipelines', subtitle: 'Manage sales pipelines and stage probabilities.' },
   targets: { title: 'Targets', subtitle: 'Monthly and annual targets for sales staff.' },
   'audit-log': { title: 'Audit Log', subtitle: 'System activity and configuration change history.' },
 };
 
 function Shell() {
-  const { hasAccess, storageError } = useApp();
+  const { hasAccess, storageError, mongoError } = useApp();
   const [page, setPage] = useState<NavKey>(() => pageFromHash(window.location.hash) ?? 'dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -111,6 +111,8 @@ function Shell() {
       case 'mira': return <MiraPage />;
       case 'settings': return <SettingsPage />;
       case 'calendar': return <CalendarPage />;
+      case 'pipelines': return <PipelinesPage />;
+      case 'funnels': return <FunnelsPage />;
       default: {
         const p = placeholders[page];
         return <Placeholder title={p?.title ?? 'Module'} subtitle={p?.subtitle ?? 'Coming soon.'} />;
@@ -124,6 +126,7 @@ function Shell() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <Topbar page={page} onMenu={() => setSidebarOpen(true)} />
         {storageError && <div role="alert" className="border-b border-hot/30 bg-hot/10 px-4 py-2 text-sm text-hot">{storageError}</div>}
+        {mongoError && <div role="alert" className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-200">{mongoError}</div>}
         <main className="flex-1 overflow-y-auto p-4 lg:p-6 animate-fadeIn">
           {renderPage()}
         </main>

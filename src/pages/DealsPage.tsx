@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { INSURERS, PRODUCT_CODES, FUNNELS } from '../data/seed';
+import { DEFAULT_PIPELINES } from '../data/pipelineDefaults';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
@@ -30,6 +31,7 @@ export default function DealsPage() {
     const probability = Number(data.get('probability'));
     const deal: Deal = {
       id: `d-${Date.now()}`,
+      pipelineId: DEFAULT_PIPELINES[0].id,
       client: String(data.get('client')),
       product: String(data.get('product')),
       value,
