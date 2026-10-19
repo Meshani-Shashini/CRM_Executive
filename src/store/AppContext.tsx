@@ -34,7 +34,11 @@ function loadStoredList<T>(key: string, initial: T[]): T[] {
 
 interface AppState {
   user: User;
-  setUser: (u: User) => void;
+  authLoading: boolean;
+  authError: string | null;
+  signIn: (email: string, password: string) => Promise<void>;
+  register: (name: string, email: string, password: string) => Promise<void>;
+  signOut: () => Promise<void>;
   hasAccess: (allowed: Role[]) => boolean;
   taxRates: TaxRate[];
   setTaxRates: (t: TaxRate[]) => void;
@@ -66,8 +70,20 @@ interface AppState {
 
 const AppContext = createContext<AppState | null>(null);
 
+const GUEST_USER: User = { id: '', name: 'Guest', email: '', role: 'client', title: '' };
+const DEMO_USER: User = {
+  id: 'demo-admin',
+  name: 'Demo Administrator',
+  email: 'demo@premierbrokers.local',
+  role: 'admin',
+  title: 'Development Demo Session',
+};
+const AUTH_BYPASS = import.meta.env.DEV && import.meta.env.VITE_AUTH_BYPASS !== 'false';
+
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User>(USERS[0]);
+  const [user, setUser] = useState<User>(AUTH_BYPASS ? DEMO_USER : GUEST_USER);
+  const [authLoading, setAuthLoading] = useState(!AUTH_BYPASS);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [taxRates, setTaxRates] = useState<TaxRate[]>(() => loadStoredList('tax-rates', TAX_RATES));
   const [leads, setLeads] = useState<Lead[]>(() => loadStoredList('leads', LEADS));
   const [clients, setClients] = useState<Client[]>(() => loadStoredList('clients', CLIENTS));
@@ -75,7 +91,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [deals, setDeals] = useState<Deal[]>(() => loadStoredList('deals', DEALS));
   const [invoices, setInvoices] = useState<Invoice[]>(() => loadStoredList('invoices', INVOICES));
   const [payments, setPayments] = useState<Payment[]>(() => loadStoredList('payments', PAYMENTS));
-  const [users, setUsers] = useState<User[]>(() => loadStoredList('users', USERS));
+  const [users, setUsers] = useState<User[]>(() => (AUTH_BYPASS ? USERS : []));
   const [company, setCompany] = useState<typeof COMPANY>(loadStoredCompany);
   const [pipelines, setPipelines] = useState<Pipeline[]>(() => loadStoredList('pipelines', DEFAULT_PIPELINES));
   const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>(() => loadStoredList('pipeline-stages', DEFAULT_PIPELINE_STAGES));
@@ -86,10 +102,97 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const mongoSaveQueue = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
+    if (AUTH_BYPASS) return;
+    let cancelled = false;
+    const loadSession = async () => {
+      try {
+        const response = await fetch('/api/auth/me');
+        if (response.status === 401) return;
+        if (!response.ok) {
+          let message = `Authentication service returned HTTP ${response.status}.`;
+          try {
+            const result: { error?: string } = await response.json();
+            message = result.error || message;
+          } catch {
+            // The service may be unavailable before it can return JSON.
+          }
+          throw new Error(message);
+        }
+        const result: { user: User; error?: string } = await response.json();
+        if (!cancelled) setUser(result.user);
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Could not restore the authentication session.', error);
+          setAuthError(error instanceof Error ? error.message : 'Authentication service is unavailable.');
+        }
+      } finally {
+        if (!cancelled) setAuthLoading(false);
+      }
+    };
+    void loadSession();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const authenticate = useCallback(async (path: string, body: Record<string, string>) => {
+    const response = await fetch(`/api/auth/${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    let result: { user?: User; error?: string };
+    try {
+      result = await response.json();
+    } catch {
+      throw new Error(`Authentication service returned an invalid response (HTTP ${response.status}).`);
+    }
+    if (!response.ok || !result.user) throw new Error(result.error || `Authentication API returned HTTP ${response.status}.`);
+    setUser(result.user);
+    setAuthError(null);
+  }, []);
+  const signIn = useCallback((email: string, password: string) => authenticate('login', { email, password }), [authenticate]);
+  const register = useCallback((name: string, email: string, password: string) =>
+    authenticate('register', { name, email, password }), [authenticate]);
+  const signOut = useCallback(async () => {
+    const response = await fetch('/api/auth/logout', { method: 'POST' });
+    if (!response.ok) throw new Error(`Could not sign out (HTTP ${response.status}).`);
+    setUser(GUEST_USER);
+  }, []);
+
+  useEffect(() => {
+    if (AUTH_BYPASS || authLoading || user.role !== 'admin') return;
+    let cancelled = false;
+    const loadUsers = async () => {
+      try {
+        const response = await fetch('/api/auth/users');
+        if (response.status === 401 && !cancelled) {
+          setUser(GUEST_USER);
+          return;
+        }
+        const result: { users: User[]; error?: string } = await response.json();
+        if (!response.ok) throw new Error(result.error || `User API returned HTTP ${response.status}.`);
+        if (!cancelled) setUsers(result.users);
+      } catch (error) {
+        if (!cancelled) console.error('Could not load registered users.', error);
+      }
+    };
+    void loadUsers();
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, user.id, user.role]);
+
+  useEffect(() => {
     let cancelled = false;
     const loadMongoData = async () => {
+      if (AUTH_BYPASS || authLoading || !user.id) return;
       try {
         const response = await fetch('/api/pipeline-data');
+        if (response.status === 401) {
+          if (!cancelled) setUser(GUEST_USER);
+          return;
+        }
         if (!response.ok) throw new Error(`MongoDB API returned HTTP ${response.status}.`);
         const data: {
           pipelines: Pipeline[];
@@ -115,10 +218,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [authLoading, user.id]);
 
   useEffect(() => {
-    if (!mongoConnected) return;
+    if (AUTH_BYPASS || !mongoConnected) return;
     const timer = window.setTimeout(() => {
       mongoSaveQueue.current = mongoSaveQueue.current.then(async () => {
         try {
@@ -127,6 +230,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pipelines, pipelineStages, stageHistory, deals }),
           });
+          if (response.status === 401) {
+            setUser(GUEST_USER);
+            return;
+          }
           const result: { error?: string } = await response.json();
           if (!response.ok) throw new Error(result.error || `MongoDB API returned HTTP ${response.status}.`);
           setMongoError(null);
@@ -165,15 +272,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       : null);
   }, [taxRates, leads, clients, activities, deals, invoices, payments, users, company, pipelines, pipelineStages, stageHistory]);
 
-  const hasAccess = useCallback((allowed: Role[]) => allowed.includes(user.role), [user.role]);
+  const hasAccess = useCallback((allowed: Role[]) => Boolean(user.id) && allowed.includes(user.role), [user.id, user.role]);
 
   const value = useMemo(() => ({
-    user, setUser, hasAccess, taxRates, setTaxRates,
+    user, authLoading, authError, signIn, register, signOut, hasAccess, taxRates, setTaxRates,
     leads, setLeads, clients, setClients, activities, setActivities,
     deals, setDeals, invoices, setInvoices, payments, setPayments, users, setUsers, company, setCompany,
     storageError, mongoError,
     pipelines, setPipelines, pipelineStages, setPipelineStages, stageHistory, setStageHistory,
-  }), [user, hasAccess, taxRates, leads, clients, activities, deals, invoices, payments, users, company, storageError, mongoError, pipelines, pipelineStages, stageHistory]);
+  }), [user, authLoading, authError, signIn, register, signOut, hasAccess, taxRates, leads, clients, activities, deals, invoices, payments, users, company, storageError, mongoError, pipelines, pipelineStages, stageHistory]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

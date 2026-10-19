@@ -15,6 +15,7 @@ import CalendarPage from './pages/CalendarPage';
 import Placeholder from './pages/Placeholder';
 import PipelinesPage from './pages/PipelinesPage';
 import FunnelsPage from './pages/FunnelsPage';
+import LoginPage from './pages/LoginPage';
 import { useApp } from './store/AppContext';
 import type { Role } from './types';
 
@@ -66,7 +67,7 @@ const placeholders: Partial<Record<NavKey, { title: string; subtitle: string }>>
 };
 
 function Shell() {
-  const { hasAccess, storageError, mongoError } = useApp();
+  const { user, authLoading, hasAccess, storageError, mongoError } = useApp();
   const [page, setPage] = useState<NavKey>(() => pageFromHash(window.location.hash) ?? 'dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -91,12 +92,17 @@ function Shell() {
     return () => window.removeEventListener('hashchange', syncPageFromHash);
   }, []);
 
+  if (authLoading) {
+    return <div className="flex h-screen items-center justify-center bg-ink-950 text-sm text-muted">Checking your session…</div>;
+  }
+  if (!user.id) return <LoginPage />;
+
   const renderPage = () => {
     if (!hasAccess(accessMap[page])) {
       return (
         <Placeholder
           title="Access Restricted"
-          subtitle="Your current role does not have permission to view this module. Switch to a different role from the sidebar profile."
+          subtitle="Your account role does not have permission to view this module. Contact a System Admin if you need access."
         />
       );
     }

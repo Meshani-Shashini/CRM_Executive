@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Menu, Search, Bell, ChevronDown, Check } from 'lucide-react';
+import { Menu, Search, Bell, ChevronDown, LogOut } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import type { Role } from '../types';
 
 const roleLabel: Record<Role, string> = {
   admin: 'System Admin',
-  sales: 'Sales Agent',
+  sales: 'Sales',
   finance: 'Accountant',
   client: 'Client',
 };
@@ -42,8 +42,9 @@ export default function Topbar({
   page: string;
   onMenu: () => void;
 }) {
-  const { user, setUser, users } = useApp();
+  const { user, signOut } = useApp();
   const [profileOpen, setProfileOpen] = useState(false);
+  const [signOutError, setSignOutError] = useState('');
   const profileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -114,28 +115,21 @@ export default function Topbar({
                 <div className="text-xs text-muted truncate">{user.email}</div>
                 <div className="text-[10px] text-brand-400 mt-1">{roleLabel[user.role]}</div>
               </div>
-              <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-muted/70">Switch account</div>
-              {users.map((account) => (
-                <button
-                  key={account.id}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setUser(account);
-                    setProfileOpen(false);
-                  }}
-                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-ink-700 transition"
-                >
-                  <span className="w-7 h-7 shrink-0 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-[10px] font-bold text-white">
-                    {account.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-xs text-white truncate">{account.name}</span>
-                    <span className="block text-[10px] text-muted">{roleLabel[account.role]}</span>
-                  </span>
-                  {account.id === user.id && <Check size={14} className="text-brand-400" />}
-                </button>
-              ))}
+              {signOutError && <p role="alert" className="px-3 py-2 text-xs text-hot">{signOutError}</p>}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={async () => {
+                  try {
+                    await signOut();
+                  } catch (error) {
+                    setSignOutError(error instanceof Error ? error.message : 'Could not sign out.');
+                  }
+                }}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-muted hover:bg-ink-700 hover:text-white transition"
+              >
+                <LogOut size={16} /> Sign out
+              </button>
             </div>
           )}
         </div>

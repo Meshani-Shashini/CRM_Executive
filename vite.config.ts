@@ -15,7 +15,18 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://127.0.0.1:3001',
+      '/api': {
+        target: 'http://127.0.0.1:3001',
+        configure(proxy) {
+          proxy.on('error', (_error, _request, response) => {
+            if (response.headersSent) return;
+            response.writeHead(503, { 'Content-Type': 'application/json' });
+            response.end(JSON.stringify({
+              error: 'Authentication and data API is unavailable. Configure MongoDB and JWT settings in .env, then restart npm run dev.',
+            }));
+          });
+        },
+      },
     },
   },
 });

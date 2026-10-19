@@ -1,31 +1,52 @@
 import express from 'express';
-import { MongoClient } from 'mongodb';
+import cookieParser from 'cookie-parser';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import mongoose from 'mongoose';
+import { rateLimit } from 'express-rate-limit';
+import User, { USER_ROLES } from './models/User.mjs';
 
 const DEFAULT_TENANT_ID = '00000000-0000-4000-8000-000000000001';
+const ROLES = USER_ROLES;
+const ROLE_TO_APP = {
+  'System Admin': 'admin',
+  Sales: 'sales',
+  Accountant: 'finance',
+  Client: 'client',
+};
+const TOKEN_LIFETIME_SECONDS = 60 * 60 * 8;
+const COOKIE_NAME = 'ibms_session';
 const allowedOrigins = new Set([
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  ...(process.env.APP_ORIGIN ? [process.env.APP_ORIGIN] : []),
 ]);
 
-if (process.env.NODE_ENV === 'production') {
-  throw new Error('This unauthenticated MongoDB API is for local development only.');
+const uri = process.env.MONGODB_URI;
+if (!uri) {
+  throw new Error('MONGODB_URI is missing. Copy .env.example to .env and set your MongoDB Atlas connection string.');
+}
+if (uri.includes('<') || uri.includes('>')) {
+  throw new Error('MONGODB_URI still contains a placeholder. Replace <username>, <db_password>, and any other angle-bracket placeholders with real Atlas values.');
+}
+if (!/^mongodb(\+srv)?:\/\//.test(uri)) {
+  throw new Error('MONGODB_URI must start with mongodb:// or mongodb+srv://.');
 }
 
-const uri = process.env.MONGODB_URI;
-if (!uri || uri.includes('<') || uri.includes('>')) {
-  throw new Error('Set MONGODB_URI in the ignored .env file using your MongoDB Atlas credentials.');
+const jwtSecret = process.env.JWT_SECRET;
+if (!jwtSecret || jwtSecret.length < 32 || /replace|change.?me|example/i.test(jwtSecret)) {
+  throw new Error('JWT_SECRET is missing, a placeholder, or too short. Set a unique random secret of at least 32 characters in .env.');
 }
 
 const tenantId = process.env.MONGODB_TENANT_ID || DEFAULT_TENANT_ID;
-const client = new MongoClient(uri);
 try {
-  await client.connect();
+  await mongoose.connect(uri, { dbName: process.env.MONGODB_DB_NAME || 'ibms' });
 } catch {
   console.error('Could not connect to MongoDB. Verify MONGODB_URI, Atlas network access, and database-user permissions.');
   process.exit(1);
 }
 
-const database = client.db(process.env.MONGODB_DB_NAME || 'ibms');
+const database = mongoose.connection.db;
 const collections = {
   pipelines: database.collection('pipelines'),
   pipelineStages: database.collection('pipeline_stages'),
@@ -33,8 +54,7 @@ const collections = {
   deals: database.collection('deals'),
 };
 
-class SnapshotValidationError extends Error {}
-
+await User.init();
 await Promise.all([
   collections.pipelines.createIndex({ tenantId: 1, code: 1 }, { unique: true }),
   collections.pipelineStages.createIndex({ tenantId: 1, pipelineId: 1, stageOrder: 1 }, { unique: true }),
@@ -42,13 +62,35 @@ await Promise.all([
   collections.deals.createIndex({ tenantId: 1, id: 1 }, { unique: true }),
 ]);
 
+if (process.env.BOOTSTRAP_ADMIN_EMAIL || process.env.BOOTSTRAP_ADMIN_PASSWORD) {
+  const email = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+  if (!email || !password || Buffer.byteLength(password, 'utf8') < 12 || Buffer.byteLength(password, 'utf8') > 72) {
+    throw new Error('Bootstrap admin requires BOOTSTRAP_ADMIN_EMAIL and a BOOTSTRAP_ADMIN_PASSWORD between 12 and 72 bytes.');
+  }
+  const hasAdmin = await User.exists({ role: 'System Admin' });
+  if (!hasAdmin) {
+    await User.create({
+      name: process.env.BOOTSTRAP_ADMIN_NAME || 'System Admin',
+      email,
+      passwordHash: await bcrypt.hash(password, 12),
+      role: 'System Admin',
+      tenantId,
+      title: 'System Administrator',
+    });
+    console.log(`Bootstrapped the initial system administrator: ${email}`);
+  }
+}
+
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '10mb' }));
+app.use(cookieParser());
+if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
 app.use('/api', (request, response, next) => {
   const origin = request.get('origin');
   if (origin && !allowedOrigins.has(origin)) {
-    response.status(403).json({ error: 'This local API only accepts requests from the local IBMS frontend.' });
+    response.status(403).json({ error: 'This API does not accept requests from this origin.' });
     return;
   }
   if (origin) {
@@ -56,12 +98,194 @@ app.use('/api', (request, response, next) => {
     response.set('Vary', 'Origin');
     response.set('Access-Control-Allow-Methods', 'GET, PUT, OPTIONS');
     response.set('Access-Control-Allow-Headers', 'Content-Type');
+    response.set('Access-Control-Allow-Credentials', 'true');
   }
   if (request.method === 'OPTIONS') {
     response.sendStatus(204);
     return;
   }
   next();
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many authentication attempts. Please try again later.' },
+});
+
+function publicUser(user) {
+  return {
+    id: user._id.toString(),
+    name: user.name,
+    email: user.email,
+    role: ROLE_TO_APP[user.role],
+    title: user.title,
+  };
+}
+
+function setSessionCookie(response, user) {
+  const token = jwt.sign({ sub: user._id.toString() }, jwtSecret, {
+    algorithm: 'HS256',
+    expiresIn: TOKEN_LIFETIME_SECONDS,
+    issuer: 'ibms-api',
+    audience: 'ibms-web',
+  });
+  response.cookie(COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    path: '/api',
+    maxAge: TOKEN_LIFETIME_SECONDS * 1000,
+  });
+}
+
+async function requireAuth(request, response, next) {
+  try {
+    const token = request.cookies[COOKIE_NAME];
+    if (!token) {
+      response.status(401).json({ error: 'Authentication required.' });
+      return;
+    }
+    const payload = jwt.verify(token, jwtSecret, {
+      algorithms: ['HS256'],
+      issuer: 'ibms-api',
+      audience: 'ibms-web',
+    });
+    if (typeof payload !== 'object' || typeof payload.sub !== 'string') {
+      response.status(401).json({ error: 'Invalid session.' });
+      return;
+    }
+    const user = await User.findById(payload.sub).select('_id name email role tenantId title');
+    if (!user) {
+      response.status(401).json({ error: 'Account no longer exists.' });
+      return;
+    }
+    request.auth = user;
+    next();
+  } catch (error) {
+    if (error instanceof jwt.JsonWebTokenError || error instanceof jwt.TokenExpiredError) {
+      response.status(401).json({ error: 'Session expired. Sign in again.' });
+      return;
+    }
+    next(error);
+  }
+}
+
+function authorize(...roles) {
+  return (request, response, next) => {
+    if (!roles.includes(request.auth.role)) {
+      response.status(403).json({ error: 'Your role does not have permission to perform this action.' });
+      return;
+    }
+    next();
+  };
+}
+
+const validCredentials = (name, email, password) => typeof name === 'string'
+  && name.trim().length > 0
+  && name.trim().length <= 120
+  && typeof email === 'string'
+  && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+  && email.length <= 254
+  && typeof password === 'string'
+  && Buffer.byteLength(password, 'utf8') >= 12
+  && Buffer.byteLength(password, 'utf8') <= 72;
+
+app.post('/api/auth/register', authLimiter, async (request, response, next) => {
+  try {
+    const { name, email, password } = request.body ?? {};
+    if (!validCredentials(name, email, password)) {
+      response.status(400).json({ error: 'Provide a name, valid email, and password between 12 and 72 bytes.' });
+      return;
+    }
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = await User.create({
+      name: name.trim(),
+      email: normalizedEmail,
+      passwordHash: await bcrypt.hash(password, 12),
+      role: 'Client',
+      tenantId,
+      title: 'Client',
+    });
+    setSessionCookie(response, user);
+    response.status(201).json({ user: publicUser(user) });
+  } catch (error) {
+    if (error?.code === 11000) {
+      response.status(409).json({ error: 'An account with that email already exists.' });
+      return;
+    }
+    next(error);
+  }
+});
+
+app.post('/api/auth/login', authLimiter, async (request, response, next) => {
+  try {
+    const { email, password } = request.body ?? {};
+    if (typeof email !== 'string' || email.length > 254
+      || typeof password !== 'string' || Buffer.byteLength(password, 'utf8') > 72) {
+      response.status(400).json({ error: 'Provide a valid email and password.' });
+      return;
+    }
+    const user = await User.findOne({ email: email.trim().toLowerCase() }).select('+passwordHash');
+    if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+      response.status(401).json({ error: 'Email or password is incorrect.' });
+      return;
+    }
+    setSessionCookie(response, user);
+    response.json({ user: publicUser(user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/auth/me', requireAuth, (request, response) => {
+  response.json({ user: publicUser(request.auth) });
+});
+
+app.post('/api/auth/logout', (_request, response) => {
+  response.clearCookie(COOKIE_NAME, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    path: '/api',
+  });
+  response.sendStatus(204);
+});
+
+app.get('/api/auth/users', requireAuth, authorize('System Admin'), async (request, response, next) => {
+  try {
+    const users = await User.find({ tenantId: request.auth.tenantId }).select('_id name email role title').sort({ name: 1 });
+    response.json({ users: users.map(publicUser) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/auth/users', requireAuth, authorize('System Admin'), async (request, response, next) => {
+  try {
+    const { name, email, password, role, title } = request.body ?? {};
+    if (!validCredentials(name, email, password) || !ROLES.includes(role)) {
+      response.status(400).json({ error: 'Provide a name, valid email, password between 12 and 72 bytes, and a supported role.' });
+      return;
+    }
+    const user = await User.create({
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      passwordHash: await bcrypt.hash(password, 12),
+      role,
+      tenantId: request.auth.tenantId,
+      title: typeof title === 'string' ? title.trim().slice(0, 120) : '',
+    });
+    response.status(201).json({ user: publicUser(user) });
+  } catch (error) {
+    if (error?.code === 11000) {
+      response.status(409).json({ error: 'An account with that email already exists.' });
+      return;
+    }
+    next(error);
+  }
 });
 
 function documentId(id) {
@@ -73,7 +297,7 @@ function clientDocument(document, includeTenantId = false) {
   return includeTenantId ? { ...data, tenantId: documentTenantId } : data;
 }
 
-async function readSnapshot() {
+async function readSnapshot(tenantId) {
   const [pipelines, pipelineStages, stageHistory, deals] = await Promise.all([
     collections.pipelines.find({ tenantId }).toArray(),
     collections.pipelineStages.find({ tenantId }).toArray(),
@@ -163,7 +387,7 @@ function validateSnapshot(body) {
   return { pipelines, pipelineStages, stageHistory, deals };
 }
 
-async function replaceTenantData(collection, items, session) {
+async function replaceTenantData(collection, tenantId, items, session) {
   await collection.deleteMany({ tenantId }, { session });
   if (items.length === 0) return;
   await collection.insertMany(items.map((item) => ({
@@ -177,24 +401,49 @@ app.get('/api/health', (_request, response) => {
   response.json({ status: 'ok', persistence: 'mongodb' });
 });
 
-app.get('/api/pipeline-data', async (_request, response, next) => {
+app.get('/api/pipeline-data', requireAuth, authorize('System Admin', 'Sales', 'Accountant'), async (request, response, next) => {
   try {
-    response.json(await readSnapshot());
+    response.json(await readSnapshot(request.auth.tenantId));
   } catch (error) {
     next(error);
   }
 });
 
-app.put('/api/pipeline-data', async (request, response, next) => {
+app.put('/api/pipeline-data', requireAuth, authorize('System Admin', 'Sales'), async (request, response, next) => {
   try {
     const snapshot = validateSnapshot(request.body);
-    const session = client.startSession();
+    const tenantId = request.auth.tenantId;
+    if (request.auth.role !== 'System Admin') {
+      const current = await readSnapshot(tenantId);
+      const sameRecords = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+      const historyIsAppendOnly = snapshot.stageHistory.length >= current.stageHistory.length
+        && current.stageHistory.every((entry, index) => {
+          const next = snapshot.stageHistory[index];
+          if (sameRecords(entry, next)) return true;
+          if (entry.exitedAt !== null || entry.durationSeconds !== null
+            || typeof next.exitedAt !== 'string' || !Number.isInteger(next.durationSeconds)
+            || Date.parse(next.exitedAt) < Date.parse(entry.enteredAt)) return false;
+          const withoutDuration = (audit) => Object.fromEntries(
+            Object.entries(audit).filter(([key]) => key !== 'exitedAt' && key !== 'durationSeconds'),
+          );
+          const oldAudit = withoutDuration(entry);
+          const nextAudit = withoutDuration(next);
+          return sameRecords(oldAudit, nextAudit);
+        });
+      if (!sameRecords(snapshot.pipelines, current.pipelines)
+        || !sameRecords(snapshot.pipelineStages, current.pipelineStages)
+        || !historyIsAppendOnly) {
+        response.status(403).json({ error: 'Only System Admin can change pipeline configuration or existing audit history.' });
+        return;
+      }
+    }
+    const session = await mongoose.startSession();
     try {
       await session.withTransaction(async () => {
-        await replaceTenantData(collections.pipelines, snapshot.pipelines, session);
-        await replaceTenantData(collections.pipelineStages, snapshot.pipelineStages, session);
-        await replaceTenantData(collections.stageHistory, snapshot.stageHistory, session);
-        await replaceTenantData(collections.deals, snapshot.deals, session);
+        await replaceTenantData(collections.pipelines, tenantId, snapshot.pipelines, session);
+        await replaceTenantData(collections.pipelineStages, tenantId, snapshot.pipelineStages, session);
+        await replaceTenantData(collections.stageHistory, tenantId, snapshot.stageHistory, session);
+        await replaceTenantData(collections.deals, tenantId, snapshot.deals, session);
       });
     } finally {
       await session.endSession();
@@ -221,7 +470,7 @@ const server = app.listen(port, '127.0.0.1', () => {
 
 async function shutdown() {
   server.close();
-  await client.close();
+  await mongoose.disconnect();
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

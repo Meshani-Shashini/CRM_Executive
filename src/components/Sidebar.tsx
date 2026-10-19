@@ -1,9 +1,10 @@
+import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import {
   LayoutDashboard, CalendarDays, Users, FileText, Receipt, Wallet,
   ShieldCheck, Settings, BarChart3, FolderKanban, Target, ScrollText,
   FileCheck2, FileSliders, Percent, BookUser, Briefcase, Files,
-  CreditCard, Send, RefreshCcw, Info, ChevronRight,
+  CreditCard, Send, RefreshCcw, Info, ChevronRight, LogOut,
 } from 'lucide-react';
 import type { Role } from '../types';
 
@@ -75,7 +76,7 @@ const GROUPS: NavGroup[] = [
 
 const roleLabel: Record<Role, string> = {
   admin: 'System Admin',
-  sales: 'Sales Agent',
+  sales: 'Sales',
   finance: 'Accountant',
   client: 'Client',
 };
@@ -87,7 +88,8 @@ export default function Sidebar({
   open: boolean;
   onClose: () => void;
 }) {
-  const { user, setUser, users, company } = useApp();
+  const { user, signOut, company } = useApp();
+  const [signOutError, setSignOutError] = useState('');
 
   return (
     <>
@@ -170,25 +172,20 @@ export default function Sidebar({
               {roleLabel[user.role]}
             </span>
           </div>
-          <div className="mt-2 px-2">
-            <div className="text-[10px] text-muted/70 mb-1">Switch role (demo)</div>
-            <div className="grid grid-cols-4 gap-1">
-              {users.map((u) => (
-                <button
-                  key={u.id}
-                  onClick={() => setUser(u)}
-                  className={`text-[10px] py-1 rounded-md border transition ${
-                    user.id === u.id
-                      ? 'bg-brand-500/20 border-brand-400/40 text-white'
-                      : 'bg-ink-800/50 border-ink-600 text-muted hover:text-white hover:border-ink-500'
-                  }`}
-                  title={roleLabel[u.role]}
-                >
-                  {roleLabel[u.role].split(' ')[0]}
-                </button>
-              ))}
-            </div>
-          </div>
+          {signOutError && <p role="alert" className="mt-2 px-2 text-xs text-hot">{signOutError}</p>}
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await signOut();
+              } catch (error) {
+                setSignOutError(error instanceof Error ? error.message : 'Could not sign out.');
+              }
+            }}
+            className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-xs text-muted hover:bg-ink-700 hover:text-white"
+          >
+            <LogOut size={14} /> Sign out
+          </button>
         </div>
       </aside>
     </>

@@ -43,9 +43,7 @@ export default function SettingsPage() {
             System Settings and Tax / VAT Configuration can only be modified by a System Admin.
             Your current role (<span className="text-white">{user.title}</span>) does not have permission.
           </p>
-          <div className="mt-4 text-xs text-muted">
-            Switch to the System Admin role from the sidebar profile to access this module.
-          </div>
+          <div className="mt-4 text-xs text-muted">Sign in with an account assigned the System Admin role to access this module.</div>
         </div>
       </div>
     );
@@ -71,26 +69,38 @@ export default function SettingsPage() {
     setNotice('Company settings updated.');
   };
 
-  const saveUser = (event: FormEvent<HTMLFormElement>) => {
+  const saveUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const name = String(data.get('name')).trim();
     const email = String(data.get('email')).trim();
-    if (users.some((existing) => existing.email.toLowerCase() === email.toLowerCase())) {
-      setUserError('A user with this email address already exists.');
-      return;
-    }
-    const newUser = {
-      id: `u-${Date.now()}`,
-      name,
-      email,
-      role: data.get('role') as Role,
-      title: String(data.get('title')).trim(),
+    const roleNames: Record<Role, string> = {
+      admin: 'System Admin',
+      sales: 'Sales',
+      finance: 'Accountant',
+      client: 'Client',
     };
-    setUsers([...users, newUser]);
-    setUserOpen(false);
-    setUserError('');
-    setNotice(`User ${name} added.`);
+    try {
+      const response = await fetch('/api/auth/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          email,
+          password: String(data.get('password') ?? ''),
+          role: roleNames[data.get('role') as Role],
+          title: String(data.get('title') ?? '').trim(),
+        }),
+      });
+      const result: { user?: (typeof users)[number]; error?: string } = await response.json();
+      if (!response.ok || !result.user) throw new Error(result.error || `Could not create user (HTTP ${response.status}).`);
+      setUsers([...users, result.user]);
+      setUserOpen(false);
+      setUserError('');
+      setNotice(`User ${name} added.`);
+    } catch (error) {
+      setUserError(error instanceof Error ? error.message : 'Could not create user.');
+    }
   };
 
   const saveTemplate = (event: FormEvent<HTMLFormElement>) => {
@@ -231,7 +241,8 @@ export default function SettingsPage() {
           <Field label="Email"><input className="input" name="email" type="email" required /></Field>
           {userError && <p role="alert" className="text-sm text-hot">{userError}</p>}
           <Field label="Job title"><input className="input" name="title" /></Field>
-          <Field label="Role"><select className="input" name="role"><option value="sales">Sales Agent</option><option value="finance">Accountant</option><option value="client">Client</option><option value="admin">System Admin</option></select></Field>
+          <Field label="Temporary password (minimum 12 characters)"><input className="input" name="password" type="password" minLength={12} maxLength={72} autoComplete="new-password" required /></Field>
+          <Field label="Role"><select className="input" name="role"><option value="sales">Sales</option><option value="finance">Accountant</option><option value="client">Client</option><option value="admin">System Admin</option></select></Field>
         </form>
       </Modal>
       <Modal open={editingTemplate !== null} onClose={() => setEditingTemplate(null)} title={`Edit ${editingTemplate ?? ''} template`} footer={<><button className="btn-ghost" onClick={() => setEditingTemplate(null)}>Cancel</button><button type="submit" form="edit-template-form" className="btn-primary"><Save size={14} /> Save</button></>}>
@@ -242,7 +253,7 @@ export default function SettingsPage() {
 }
 
 const roleLabel: Record<Role, string> = {
-  admin: 'System Admin', sales: 'Sales Agent', finance: 'Accountant', client: 'Client',
+  admin: 'System Admin', sales: 'Sales', finance: 'Accountant', client: 'Client',
 };
 
 function Labeled({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
