@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { INSURERS, PRODUCT_CODES } from '../data/seed';
+import { INSURERS, PRODUCT_CODES } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
@@ -8,6 +8,7 @@ import {
   Building2, Briefcase, ShieldCheck, Plus, Search, X,
 } from 'lucide-react';
 import type { Activity, Client } from '../types';
+import { formatAmount, toMvr, type Currency } from '../utils/currency';
 
 const activityIcon = {
   call: Phone, meeting: Calendar, email: Mail, upload: Upload, note: MessageSquare, quote: FileText,
@@ -20,6 +21,9 @@ export default function ClientsPage() {
   const [clientOpen, setClientOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [quoteOpen, setQuoteOpen] = useState(false);
+  const [quoteCurrency, setQuoteCurrency] = useState<Currency | ''>('');
+  const [quoteAmount, setQuoteAmount] = useState('');
+  const [quoteExchangeRate, setQuoteExchangeRate] = useState('');
   const selected = clients.find((c) => c.id === selectedId) ?? clients[0];
   const clientActivities = activities.filter((a) => a.clientId === selected?.id);
   const productName = (code: string) => PRODUCT_CODES.find((p) => p.code === code)?.name ?? code;
@@ -43,8 +47,8 @@ export default function ClientsPage() {
       phone: String(data.get('phone')).trim(),
       email: String(data.get('email')).trim(),
       address: String(data.get('address')).trim(),
-      sumInsured: Number(data.get('sumInsured') || 0),
-      premium: Number(data.get('premium') || 0),
+      sumInsured: Number(data.get('sumInsured')),
+      premium: Number(data.get('premium')),
       expiry: String(data.get('expiry')),
       insurer: String(data.get('insurer')).trim(),
       productCode,
@@ -62,16 +66,27 @@ export default function ClientsPage() {
     if (!selected) return;
     const data = new FormData(event.currentTarget);
     const description = String(data.get('description')).trim();
+    const amount = type === 'quote' ? Number(data.get('premium')) : undefined;
+    const currency = type === 'quote' ? String(data.get('currency')) as Currency : undefined;
+    const exchangeRate = currency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
+    const quoteSummary = currency === 'USD'
+      ? `Premium ${formatAmount(amount ?? 0, 'USD')} (equivalent ${formatAmount(toMvr(amount ?? 0, 'USD', exchangeRate), 'MVR')} at ${exchangeRate} MVR per USD).`
+      : currency === 'MVR' ? `Premium ${formatAmount(amount ?? 0, 'MVR')}.` : '';
     const activity: Activity = {
       id: `a-${Date.now()}`,
       clientId: selected.id,
       type,
       title: String(data.get('title')).trim(),
       description: type === 'quote'
-        ? `Insurer: ${String(data.get('insurer'))}; premium MVR ${Number(data.get('premium')).toLocaleString()}. ${description}`
+        ? `Insurer: ${String(data.get('insurer'))}; ${quoteSummary} ${description}`
         : description,
       date: new Date().toLocaleString('sv-SE').slice(0, 16),
       userId: user.id,
+      ...(type === 'quote' && currency ? {
+        quoteAmount: amount,
+        quoteCurrency: currency,
+        ...(exchangeRate ? { quoteExchangeRate: exchangeRate } : {}),
+      } : {}),
     };
     setActivities([activity, ...activities]);
     if (type === 'quote') setQuoteOpen(false);
@@ -145,7 +160,7 @@ export default function ClientsPage() {
               </div>
             </div>
             <div className="flex gap-2">
-              <button className="btn-ghost !py-2" onClick={() => setQuoteOpen(true)}><FileText size={14} /> New Quote</button>
+              <button className="btn-ghost !py-2" onClick={() => { setQuoteCurrency(''); setQuoteAmount(''); setQuoteExchangeRate(''); setQuoteOpen(true); }}><FileText size={14} /> New Quote</button>
               <button className="btn-primary !py-2" onClick={() => setActivityOpen(true)}><Plus size={14} /> Log Activity</button>
             </div>
           </div>
@@ -213,15 +228,15 @@ export default function ClientsPage() {
               <form id="new-client-form" onSubmit={createClient} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Client name"><input className="input" name="name" required /></Field>
                 <Field label="TIN"><input className="input" name="tin" required /></Field>
-                <Field label="Country"><input className="input" name="country" defaultValue="Maldives" required /></Field>
+                <Field label="Country"><input className="input" name="country" required /></Field>
                 <Field label="Phone"><input className="input" name="phone" type="tel" /></Field>
                 <Field label="Email"><input className="input" name="email" type="email" /></Field>
                 <Field label="Address"><input className="input" name="address" /></Field>
-                <Field label="Product"><select className="input" name="productCode">{PRODUCT_CODES.map((product) => <option key={product.code} value={product.code}>{product.code} · {product.name}</option>)}</select></Field>
-                <Field label="Insurer"><select className="input" name="insurer">{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
+                <Field label="Product"><select className="input" name="productCode" required defaultValue=""><option value="">Select product</option>{PRODUCT_CODES.map((product) => <option key={product.code} value={product.code}>{product.code} · {product.name}</option>)}</select></Field>
+                <Field label="Insurer"><select className="input" name="insurer" required defaultValue=""><option value="">Select insurer</option>{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
                 <Field label="Expiry"><input className="input" name="expiry" type="date" required /></Field>
-                <Field label="Sum Insured (MVR)"><input className="input" name="sumInsured" type="number" min="0" defaultValue="0" /></Field>
-                <Field label="Premium (MVR)"><input className="input" name="premium" type="number" min="0" defaultValue="0" /></Field>
+                <Field label="Sum Insured (MVR)"><input className="input" name="sumInsured" type="number" min="0" step="0.01" required /></Field>
+                <Field label="Premium (MVR)"><input className="input" name="premium" type="number" min="0" step="0.01" required /></Field>
               </form>
             </Modal>
             <Modal open={activityOpen} onClose={() => setActivityOpen(false)} title="Log Activity" subtitle={selected?.name} footer={<><button type="button" className="btn-ghost" onClick={() => setActivityOpen(false)}>Cancel</button><button type="submit" form="new-activity-form" className="btn-primary">Save Activity</button></>}>
@@ -233,9 +248,12 @@ export default function ClientsPage() {
             </Modal>
             <Modal open={quoteOpen} onClose={() => setQuoteOpen(false)} title="Create Quote" subtitle={`Prepare a quote for ${selected?.name ?? ''}.`} footer={<><button type="button" className="btn-ghost" onClick={() => setQuoteOpen(false)}>Cancel</button><button type="submit" form="new-quote-form" className="btn-primary">Save Quote</button></>}>
               <form id="new-quote-form" onSubmit={(event) => addActivity(event, 'quote')} className="space-y-3">
-                <Field label="Product"><select className="input" name="title">{PRODUCT_CODES.map((product) => <option key={product.code} value={`${product.name} quote`}>{product.code} · {product.name}</option>)}</select></Field>
-                <Field label="Insurer"><select className="input" name="insurer">{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
-                <Field label="Premium (MVR)"><input className="input" name="premium" type="number" min="0" step="0.01" required /></Field>
+                <Field label="Product"><select className="input" name="title" required defaultValue=""><option value="">Select product</option>{PRODUCT_CODES.map((product) => <option key={product.code} value={`${product.name} quote`}>{product.code} · {product.name}</option>)}</select></Field>
+                <Field label="Insurer"><select className="input" name="insurer" required defaultValue=""><option value="">Select insurer</option>{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
+                <Field label="Currency"><select className="input" name="currency" required value={quoteCurrency} onChange={(event) => { setQuoteCurrency(event.target.value as Currency | ''); setQuoteAmount(''); setQuoteExchangeRate(''); }}><option value="">Select currency</option><option value="MVR">MVR</option><option value="USD">USD</option></select></Field>
+                <Field label={`Premium${quoteCurrency ? ` (${quoteCurrency})` : ''}`}><input className="input" name="premium" type="number" min="0" step="0.01" required value={quoteAmount} onChange={(event) => setQuoteAmount(event.target.value)} /></Field>
+                {quoteCurrency === 'USD' && <Field label="Exchange rate (1 USD = MVR)"><input className="input" name="exchangeRate" type="number" min="0.000001" step="any" required value={quoteExchangeRate} onChange={(event) => setQuoteExchangeRate(event.target.value)} /></Field>}
+                {quoteCurrency === 'USD' && Number(quoteAmount) > 0 && Number(quoteExchangeRate) > 0 && <p className="text-sm text-muted">Equivalent: {formatAmount(toMvr(Number(quoteAmount), 'USD', Number(quoteExchangeRate)), 'MVR')}</p>}
                 <Field label="Coverage / notes"><textarea className="input min-h-24" name="description" placeholder="Enter coverage and terms" required /></Field>
               </form>
             </Modal>

@@ -4,6 +4,7 @@ import { useApp } from '../store/AppContext';
 
 export default function LoginPage() {
   const { signIn, register, authError } = useApp();
+  const demoLogin = import.meta.env.DEV && import.meta.env.VITE_AUTH_BYPASS === 'true';
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -48,9 +49,11 @@ export default function LoginPage() {
           <h2 className="text-xl font-semibold text-white">{creatingAccount ? 'Create your account' : 'Sign in'}</h2>
         </div>
         <p className="mb-5 text-sm text-muted">
-          {creatingAccount
-            ? 'New registrations receive Client access. A System Admin can assign staff roles.'
-            : 'Sign in with your registered email and password.'}
+          {demoLogin
+            ? 'Use the temporary local demo credentials to continue.'
+            : creatingAccount
+              ? 'New registrations receive Client access. A System Admin can assign staff roles.'
+              : 'Sign in with your registered email and password.'}
         </p>
         {authError && <p role="alert" className="mb-4 rounded-lg border border-hot/30 bg-hot/10 px-3 py-2 text-sm text-hot">Authentication service unavailable: {authError}</p>}
         <form onSubmit={submit} className="space-y-4">
@@ -62,7 +65,16 @@ export default function LoginPage() {
           )}
           <label className="block">
             <span className="mb-1.5 block text-xs text-muted">Email</span>
-            <input className="input" name="email" type="email" autoComplete="email" maxLength={254} required />
+            <input
+              className="input"
+              name="email"
+              type={creatingAccount ? 'email' : 'text'}
+              autoComplete={creatingAccount ? 'email' : 'username'}
+              autoCapitalize="none"
+              placeholder={creatingAccount ? undefined : demoLogin ? 'Username' : 'Email or admin'}
+              maxLength={254}
+              required
+            />
           </label>
           <label className="block">
             <span className="mb-1.5 block text-xs text-muted">Password</span>
@@ -82,7 +94,7 @@ export default function LoginPage() {
             <ShieldCheck size={16} /> {submitting ? 'Please wait…' : creatingAccount ? 'Create Client Account' : 'Sign in'}
           </button>
         </form>
-        <div className="mt-5 border-t border-ink-600 pt-4 text-center text-sm text-muted">
+        {!demoLogin && <div className="mt-5 border-t border-ink-600 pt-4 text-center text-sm text-muted">
           {creatingAccount ? 'Already registered?' : 'Need a client account?'}{' '}
           <button
             type="button"
@@ -91,7 +103,7 @@ export default function LoginPage() {
           >
             {creatingAccount ? 'Sign in' : 'Create account'}
           </button>
-        </div>
+        </div>}
       </section>
     </main>
   );

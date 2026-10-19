@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { BANK_DETAILS } from '../data/seed';
+import { BANK_DETAILS } from '../data/catalogs';
 import { useApp } from '../store/AppContext';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
@@ -80,7 +80,7 @@ export default function InvoicesPage() {
         <Stat label="Outstanding" value={`MVR ${invoices.filter((i) => i.status !== 'Paid').reduce((s, i) => s + computeTotals(i).total, 0).toLocaleString()}`} variant="warm" />
         <Stat label="Overdue" value={`MVR ${invoices.filter((i) => i.status === 'Overdue').reduce((s, i) => s + computeTotals(i).total, 0).toLocaleString()}`} variant="hot" />
         <Stat label="Collected" value={`MVR ${invoices.filter((i) => i.status === 'Paid').reduce((s, i) => s + computeTotals(i).total, 0).toLocaleString()}`} variant="win" />
-        <Stat label="Active GST" value={`${taxRates.find((t) => t.name === 'Standard GST')?.rate}%`} variant="brand" />
+        <Stat label="Active GST" value={`${taxRates.find((t) => t.name === 'Standard GST')?.rate ?? '—'}%`} variant="brand" />
       </div>
 
       <div className="glass rounded-2xl overflow-hidden">

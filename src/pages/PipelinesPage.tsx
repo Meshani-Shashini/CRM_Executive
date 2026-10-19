@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { AlertTriangle, ArrowDown, ArrowUp, Check, Plus, Settings2 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
-import { DEFAULT_PIPELINES, DEMO_TENANT_ID } from '../data/pipelineDefaults';
+import { TENANT_ID } from '../lib/supabase';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
-import type { PipelineStage, StageHistoryAudit } from '../types';
+import type { Pipeline, PipelineStage, StageHistoryAudit } from '../types';
+import { formatAmount, toMvr } from '../utils/currency';
 
 const LOSS_REASONS = [
   'Price / premium',
@@ -29,24 +30,30 @@ function makeId() {
 
 export default function PipelinesPage() {
   const {
-    user, deals, setDeals, pipelines, pipelineStages, setPipelineStages,
+    user, deals, setDeals, pipelines, setPipelines, pipelineStages, setPipelineStages,
     stageHistory, setStageHistory,
   } = useApp();
-  const [pipelineId, setPipelineId] = useState(pipelines.find((pipeline) => pipeline.isActive)?.id ?? DEFAULT_PIPELINES[0].id);
+  const [pipelineId, setPipelineId] = useState(pipelines.find((pipeline) => pipeline.isActive)?.id ?? '');
+  const [pipelineModalOpen, setPipelineModalOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [editingStage, setEditingStage] = useState<PipelineStage | null>(null);
   const [stageModalOpen, setStageModalOpen] = useState(false);
   const [pendingMove, setPendingMove] = useState<{ dealId: string; stage: PipelineStage } | null>(null);
   const [moveModalOpen, setMoveModalOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
-  const selectedPipeline = pipelines.find((pipeline) => pipeline.id === pipelineId) ?? pipelines[0];
+  const selectedPipeline = pipelines.find((pipeline) => pipeline.id === pipelineId);
   const stages = useMemo(
     () => pipelineStages.filter((stage) => stage.pipelineId === pipelineId).sort((a, b) => a.stageOrder - b.stageOrder),
     [pipelineStages, pipelineId],
   );
   const pipelineDeals = deals.filter((deal) => deal.pipelineId
     ? deal.pipelineId === pipelineId
-    : pipelineId === DEFAULT_PIPELINES[0].id);
+    : pipelineId === pipelines.find((pipeline) => pipeline.isActive)?.id);
+  useEffect(() => {
+    if (!pipelines.some((pipeline) => pipeline.id === pipelineId && pipeline.isActive)) {
+      setPipelineId(pipelines.find((pipeline) => pipeline.isActive)?.id ?? '');
+    }
+  }, [pipelines, pipelineId]);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
@@ -85,7 +92,7 @@ export default function PipelinesPage() {
       } else {
         history.push({
           id: makeId(),
-          tenantId: DEMO_TENANT_ID,
+          tenantId: TENANT_ID,
           dealId,
           fromStageId: null,
           toStageId: from.id,
@@ -96,7 +103,7 @@ export default function PipelinesPage() {
       }
       const audit: StageHistoryAudit = {
         id: makeId(),
-        tenantId: DEMO_TENANT_ID,
+        tenantId: TENANT_ID,
         dealId,
         fromStageId: from.id,
         toStageId: to.id,
@@ -114,7 +121,7 @@ export default function PipelinesPage() {
         pipelineId,
         stage: to.name,
         probability: to.winProbabilityPct,
-        weighted: Math.round(deal.value * to.winProbabilityPct / 100),
+        weighted: Math.round(deal.value * to.winProbabilityPct) / 100,
         ...(to.name === 'Closed-Lost' ? { lossReason } : {}),
         ...(to.name.includes('Proposal') ? { proposalSummary: details } : {}),
       }
@@ -151,7 +158,7 @@ export default function PipelinesPage() {
         ? { ...stage, name, winProbabilityPct, stagnationDaysThreshold }
         : stage));
       setDeals((current) => current.map((deal) => deal.pipelineId === pipelineId && deal.stage === oldName
-        ? { ...deal, stage: name, probability: winProbabilityPct, weighted: Math.round(deal.value * winProbabilityPct / 100) }
+        ? { ...deal, stage: name, probability: winProbabilityPct, weighted: Math.round(deal.value * winProbabilityPct) / 100 }
         : deal));
     } else {
       const stage: PipelineStage = {
@@ -166,6 +173,21 @@ export default function PipelinesPage() {
     }
     setEditingStage(null);
     setStageModalOpen(false);
+  };
+
+  const savePipeline = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const pipeline: Pipeline = {
+      id: makeId(),
+      tenantId: TENANT_ID,
+      name: String(data.get('name')).trim(),
+      code: String(data.get('code')).trim().toUpperCase(),
+      isActive: true,
+    };
+    setPipelines((current) => [...current, pipeline]);
+    setPipelineId(pipeline.id);
+    setPipelineModalOpen(false);
   };
 
   const reorderStage = (stage: PipelineStage, direction: -1 | 1) => {
@@ -215,13 +237,20 @@ export default function PipelinesPage() {
         </div>
         <div className="flex items-center gap-2">
           <select className="input w-auto min-w-64" value={pipelineId} onChange={(event) => setPipelineId(event.target.value)} aria-label="Select pipeline">
+            {pipelines.filter((pipeline) => pipeline.isActive).length === 0 && <option value="">No active pipelines</option>}
             {pipelines.filter((pipeline) => pipeline.isActive).map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
           </select>
+          {user.role === 'admin' && <button className="btn-primary" onClick={() => setPipelineModalOpen(true)}><Plus size={15} /> New Pipeline</button>}
           {user.role === 'admin' && <button className="btn-ghost" onClick={() => setConfigOpen((open) => !open)}><Settings2 size={15} /> {configOpen ? 'Back to Board' : 'Configure Stages'}</button>}
         </div>
       </div>
 
-      {configOpen && user.role === 'admin' ? (
+      {!selectedPipeline ? (
+        <div className="glass rounded-2xl p-8 text-center">
+          <h3 className="font-semibold text-white">No pipelines configured</h3>
+          <p className="mt-1 text-sm text-muted">Create a pipeline to add stages and track deals.</p>
+        </div>
+      ) : configOpen && user.role === 'admin' ? (
         <div className="glass rounded-2xl p-5">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div><h3 className="font-semibold text-white">Stage Configuration</h3><p className="text-xs text-muted mt-1">Set order, win probability, and deal-rotting thresholds.</p></div>
@@ -271,7 +300,8 @@ export default function PipelinesPage() {
                         </div>
                         <div className="mt-1 text-xs text-muted">{deal.product} · {deal.insurer}</div>
                         <div className="mt-3 flex justify-between text-xs">
-                          <span className="text-white">MVR {deal.value.toLocaleString()}</span>
+                          <span className="text-white">{formatAmount(deal.value, deal.currency)}</span>
+                          {deal.currency === 'USD' && <span className="text-muted">{formatAmount(toMvr(deal.value, deal.currency, deal.exchangeRate), 'MVR')}</span>}
                           <span className="text-brand-400">{deal.probability}%</span>
                         </div>
                         <div className="mt-2 flex items-center justify-between text-[10px] text-muted">
@@ -300,8 +330,14 @@ export default function PipelinesPage() {
       <Modal open={stageModalOpen} onClose={() => { setStageModalOpen(false); setEditingStage(null); }} title={editingStage ? 'Edit Pipeline Stage' : 'Add Pipeline Stage'} subtitle={selectedPipeline?.name} size="sm" footer={<><button className="btn-ghost" onClick={() => { setStageModalOpen(false); setEditingStage(null); }}>Cancel</button><button type="submit" form="pipeline-stage-form" className="btn-primary"><Check size={14} /> Save Stage</button></>}>
         <form id="pipeline-stage-form" onSubmit={saveStage} className="space-y-3">
           <Field label="Stage name"><input className="input" name="name" defaultValue={editingStage?.name ?? ''} required /></Field>
-          <Field label="Win probability (%)"><input className="input" name="winProbabilityPct" type="number" min="0" max="100" step="1" defaultValue={editingStage?.winProbabilityPct ?? 0} required /></Field>
-          <Field label="Stagnation threshold (days)"><input className="input" name="stagnationDaysThreshold" type="number" min="0" step="1" defaultValue={editingStage?.stagnationDaysThreshold ?? 7} required /></Field>
+          <Field label="Win probability (%)"><input className="input" name="winProbabilityPct" type="number" min="0" max="100" step="1" defaultValue={editingStage?.winProbabilityPct ?? ''} required /></Field>
+          <Field label="Stagnation threshold (days)"><input className="input" name="stagnationDaysThreshold" type="number" min="0" step="1" defaultValue={editingStage?.stagnationDaysThreshold ?? ''} required /></Field>
+        </form>
+      </Modal>
+      <Modal open={pipelineModalOpen} onClose={() => setPipelineModalOpen(false)} title="Create Pipeline" subtitle="Set up a pipeline before adding stages." size="sm" footer={<><button type="button" className="btn-ghost" onClick={() => setPipelineModalOpen(false)}>Cancel</button><button type="submit" form="new-pipeline-form" className="btn-primary"><Plus size={14} /> Create Pipeline</button></>}>
+        <form id="new-pipeline-form" onSubmit={savePipeline} className="space-y-3">
+          <Field label="Pipeline name"><input className="input" name="name" required /></Field>
+          <Field label="Code"><input className="input" name="code" required /></Field>
         </form>
       </Modal>
 

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { FUNNELS, PRODUCT_CODES } from '../data/seed';
+import { FUNNELS, PRODUCT_CODES } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
@@ -193,9 +193,9 @@ export default function LeadsPage() {
         <form id="new-lead-form" onSubmit={createLead} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Client / Company"><input className="input" name="client" required /></Field>
           <Field label="Contact"><input className="input" name="contact" required /></Field>
-          <Field label="Country"><input className="input" name="country" defaultValue="Maldives" required /></Field>
-          <Field label="Product"><select className="input" name="productCode">{PRODUCT_CODES.map((p) => <option key={p.code} value={p.code}>{p.code} · {p.name}</option>)}</select></Field>
-          <Field label="Temperature"><select className="input" name="temperature"><option>WARM</option><option>HOT</option><option>COLD</option></select></Field>
+          <Field label="Country"><input className="input" name="country" required /></Field>
+          <Field label="Product"><select className="input" name="productCode" required><option value="">Select product</option>{PRODUCT_CODES.map((p) => <option key={p.code} value={p.code}>{p.code} · {p.name}</option>)}</select></Field>
+          <Field label="Temperature"><select className="input" name="temperature" required><option value="">Select temperature</option><option>WARM</option><option>HOT</option><option>COLD</option></select></Field>
           <Field label="Renewal Date"><input className="input" name="renewalDate" type="date" required /></Field>
           <Field label="Sum Insured (MVR)"><input className="input" name="sumInsured" type="number" min="0" required /></Field>
           <Field label="Premium (MVR)"><input className="input" name="premium" type="number" min="0" required /></Field>

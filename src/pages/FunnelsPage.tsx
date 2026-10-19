@@ -1,12 +1,16 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BarChart3, TrendingDown } from 'lucide-react';
 import Badge from '../components/ui/Badge';
-import { DEFAULT_PIPELINES } from '../data/pipelineDefaults';
 import { useApp } from '../store/AppContext';
 
 export default function FunnelsPage() {
   const { pipelines, pipelineStages, stageHistory } = useApp();
-  const [pipelineId, setPipelineId] = useState(pipelines.find((pipeline) => pipeline.isActive)?.id ?? DEFAULT_PIPELINES[0].id);
+  const [pipelineId, setPipelineId] = useState(pipelines.find((pipeline) => pipeline.isActive)?.id ?? '');
+  useEffect(() => {
+    if (!pipelines.some((pipeline) => pipeline.id === pipelineId && pipeline.isActive)) {
+      setPipelineId(pipelines.find((pipeline) => pipeline.isActive)?.id ?? '');
+    }
+  }, [pipelines, pipelineId]);
   const stages = useMemo(
     () => pipelineStages
       .filter((stage) => stage.pipelineId === pipelineId && stage.name !== 'Closed-Lost')
@@ -50,6 +54,7 @@ export default function FunnelsPage() {
           <p className="text-sm text-muted mt-1">Stage entries and conversion rates calculated from deal stage history.</p>
         </div>
         <select className="input w-auto min-w-64" value={pipelineId} onChange={(event) => setPipelineId(event.target.value)} aria-label="Select pipeline">
+          {pipelines.filter((pipeline) => pipeline.isActive).length === 0 && <option value="">No active pipelines</option>}
           {pipelines.filter((pipeline) => pipeline.isActive).map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
         </select>
       </div>
@@ -89,7 +94,7 @@ export default function FunnelsPage() {
               );
             })}
           </div>
-          <p className="mt-5 text-xs text-muted">Conversion rates count distinct deals with an audit entry in both consecutive stages. Older seeded deals are not included until their movements are tracked.</p>
+          <p className="mt-5 text-xs text-muted">Conversion rates count distinct deals with an audit entry in both consecutive stages.</p>
         </div>
       )}
     </div>

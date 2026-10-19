@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { CALENDAR_EVENTS } from '../data/seed';
 import Badge from '../components/ui/Badge';
 import { ChevronLeft, ChevronRight, RefreshCcw, Bell, Calendar as CalIcon, Users } from 'lucide-react';
 import type { CalendarEvent } from '../types';
@@ -12,7 +11,12 @@ const typeMeta: Record<CalendarEvent['type'], { color: string; icon: typeof CalI
 };
 
 export default function CalendarPage() {
-  const [cursor, setCursor] = useState(new Date(2026, 9, 1));
+  const [cursor, setCursor] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+  const today = new Date();
+  const events: CalendarEvent[] = [];
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
@@ -20,7 +24,7 @@ export default function CalendarPage() {
   const monthName = cursor.toLocaleString('en-GB', { month: 'long', year: 'numeric' });
 
   const eventsByDay: Record<number, CalendarEvent[]> = {};
-  CALENDAR_EVENTS.forEach((e) => {
+  events.forEach((e) => {
     const d = new Date(e.date);
     if (d.getFullYear() === year && d.getMonth() === month) {
       const day = d.getDate();
@@ -28,7 +32,7 @@ export default function CalendarPage() {
     }
   });
 
-  const upcoming = [...CALENDAR_EVENTS].sort((a, b) => a.date.localeCompare(b.date)).slice(0, 6);
+  const upcoming = [...events].sort((a, b) => a.date.localeCompare(b.date)).slice(0, 6);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
@@ -37,7 +41,7 @@ export default function CalendarPage() {
           <h2 className="text-white font-semibold text-lg">{monthName}</h2>
           <div className="flex items-center gap-2">
             <button onClick={() => setCursor(new Date(year, month - 1, 1))} className="p-2 rounded-lg hover:bg-ink-700 text-muted hover:text-white"><ChevronLeft size={16} /></button>
-            <button onClick={() => setCursor(new Date(2026, 9, 1))} className="btn-ghost !py-1 !px-3 text-xs">Today</button>
+            <button onClick={() => { const now = new Date(); setCursor(new Date(now.getFullYear(), now.getMonth(), 1)); }} className="btn-ghost !py-1 !px-3 text-xs">Today</button>
             <button onClick={() => setCursor(new Date(year, month + 1, 1))} className="p-2 rounded-lg hover:bg-ink-700 text-muted hover:text-white"><ChevronRight size={16} /></button>
           </div>
         </div>
@@ -51,7 +55,7 @@ export default function CalendarPage() {
           {Array.from({ length: daysIn }).map((_, i) => {
             const day = i + 1;
             const evts = eventsByDay[day] ?? [];
-            const isToday = day === 18 && month === 9 && year === 2026;
+            const isToday = day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
             return (
               <div
                 key={day}
@@ -80,6 +84,7 @@ export default function CalendarPage() {
       <div className="glass rounded-2xl p-5">
         <h3 className="text-white font-semibold mb-4 flex items-center gap-2"><Bell size={16} /> Upcoming Events</h3>
         <div className="space-y-2">
+          {upcoming.length === 0 && <p className="text-sm text-muted">No upcoming events.</p>}
           {upcoming.map((e) => {
             const m = typeMeta[e.type];
             const Icon = m.icon;

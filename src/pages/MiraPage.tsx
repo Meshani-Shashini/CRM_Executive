@@ -1,15 +1,16 @@
 import { useState } from 'react';
-import { MIRA_ROWS } from '../data/seed';
 import { Download, FileCheck2, Calendar, Filter, Printer } from 'lucide-react';
 import { downloadCsv } from '../utils/downloadCsv';
 import { useApp } from '../store/AppContext';
+import type { MiraRow } from '../types';
 
 export default function MiraPage() {
   const { company } = useApp();
-  const [from, setFrom] = useState('2025-10-01');
-  const [to, setTo] = useState('2025-12-31');
-  const [appliedRange, setAppliedRange] = useState({ from: '2025-10-01', to: '2025-12-31' });
-  const rows = MIRA_ROWS.filter((row) => row.date >= appliedRange.from && row.date <= appliedRange.to);
+  const year = new Date().getFullYear();
+  const [from, setFrom] = useState(`${year}-01-01`);
+  const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const [appliedRange, setAppliedRange] = useState({ from: `${year}-01-01`, to: new Date().toISOString().slice(0, 10) });
+  const rows: MiraRow[] = [];
 
   const totals = rows.reduce(
     (acc, r) => {
@@ -86,6 +87,7 @@ export default function MiraPage() {
               </tr>
             </thead>
             <tbody>
+              {rows.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-muted">No MIRA records in this period.</td></tr>}
               {rows.map((r, i) => (
                 <tr key={r.id} className="table-row">
                   <td className="px-4 py-3 text-muted">{i + 1}</td>

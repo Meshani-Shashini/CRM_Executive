@@ -1,11 +1,11 @@
 import { useState, type FormEvent } from 'react';
-import { INSURERS, PRODUCT_CODES, FUNNELS } from '../data/seed';
-import { DEFAULT_PIPELINES } from '../data/pipelineDefaults';
+import { INSURERS, PRODUCT_CODES } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
 import { Plus, Filter, X } from 'lucide-react';
 import type { Deal } from '../types';
+import { formatAmount, toMvr, type Currency } from '../utils/currency';
 
 const stageColors: Record<string, 'cold' | 'warm' | 'win' | 'hot'> = {
   'Lead Identified': 'cold',
@@ -16,26 +16,52 @@ const stageColors: Record<string, 'cold' | 'warm' | 'win' | 'hot'> = {
 };
 
 export default function DealsPage() {
-  const { deals, setDeals, clients, user } = useApp();
+  const { deals, setDeals, clients, user, pipelines, pipelineStages } = useApp();
   const [createOpen, setCreateOpen] = useState(false);
+  const [createPipelineId, setCreatePipelineId] = useState('');
+  const [dealCurrency, setDealCurrency] = useState<Currency | ''>('');
+  const [dealAmount, setDealAmount] = useState('');
+  const [exchangeRate, setExchangeRate] = useState('');
+  const [createError, setCreateError] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
   const [stageFilter, setStageFilter] = useState('');
   const visibleDeals = stageFilter ? deals.filter((deal) => deal.stage === stageFilter) : deals;
-  const totalValue = deals.reduce((s, d) => s + d.value, 0);
-  const totalWeighted = deals.reduce((s, d) => s + d.weighted, 0);
+  const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
+  const availableStages = pipelineStages
+    .filter((stage) => stage.pipelineId === createPipelineId)
+    .sort((a, b) => a.stageOrder - b.stageOrder);
+  const totalValue = deals.reduce((sum, deal) => sum + toMvr(deal.value, deal.currency, deal.exchangeRate), 0);
+  const totalWeighted = deals.reduce((sum, deal) => sum + toMvr(deal.weighted, deal.currency, deal.exchangeRate), 0);
+
+  const openCreate = () => {
+    setCreatePipelineId('');
+    setDealCurrency('');
+    setDealAmount('');
+    setExchangeRate('');
+    setCreateError('');
+    setCreateOpen(true);
+  };
 
   const createDeal = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const value = Number(data.get('value'));
     const probability = Number(data.get('probability'));
+    const currency = String(data.get('currency')) as Currency;
+    const rate = currency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
+    if (currency === 'USD' && (!Number.isFinite(rate) || !rate || rate <= 0)) {
+      setCreateError('Enter a valid positive exchange rate.');
+      return;
+    }
     const deal: Deal = {
       id: `d-${Date.now()}`,
-      pipelineId: DEFAULT_PIPELINES[0].id,
+      pipelineId: String(data.get('pipelineId')),
       client: String(data.get('client')),
       product: String(data.get('product')),
       value,
-      weighted: Math.round(value * probability / 100),
+      weighted: Math.round(value * probability) / 100,
+      currency,
+      ...(rate ? { exchangeRate: rate } : {}),
       stage: String(data.get('stage')),
       probability,
       ownerId: user.id,
@@ -67,7 +93,7 @@ export default function DealsPage() {
         <h2 className="text-white font-semibold">Sales Pipeline</h2>
         <div className="flex gap-2">
             <button className="btn-ghost !py-1.5" onClick={() => setFilterOpen(true)}><Filter size={14} /> Filter</button>
-            <button className="btn-primary !py-1.5" onClick={() => setCreateOpen(true)}><Plus size={14} /> New Deal</button>
+            <button className="btn-primary !py-1.5" onClick={openCreate} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding deals' : undefined}><Plus size={14} /> New Deal</button>
         </div>
       </div>
 
@@ -94,8 +120,14 @@ export default function DealsPage() {
                 <td className="px-4 py-3">
                   <Badge variant={stageColors[d.stage] ?? 'muted'} dot>{d.stage}</Badge>
                 </td>
-                <td className="px-4 py-3 text-right text-white">MVR {d.value.toLocaleString()}</td>
-                <td className="px-4 py-3 text-right text-brand-400 font-medium">MVR {d.weighted.toLocaleString()}</td>
+                <td className="px-4 py-3 text-right text-white">
+                  <div>{formatAmount(d.value, d.currency)}</div>
+                  {d.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(toMvr(d.value, d.currency, d.exchangeRate), 'MVR')}</div>}
+                </td>
+                <td className="px-4 py-3 text-right text-brand-400 font-medium">
+                  <div>{formatAmount(d.weighted, d.currency)}</div>
+                  {d.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(toMvr(d.weighted, d.currency, d.exchangeRate), 'MVR')}</div>}
+                </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
                     <div className="w-16 h-1.5 bg-ink-900 rounded-full overflow-hidden">
@@ -119,12 +151,17 @@ export default function DealsPage() {
         footer={<><button type="button" className="btn-ghost" onClick={() => setCreateOpen(false)}><X size={14} /> Cancel</button><button type="submit" form="new-deal-form" className="btn-primary"><Plus size={14} /> Create Deal</button></>}
       >
         <form id="new-deal-form" onSubmit={createDeal} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Client"><select className="input" name="client" required>{clients.map((client) => <option key={client.id}>{client.name}</option>)}</select></Field>
-          <Field label="Product"><select className="input" name="product">{PRODUCT_CODES.map((product) => <option key={product.code}>{product.name}</option>)}</select></Field>
-          <Field label="Insurer"><select className="input" name="insurer">{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
-          <Field label="Stage"><select className="input" name="stage">{FUNNELS[0].stages.map((stage) => <option key={stage}>{stage}</option>)}</select></Field>
-          <Field label="Deal Value (MVR)"><input className="input" name="value" type="number" min="0" required /></Field>
-          <Field label="Probability (%)"><input className="input" name="probability" type="number" min="0" max="100" defaultValue="50" required /></Field>
+          <Field label="Pipeline"><select className="input" name="pipelineId" required value={createPipelineId} onChange={(event) => setCreatePipelineId(event.target.value)}><option value="">Select pipeline</option>{activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}</select></Field>
+          <Field label="Client"><select className="input" name="client" required defaultValue=""><option value="">Select client</option>{clients.map((client) => <option key={client.id}>{client.name}</option>)}</select></Field>
+          <Field label="Product"><select className="input" name="product" required defaultValue=""><option value="">Select product</option>{PRODUCT_CODES.map((product) => <option key={product.code}>{product.name}</option>)}</select></Field>
+          <Field label="Insurer"><select className="input" name="insurer" required defaultValue=""><option value="">Select insurer</option>{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
+          <Field label="Stage"><select className="input" name="stage" required defaultValue=""><option value="">Select stage</option>{availableStages.map((stage) => <option key={stage.id}>{stage.name}</option>)}</select></Field>
+          <Field label="Currency"><select className="input" name="currency" required value={dealCurrency} onChange={(event) => { setDealCurrency(event.target.value as Currency | ''); setDealAmount(''); setExchangeRate(''); }}><option value="">Select currency</option><option value="MVR">MVR</option><option value="USD">USD</option></select></Field>
+          <Field label={`Deal Value${dealCurrency ? ` (${dealCurrency})` : ''}`}><input className="input" name="value" type="number" min="0" step="0.01" required value={dealAmount} onChange={(event) => setDealAmount(event.target.value)} /></Field>
+          {dealCurrency === 'USD' && <Field label="Exchange rate (1 USD = MVR)"><input className="input" name="exchangeRate" type="number" min="0.000001" step="any" required value={exchangeRate} onChange={(event) => { setExchangeRate(event.target.value); setCreateError(''); }} /></Field>}
+          {dealCurrency === 'USD' && Number(dealAmount) > 0 && Number(exchangeRate) > 0 && <p className="sm:col-span-2 text-sm text-muted">Equivalent: {formatAmount(toMvr(Number(dealAmount), 'USD', Number(exchangeRate)), 'MVR')}</p>}
+          {createError && <p role="alert" className="sm:col-span-2 text-sm text-hot">{createError}</p>}
+          <Field label="Probability (%)"><input className="input" name="probability" type="number" min="0" max="100" step="0.01" required /></Field>
           <Field label="Expected Close"><input className="input" name="closeDate" type="date" required /></Field>
         </form>
       </Modal>

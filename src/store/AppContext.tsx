@@ -6,10 +6,7 @@ import type {
   Activity, Client, Deal, Invoice, Lead, Payment, Pipeline, PipelineStage,
   Role, StageHistoryAudit, TaxRate, User,
 } from '../types';
-import {
-  USERS, TAX_RATES, LEADS, CLIENTS, ACTIVITIES, DEALS, INVOICES, PAYMENTS, COMPANY,
-} from '../data/seed';
-import { DEFAULT_PIPELINES, DEFAULT_PIPELINE_STAGES } from '../data/pipelineDefaults';
+import { COMPANY } from '../data/catalogs';
 import { supabase, TENANT_ID } from '../lib/supabase';
 
 interface AppState {
@@ -67,13 +64,15 @@ interface TenantRecord {
 const AppContext = createContext<AppState | null>(null);
 const GUEST_USER: User = { id: '', name: 'Guest', email: '', role: 'client', title: '' };
 const DEMO_USER: User = {
-  id: 'demo-admin',
+  id: 'local-development-admin',
   name: 'Demo Administrator',
-  email: 'demo@premierbrokers.local',
+  email: 'admin',
   role: 'admin',
   title: 'Development Demo Session',
 };
 const AUTH_BYPASS = import.meta.env.DEV && import.meta.env.VITE_AUTH_BYPASS === 'true';
+const DEMO_ADMIN_USERNAME = import.meta.env.VITE_DEMO_ADMIN_USERNAME;
+const DEMO_ADMIN_PASSWORD = import.meta.env.VITE_DEMO_ADMIN_PASSWORD;
 const DEFAULT_EMAIL_TEMPLATES = Object.fromEntries([
   'Renewal Reminder (30/60/90)', 'Quotation Sent', 'Invoice Issued', 'Payment Receipt', 'Payment Overdue',
 ].map((name) => [name, '']));
@@ -110,21 +109,21 @@ function writeArray(resource: string, items: unknown[]) {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User>(AUTH_BYPASS ? DEMO_USER : GUEST_USER);
+  const [user, setUser] = useState<User>(GUEST_USER);
   const [authLoading, setAuthLoading] = useState(!AUTH_BYPASS);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [taxRates, setTaxRates] = useState<TaxRate[]>(AUTH_BYPASS ? TAX_RATES : []);
-  const [leads, setLeads] = useState<Lead[]>(AUTH_BYPASS ? LEADS : []);
-  const [clients, setClients] = useState<Client[]>(AUTH_BYPASS ? CLIENTS : []);
-  const [activities, setActivities] = useState<Activity[]>(AUTH_BYPASS ? ACTIVITIES : []);
-  const [deals, setDeals] = useState<Deal[]>(AUTH_BYPASS ? DEALS : []);
-  const [invoices, setInvoices] = useState<Invoice[]>(AUTH_BYPASS ? INVOICES : []);
-  const [payments, setPayments] = useState<Payment[]>(AUTH_BYPASS ? PAYMENTS : []);
-  const [users, setUsers] = useState<User[]>(AUTH_BYPASS ? USERS : []);
+  const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [company, setCompany] = useState<typeof COMPANY>(COMPANY);
   const [emailTemplates, setEmailTemplates] = useState<Record<string, string>>(DEFAULT_EMAIL_TEMPLATES);
-  const [pipelines, setPipelines] = useState<Pipeline[]>(AUTH_BYPASS ? DEFAULT_PIPELINES : []);
-  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>(AUTH_BYPASS ? DEFAULT_PIPELINE_STAGES : []);
+  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>([]);
   const [stageHistory, setStageHistory] = useState<StageHistoryAudit[]>([]);
   const [dataReady, setDataReady] = useState(AUTH_BYPASS);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
@@ -165,7 +164,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [loadProfile]);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (AUTH_BYPASS) {
+      if (
+        !DEMO_ADMIN_USERNAME
+        || !DEMO_ADMIN_PASSWORD
+        || email.trim() !== DEMO_ADMIN_USERNAME
+        || password !== DEMO_ADMIN_PASSWORD
+      ) {
+        throw new Error('Invalid demo username or password.');
+      }
+      setUser(DEMO_USER);
+      setAuthError(null);
+      setDataReady(true);
+      return;
+    }
+    const login = email.trim().toLowerCase();
+    const authEmail = login === 'admin' ? import.meta.env.VITE_ADMIN_LOGIN_EMAIL?.trim() : login;
+    if (!authEmail) {
+      throw new Error('Set VITE_ADMIN_LOGIN_EMAIL to the valid Supabase email for the admin login alias.');
+    }
+    const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password });
     if (error) throw new Error(error.message);
     if (!data.user) throw new Error('Supabase did not return a user for this sign-in.');
     const profile = await loadProfile(data.user.id);
@@ -175,6 +193,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [loadProfile]);
 
   const register = useCallback(async (name: string, email: string, password: string) => {
+    if (AUTH_BYPASS) {
+      throw new Error('Account registration is disabled in demo login mode.');
+    }
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -197,7 +218,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     setUser(GUEST_USER);
     setDataReady(false);
+    setTaxRates([]);
+    setLeads([]);
+    setClients([]);
+    setActivities([]);
+    setDeals([]);
+    setInvoices([]);
+    setPayments([]);
     setUsers([]);
+    setCompany(COMPANY);
+    setEmailTemplates(DEFAULT_EMAIL_TEMPLATES);
+    setPipelines([]);
+    setPipelineStages([]);
+    setStageHistory([]);
+    setAuthError(null);
+    setPersistenceError(null);
   }, []);
 
   useEffect(() => {
@@ -213,37 +248,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (error) throw new Error(`Could not load Supabase records: ${error.message}`);
         if (cancelled) return;
         const records = (data ?? []) as TenantRecord[];
-        if (records.length === 0 && user.role === 'admin') {
-          setTaxRates(TAX_RATES);
-          setLeads(LEADS);
-          setClients(CLIENTS);
-          setActivities(ACTIVITIES);
-          setDeals(DEALS);
-          setInvoices(INVOICES);
-          setPayments(PAYMENTS);
-          setPipelines(DEFAULT_PIPELINES);
-          setPipelineStages(DEFAULT_PIPELINE_STAGES);
-          setStageHistory([]);
-          setCompany(COMPANY);
-          setEmailTemplates(DEFAULT_EMAIL_TEMPLATES);
-        } else {
-          setTaxRates(asArray<TaxRate>(records, 'tax-rates'));
-          setLeads(asArray<Lead>(records, 'leads'));
-          setClients(asArray<Client>(records, 'clients'));
-          setActivities(asArray<Activity>(records, 'activities'));
-          setDeals(asArray<Deal>(records, 'deals'));
-          setInvoices(asArray<Invoice>(records, 'invoices'));
-          setPayments(asArray<Payment>(records, 'payments'));
-          setPipelines(asArray<Pipeline>(records, 'pipelines'));
-          setPipelineStages(asArray<PipelineStage>(records, 'pipeline-stages'));
-          setStageHistory(asArray<StageHistoryAudit>(records, 'stage-history'));
-          const companyRecord = records.find((record) => record.resource === 'company');
-          setCompany(companyRecord ? companyRecord.data as typeof COMPANY : COMPANY);
-          const templatesRecord = records.find((record) => record.resource === 'email-templates');
-          setEmailTemplates(templatesRecord
-            ? templatesRecord.data.templates as Record<string, string>
-            : DEFAULT_EMAIL_TEMPLATES);
-        }
+        setTaxRates(asArray<TaxRate>(records, 'tax-rates'));
+        setLeads(asArray<Lead>(records, 'leads'));
+        setClients(asArray<Client>(records, 'clients'));
+        setActivities(asArray<Activity>(records, 'activities'));
+        setDeals(asArray<Deal>(records, 'deals'));
+        setInvoices(asArray<Invoice>(records, 'invoices'));
+        setPayments(asArray<Payment>(records, 'payments'));
+        setPipelines(asArray<Pipeline>(records, 'pipelines'));
+        setPipelineStages(asArray<PipelineStage>(records, 'pipeline-stages'));
+        setStageHistory(asArray<StageHistoryAudit>(records, 'stage-history'));
+        const companyRecord = records.find((record) => record.resource === 'company');
+        setCompany(companyRecord ? companyRecord.data as typeof COMPANY : COMPANY);
+        const templatesRecord = records.find((record) => record.resource === 'email-templates');
+        setEmailTemplates(templatesRecord
+          ? templatesRecord.data.templates as Record<string, string>
+          : DEFAULT_EMAIL_TEMPLATES);
         setPersistenceError(null);
         setDataReady(true);
       } catch (error) {

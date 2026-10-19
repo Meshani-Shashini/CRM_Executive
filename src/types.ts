@@ -57,6 +57,9 @@ export interface Activity {
   description: string;
   date: string;
   userId: string;
+  quoteAmount?: number;
+  quoteCurrency?: 'MVR' | 'USD';
+  quoteExchangeRate?: number;
 }
 
 export interface Insurer {
@@ -135,6 +138,8 @@ export interface Deal {
   product: string;
   value: number;
   weighted: number;
+  currency: 'MVR' | 'USD';
+  exchangeRate?: number;
   stage: string;
   probability: number;
   ownerId: string;
