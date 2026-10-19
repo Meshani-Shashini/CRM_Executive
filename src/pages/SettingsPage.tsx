@@ -11,25 +11,22 @@ import type { TaxRate, Role } from '../types';
 type Tab = 'general' | 'tax' | 'email' | 'users';
 
 export default function SettingsPage() {
-  const { user, hasAccess, taxRates, setTaxRates, users, setUsers, company, setCompany } = useApp();
+  const {
+    user, hasAccess, taxRates, setTaxRates, users, createUser,
+    company, setCompany, emailTemplates, setEmailTemplates,
+  } = useApp();
   const [tab, setTab] = useState<Tab>('tax');
   const [editing, setEditing] = useState<TaxRate | null>(null);
   const [open, setOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [userError, setUserError] = useState('');
+  const [userSubmitting, setUserSubmitting] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<string | null>(null);
   const [templateText, setTemplateText] = useState('');
   const [notice, setNotice] = useState('');
   const [companyDetails, setCompanyDetails] = useState(company);
-  const [emailTemplates, setEmailTemplates] = useState(() => {
-    try {
-      const saved = window.localStorage.getItem('ibms:email-templates');
-      return saved ? JSON.parse(saved) as Record<string, string> : Object.fromEntries(['Renewal Reminder (30/60/90)', 'Quotation Sent', 'Invoice Issued', 'Payment Receipt', 'Payment Overdue'].map((name) => [name, '']));
-    } catch (error) {
-      console.error('Could not load email templates from browser storage.', error);
-      return {};
-    }
-  });
+
+  useEffect(() => setCompanyDetails(company), [company]);
 
   if (!hasAccess(['admin'])) {
     return (
@@ -74,48 +71,31 @@ export default function SettingsPage() {
     const data = new FormData(event.currentTarget);
     const name = String(data.get('name')).trim();
     const email = String(data.get('email')).trim();
-    const roleNames: Record<Role, string> = {
-      admin: 'System Admin',
-      sales: 'Sales',
-      finance: 'Accountant',
-      client: 'Client',
-    };
+    setUserSubmitting(true);
     try {
-      const response = await fetch('/api/auth/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          email,
-          password: String(data.get('password') ?? ''),
-          role: roleNames[data.get('role') as Role],
-          title: String(data.get('title') ?? '').trim(),
-        }),
+      await createUser({
+        name,
+        email,
+        password: String(data.get('password') ?? ''),
+        role: data.get('role') as Role,
+        title: String(data.get('title') ?? '').trim(),
       });
-      const result: { user?: (typeof users)[number]; error?: string } = await response.json();
-      if (!response.ok || !result.user) throw new Error(result.error || `Could not create user (HTTP ${response.status}).`);
-      setUsers([...users, result.user]);
       setUserOpen(false);
       setUserError('');
       setNotice(`User ${name} added.`);
     } catch (error) {
       setUserError(error instanceof Error ? error.message : 'Could not create user.');
+    } finally {
+      setUserSubmitting(false);
     }
   };
 
   const saveTemplate = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (editingTemplate === null) return;
-    const next = { ...emailTemplates, [editingTemplate]: templateText };
-    try {
-      window.localStorage.setItem('ibms:email-templates', JSON.stringify(next));
-      setEmailTemplates(next);
-      setEditingTemplate(null);
-      setNotice('Email template saved.');
-    } catch (error) {
-      console.error('Could not save email template to browser storage.', error);
-      setNotice('Unable to save the email template. Check browser storage permissions.');
-    }
+    setEmailTemplates({ ...emailTemplates, [editingTemplate]: templateText });
+    setEditingTemplate(null);
+    setNotice('Email template saved.');
   };
 
   return (
@@ -235,7 +215,7 @@ export default function SettingsPage() {
       )}
 
       <TaxModal open={open} onClose={() => setOpen(false)} initial={editing} onSave={saveTax} />
-      <Modal open={userOpen} onClose={() => { setUserOpen(false); setUserError(''); }} title="Add User" subtitle="Add a user and assign an application role." footer={<><button type="button" className="btn-ghost" onClick={() => { setUserOpen(false); setUserError(''); }}>Cancel</button><button type="submit" form="new-user-form" className="btn-primary"><Plus size={14} /> Add User</button></>}>
+      <Modal open={userOpen} onClose={() => { setUserOpen(false); setUserError(''); }} title="Add User" subtitle="Add a user and assign an application role." footer={<><button type="button" className="btn-ghost" onClick={() => { setUserOpen(false); setUserError(''); }}>Cancel</button><button type="submit" form="new-user-form" className="btn-primary" disabled={userSubmitting}><Plus size={14} /> {userSubmitting ? 'Adding…' : 'Add User'}</button></>}>
         <form id="new-user-form" onSubmit={saveUser} className="space-y-3">
           <Field label="Full name"><input className="input" name="name" required /></Field>
           <Field label="Email"><input className="input" name="email" type="email" required /></Field>
