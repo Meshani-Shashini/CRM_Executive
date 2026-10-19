@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Menu, Search, Bell, ChevronDown, Check } from 'lucide-react';
 import { useApp } from '../store/AppContext';
-import { USERS } from '../data/seed';
 import type { Role } from '../types';
 
 const roleLabel: Record<Role, string> = {
@@ -43,7 +42,7 @@ export default function Topbar({
   page: string;
   onMenu: () => void;
 }) {
-  const { user, setUser } = useApp();
+  const { user, setUser, users } = useApp();
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
 
@@ -116,7 +115,7 @@ export default function Topbar({
                 <div className="text-[10px] text-brand-400 mt-1">{roleLabel[user.role]}</div>
               </div>
               <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-muted/70">Switch account</div>
-              {USERS.map((account) => (
+              {users.map((account) => (
                 <button
                   key={account.id}
                   type="button"

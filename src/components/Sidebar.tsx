@@ -2,11 +2,10 @@ import { useApp } from '../store/AppContext';
 import {
   LayoutDashboard, CalendarDays, Users, FileText, Receipt, Wallet,
   ShieldCheck, Settings, BarChart3, FolderKanban, Target, ScrollText,
-  FileCheck2, FileSliders, Percent, Bell, BookUser, Briefcase, Files,
-  CreditCard, Send, RefreshCcw, Info, StickyNote, LogOut, ChevronRight,
+  FileCheck2, FileSliders, Percent, BookUser, Briefcase, Files,
+  CreditCard, Send, RefreshCcw, Info, ChevronRight,
 } from 'lucide-react';
 import type { Role } from '../types';
-import { USERS, COMPANY } from '../data/seed';
 
 export type NavKey =
   | 'dashboard' | 'plans' | 'leads' | 'deals' | 'clients' | 'calendar' | 'reports' | 'documents'
@@ -82,14 +81,13 @@ const roleLabel: Record<Role, string> = {
 };
 
 export default function Sidebar({
-  active, onNavigate, open, onClose,
+  active, open, onClose,
 }: {
   active: NavKey;
-  onNavigate: (k: NavKey) => void;
   open: boolean;
   onClose: () => void;
 }) {
-  const { user, setUser } = useApp();
+  const { user, setUser, users, company } = useApp();
 
   return (
     <>
@@ -104,15 +102,17 @@ export default function Sidebar({
           <div className="flex items-center gap-2.5">
             <img
               src="/logo.jpeg"
-              alt="IBMS"
-              className="w-24 h-10 shrink-0 rounded-xl object-contain ring-1 ring-ink-600 shadow-glow"
+              alt="Premier"
+              className="w-24 h-12 shrink-0 rounded-[18px] bg-white object-contain ring-1 ring-ink-600 shadow-glow"
             />
-            <div className="leading-tight">
-              <div className="text-white font-bold tracking-wide">IBMS</div>
-              <div className="text-[10px] text-muted uppercase tracking-wider">Brokers Management</div>
+            <div className="min-w-0 text-[11px] leading-[1.05]">
+              <div><span className="font-semibold text-white">I</span><span className="text-muted">nsurance</span></div>
+              <div><span className="font-semibold text-white">B</span><span className="text-muted">rokers</span></div>
+              <div><span className="font-semibold text-white">M</span><span className="text-muted">anagement</span></div>
+              <div><span className="font-semibold text-white">S</span><span className="text-muted">ystem</span></div>
             </div>
           </div>
-          <div className="mt-3 text-[11px] text-muted/80 truncate">{COMPANY.legalName}</div>
+          <div className="mt-3 text-[11px] text-muted/80 truncate">{company.legalName}</div>
         </div>
 
         {/* Nav */}
@@ -136,15 +136,17 @@ export default function Sidebar({
                     const Icon = item.icon;
                     const isActive = active === item.key;
                     return (
-                      <button
+                      <a
                         key={item.key}
-                        onClick={() => { onNavigate(item.key); onClose(); }}
-                        className={`nav-item w-full ${isActive ? 'nav-item-active' : ''}`}
+                        href={`#/${item.key}`}
+                        onClick={onClose}
+                        aria-current={isActive ? 'page' : undefined}
+                        className={`nav-item w-full no-underline ${isActive ? 'nav-item-active' : ''}`}
                       >
                         <Icon size={16} />
                         <span className="flex-1 text-left">{item.label}</span>
                         {isActive && <ChevronRight size={14} className="text-brand-400" />}
-                      </button>
+                      </a>
                     );
                   })}
                 </div>
@@ -171,7 +173,7 @@ export default function Sidebar({
           <div className="mt-2 px-2">
             <div className="text-[10px] text-muted/70 mb-1">Switch role (demo)</div>
             <div className="grid grid-cols-4 gap-1">
-              {USERS.map((u) => (
+              {users.map((u) => (
                 <button
                   key={u.id}
                   onClick={() => setUser(u)}

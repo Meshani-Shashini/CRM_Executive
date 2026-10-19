@@ -74,4 +74,36 @@ body {
     background-clip: text;
     -webkit-text-fill-color: transparent;
   }
+
+  @media print {
+    body.print-mira * {
+      visibility: hidden;
+    }
+
+    body.print-mira .print-report,
+    body.print-mira .print-report * {
+      visibility: visible;
+    }
+
+    body.print-mira .print-report {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      color: #000 !important;
+      background: #fff !important;
+    }
+
+    body.print-mira .print-report * {
+      color: #000 !important;
+      border-color: #ccc !important;
+      background-color: transparent !important;
+      box-shadow: none !important;
+      -webkit-text-fill-color: #000 !important;
+    }
+
+    body.print-mira .print-report button,
+    body.print-mira .print-report input {
+      display: none !important;
+    }
+  }
 }

@@ -1,7 +1,9 @@
-import { useState } from 'react';
-import { LEADS, FUNNELS, PRODUCT_CODES } from '../data/seed';
+import { useState, type FormEvent } from 'react';
+import { FUNNELS, PRODUCT_CODES } from '../data/seed';
 import Badge from '../components/ui/Badge';
-import { Flame, Sun, Snowflake, List, Columns3, Filter, Plus, Phone, Calendar, FileText } from 'lucide-react';
+import Modal from '../components/ui/Modal';
+import { useApp } from '../store/AppContext';
+import { Flame, Sun, Snowflake, List, Columns3, Filter, Plus, X } from 'lucide-react';
 import type { Lead, LeadTemperature } from '../types';
 
 const tempVariant: Record<LeadTemperature, 'hot' | 'warm' | 'cold'> = {
@@ -10,12 +12,45 @@ const tempVariant: Record<LeadTemperature, 'hot' | 'warm' | 'cold'> = {
 const tempIcon = { HOT: Flame, WARM: Sun, COLD: Snowflake };
 
 export default function LeadsPage() {
+  const { leads, setLeads, user } = useApp();
   const [funnelId, setFunnelId] = useState(FUNNELS[0].id);
   const [view, setView] = useState<'kanban' | 'table'>('kanban');
+  const [newLeadOpen, setNewLeadOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [temperatureFilter, setTemperatureFilter] = useState('');
+  const [stageFilter, setStageFilter] = useState('');
   const funnel = FUNNELS.find((f) => f.id === funnelId)!;
-  const [leads] = useState<Lead[]>(LEADS);
+  const visibleLeads = leads.filter((lead) =>
+    (!temperatureFilter || lead.temperature === temperatureFilter) &&
+    (!stageFilter || lead.funnelStage === stageFilter)
+  );
 
   const productName = (code: string) => PRODUCT_CODES.find((p) => p.code === code)?.name ?? code;
+
+  const createLead = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const productCode = String(data.get('productCode'));
+    const product = PRODUCT_CODES.find((item) => item.code === productCode);
+    const lead: Lead = {
+      id: `L-${Date.now()}`,
+      client: String(data.get('client')).trim(),
+      contact: String(data.get('contact')).trim(),
+      country: String(data.get('country')).trim(),
+      insuranceClass: product?.category ?? 'Miscellaneous',
+      productCode,
+      temperature: data.get('temperature') as LeadTemperature,
+      status: 'TO-DO',
+      funnelStage: funnel.stages[0],
+      renewalDate: String(data.get('renewalDate')),
+      sumInsured: Number(data.get('sumInsured')),
+      premium: Number(data.get('premium')),
+      ownerId: user.id,
+      lastActivity: 'Just now',
+    };
+    setLeads([lead, ...leads]);
+    setNewLeadOpen(false);
+  };
 
   return (
     <div className="space-y-5">
@@ -26,7 +61,7 @@ export default function LeadsPage() {
             {FUNNELS.map((f) => (
               <button
                 key={f.id}
-                onClick={() => setFunnelId(f.id)}
+                onClick={() => { setFunnelId(f.id); setStageFilter(''); }}
                 className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
                   funnelId === f.id ? 'bg-brand-500 text-white' : 'text-muted hover:text-white'
                 }`}
@@ -37,19 +72,19 @@ export default function LeadsPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button className="btn-ghost !py-1.5"><Filter size={14} /> Filter</button>
+          <button className="btn-ghost !py-1.5" onClick={() => setFilterOpen(true)}><Filter size={14} /> Filter</button>
           <div className="flex gap-1 bg-ink-800/60 border border-ink-600 rounded-lg p-1">
             <button onClick={() => setView('kanban')} className={`p-1.5 rounded-md ${view === 'kanban' ? 'bg-ink-700 text-white' : 'text-muted'}`}><Columns3 size={15} /></button>
             <button onClick={() => setView('table')} className={`p-1.5 rounded-md ${view === 'table' ? 'bg-ink-700 text-white' : 'text-muted'}`}><List size={15} /></button>
           </div>
-          <button className="btn-primary !py-1.5"><Plus size={14} /> New Lead</button>
+          <button className="btn-primary !py-1.5" onClick={() => setNewLeadOpen(true)}><Plus size={14} /> New Lead</button>
         </div>
       </div>
 
       {view === 'kanban' ? (
         <div className="flex gap-3 overflow-x-auto pb-3">
           {funnel.stages.map((stage) => {
-            const stageLeads = leads.filter((l) => l.funnelStage === stage);
+            const stageLeads = visibleLeads.filter((l) => l.funnelStage === stage);
             return (
               <div key={stage} className="w-72 shrink-0">
                 <div className="flex items-center justify-between mb-2 px-1">
@@ -107,7 +142,7 @@ export default function LeadsPage() {
               </tr>
             </thead>
             <tbody>
-              {leads.map((l) => {
+              {visibleLeads.map((l) => {
                 const TIcon = tempIcon[l.temperature];
                 return (
                   <tr key={l.id} className="table-row hover:bg-ink-750/40">
@@ -142,6 +177,51 @@ export default function LeadsPage() {
           </table>
         </div>
       )}
+
+      <Modal
+        open={newLeadOpen}
+        onClose={() => setNewLeadOpen(false)}
+        title="Create Lead"
+        subtitle="Add a prospect to the active sales funnel."
+        footer={
+          <>
+            <button type="button" className="btn-ghost" onClick={() => setNewLeadOpen(false)}><X size={14} /> Cancel</button>
+            <button type="submit" form="new-lead-form" className="btn-primary"><Plus size={14} /> Create Lead</button>
+          </>
+        }
+      >
+        <form id="new-lead-form" onSubmit={createLead} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Client / Company"><input className="input" name="client" required /></Field>
+          <Field label="Contact"><input className="input" name="contact" required /></Field>
+          <Field label="Country"><input className="input" name="country" defaultValue="Maldives" required /></Field>
+          <Field label="Product"><select className="input" name="productCode">{PRODUCT_CODES.map((p) => <option key={p.code} value={p.code}>{p.code} · {p.name}</option>)}</select></Field>
+          <Field label="Temperature"><select className="input" name="temperature"><option>WARM</option><option>HOT</option><option>COLD</option></select></Field>
+          <Field label="Renewal Date"><input className="input" name="renewalDate" type="date" required /></Field>
+          <Field label="Sum Insured (MVR)"><input className="input" name="sumInsured" type="number" min="0" required /></Field>
+          <Field label="Premium (MVR)"><input className="input" name="premium" type="number" min="0" required /></Field>
+        </form>
+      </Modal>
+      <Modal
+        open={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        title="Filter Leads"
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => { setTemperatureFilter(''); setStageFilter(''); }}>Clear</button>
+            <button className="btn-primary" onClick={() => setFilterOpen(false)}>Apply Filter</button>
+          </>
+        }
+        size="sm"
+      >
+        <div className="space-y-3">
+          <Field label="Funnel stage"><select className="input" value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}><option value="">All stages</option>{funnel.stages.map((stage) => <option key={stage}>{stage}</option>)}</select></Field>
+          <Field label="Temperature"><select className="input" value={temperatureFilter} onChange={(e) => setTemperatureFilter(e.target.value)}><option value="">All temperatures</option><option>HOT</option><option>WARM</option><option>COLD</option></select></Field>
+        </div>
+      </Modal>
     </div>
   );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="block"><div className="text-xs text-muted mb-1.5">{label}</div>{children}</label>;
 }

@@ -1,12 +1,17 @@
 import { useState } from 'react';
-import { MIRA_ROWS, COMPANY } from '../data/seed';
-import { Download, FileCheck2, Calendar, Filter } from 'lucide-react';
+import { MIRA_ROWS } from '../data/seed';
+import { Download, FileCheck2, Calendar, Filter, Printer } from 'lucide-react';
+import { downloadCsv } from '../utils/downloadCsv';
+import { useApp } from '../store/AppContext';
 
 export default function MiraPage() {
+  const { company } = useApp();
   const [from, setFrom] = useState('2025-10-01');
   const [to, setTo] = useState('2025-12-31');
+  const [appliedRange, setAppliedRange] = useState({ from: '2025-10-01', to: '2025-12-31' });
+  const rows = MIRA_ROWS.filter((row) => row.date >= appliedRange.from && row.date <= appliedRange.to);
 
-  const totals = MIRA_ROWS.reduce(
+  const totals = rows.reduce(
     (acc, r) => {
       acc.sumInsured += r.sumInsured;
       acc.premium += r.premium;
@@ -17,8 +22,14 @@ export default function MiraPage() {
     { sumInsured: 0, premium: 0, commission: 0, brokerage: 0 }
   );
 
+  const printReport = () => {
+    document.body.classList.add('print-mira');
+    window.addEventListener('afterprint', () => document.body.classList.remove('print-mira'), { once: true });
+    window.print();
+  };
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 print-report">
       <div className="glass rounded-2xl p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-3">
@@ -30,20 +41,23 @@ export default function MiraPage() {
               <p className="text-sm text-muted mt-0.5">Maldives Inland Revenue Authority · statutory regulatory export</p>
             </div>
           </div>
-          <button className="btn-primary"><Download size={14} /> Export PDF / CSV</button>
+          <div className="flex gap-2">
+            <button className="btn-ghost print:hidden" onClick={printReport}><Printer size={14} /> Print / Save PDF</button>
+            <button className="btn-primary print:hidden" onClick={() => downloadCsv('mira-form-1.csv', ['Date', 'Insured Risk', 'Insurer', 'Sum Insured', 'Premium', 'Commission %', 'Commission', 'Brokerage Fee'], rows.map((row) => [row.date, row.insured, row.insurer, row.sumInsured, row.premium, row.commissionPct, row.commissionAmount, row.brokerageFee]))}><Download size={14} /> Export CSV</button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
           <div>
-            <label className="text-xs text-muted flex items-center gap-1.5 mb-1.5"><Calendar size={12} /> Period From</label>
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="input" />
+            <label htmlFor="mira-from" className="text-xs text-muted flex items-center gap-1.5 mb-1.5"><Calendar size={12} /> Period From</label>
+            <input id="mira-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="input" />
           </div>
           <div>
-            <label className="text-xs text-muted flex items-center gap-1.5 mb-1.5"><Calendar size={12} /> Period To</label>
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="input" />
+            <label htmlFor="mira-to" className="text-xs text-muted flex items-center gap-1.5 mb-1.5"><Calendar size={12} /> Period To</label>
+            <input id="mira-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} className="input" />
           </div>
           <div className="flex items-end">
-            <button className="btn-ghost w-full"><Filter size={14} /> Apply Filter</button>
+            <button className="btn-ghost w-full print:hidden" onClick={() => setAppliedRange({ from, to })}><Filter size={14} /> Apply Filter</button>
           </div>
         </div>
       </div>
@@ -51,10 +65,10 @@ export default function MiraPage() {
       <div className="glass rounded-2xl overflow-hidden">
         <div className="px-5 py-4 border-b border-ink-600 flex items-center justify-between">
           <div>
-            <div className="text-white font-semibold">{COMPANY.legalName}</div>
-            <div className="text-xs text-muted">Reg: {COMPANY.registration} · Period {from} to {to}</div>
+            <div className="text-white font-semibold">{company.legalName}</div>
+            <div className="text-xs text-muted">Reg: {company.registration} · Period {appliedRange.from} to {appliedRange.to}</div>
           </div>
-          <div className="text-xs text-muted">{MIRA_ROWS.length} records</div>
+          <div className="text-xs text-muted">{rows.length} records</div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -72,7 +86,7 @@ export default function MiraPage() {
               </tr>
             </thead>
             <tbody>
-              {MIRA_ROWS.map((r, i) => (
+              {rows.map((r, i) => (
                 <tr key={r.id} className="table-row">
                   <td className="px-4 py-3 text-muted">{i + 1}</td>
                   <td className="px-4 py-3 text-muted text-xs">{new Date(r.date).toLocaleDateString('en-GB')}</td>

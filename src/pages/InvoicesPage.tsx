@@ -1,26 +1,60 @@
-import { useState } from 'react';
-import { INVOICES, COMPANY, BANK_DETAILS } from '../data/seed';
+import { useState, type FormEvent } from 'react';
+import { BANK_DETAILS } from '../data/seed';
 import { useApp } from '../store/AppContext';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
-import { Receipt, Download, Eye, Plus, Printer } from 'lucide-react';
+import { Download, Eye, Plus, Printer, X } from 'lucide-react';
 import type { Invoice } from '../types';
+import { downloadCsv } from '../utils/downloadCsv';
 
 const statusVariant: Record<string, 'win' | 'warm' | 'hot' | 'cold' | 'muted'> = {
   Paid: 'win', Partial: 'warm', Pending: 'cold', Overdue: 'hot', Archived: 'muted',
 };
 
 export default function InvoicesPage() {
-  const { taxRates } = useApp();
+  const { taxRates, invoices, setInvoices, clients, company } = useApp();
   const [tab, setTab] = useState<'all' | 'Pending' | 'Paid' | 'Overdue' | 'Archived'>('all');
   const [selected, setSelected] = useState<Invoice | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
-  const filtered = tab === 'all' ? INVOICES : INVOICES.filter((i) => i.status === tab);
+  const filtered = tab === 'all' ? invoices : invoices.filter((i) => i.status === tab);
 
   const computeTotals = (inv: Invoice) => {
     const subtotal = inv.items.reduce((s, it) => s + it.unitPrice * it.qty, 0);
     const vat = inv.items.reduce((s, it) => s + it.unitPrice * it.qty * (it.vatRate / 100), 0);
     return { subtotal, vat, total: subtotal + vat };
+  };
+
+  const createInvoice = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const client = clients.find((item) => item.id === data.get('clientId'));
+    if (!client) return;
+    const amount = Number(data.get('amount'));
+    const issueDate = String(data.get('issueDate'));
+    const invoice: Invoice = {
+      id: `inv-${Date.now()}`,
+      number: `INV-${String(invoices.length + 1).padStart(3, '0')}-${new Date(issueDate).getFullYear()}`,
+      clientId: client.id,
+      clientName: client.name,
+      insurer: client.insurer,
+      policyNo: `${client.productCode}-${client.id}-${new Date(issueDate).getFullYear()}`,
+      issueDate,
+      dueDate: String(data.get('dueDate')),
+      status: 'Pending',
+      items: [{ description: String(data.get('description')).trim(), qty: 1, unitPrice: amount, vatRate: taxRates.find((rate) => rate.active && rate.category === 'Standard')?.rate ?? 0 }],
+      installments: [{ id: `inst-${Date.now()}`, label: 'Single Payment', due: String(data.get('dueDate')), amount, paid: false }],
+      currency: 'MVR',
+    };
+    setInvoices([invoice, ...invoices]);
+    setSelected(invoice);
+    setTab('all');
+    setCreateOpen(false);
+  };
+
+  const downloadInvoice = (invoice: Invoice) => {
+    const totals = computeTotals(invoice);
+    downloadCsv(`${invoice.number}.csv`, ['Invoice #', 'Client', 'Insurer', 'Policy', 'Issue Date', 'Due Date', 'Status', 'Subtotal', 'VAT', 'Total'], [[invoice.number, invoice.clientName, invoice.insurer, invoice.policyNo, invoice.issueDate, invoice.dueDate, invoice.status, totals.subtotal, totals.vat, totals.total]]);
   };
 
   return (
@@ -39,13 +73,13 @@ export default function InvoicesPage() {
             </button>
           ))}
         </div>
-        <button className="btn-primary !py-1.5"><Plus size={14} /> New Invoice</button>
+        <button className="btn-primary !py-1.5" onClick={() => setCreateOpen(true)}><Plus size={14} /> New Invoice</button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Stat label="Outstanding" value={`MVR ${INVOICES.filter((i) => i.status !== 'Paid').reduce((s, i) => s + computeTotals(i).total, 0).toLocaleString()}`} variant="warm" />
-        <Stat label="Overdue" value={`MVR ${INVOICES.filter((i) => i.status === 'Overdue').reduce((s, i) => s + computeTotals(i).total, 0).toLocaleString()}`} variant="hot" />
-        <Stat label="Collected" value={`MVR ${INVOICES.filter((i) => i.status === 'Paid').reduce((s, i) => s + computeTotals(i).total, 0).toLocaleString()}`} variant="win" />
+        <Stat label="Outstanding" value={`MVR ${invoices.filter((i) => i.status !== 'Paid').reduce((s, i) => s + computeTotals(i).total, 0).toLocaleString()}`} variant="warm" />
+        <Stat label="Overdue" value={`MVR ${invoices.filter((i) => i.status === 'Overdue').reduce((s, i) => s + computeTotals(i).total, 0).toLocaleString()}`} variant="hot" />
+        <Stat label="Collected" value={`MVR ${invoices.filter((i) => i.status === 'Paid').reduce((s, i) => s + computeTotals(i).total, 0).toLocaleString()}`} variant="win" />
         <Stat label="Active GST" value={`${taxRates.find((t) => t.name === 'Standard GST')?.rate}%`} variant="brand" />
       </div>
 
@@ -78,7 +112,7 @@ export default function InvoicesPage() {
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-1">
                       <button onClick={() => setSelected(inv)} className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white" title="View"><Eye size={14} /></button>
-                      <button className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white" title="Download"><Download size={14} /></button>
+                      <button onClick={() => downloadInvoice(inv)} className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white" title="Download CSV" aria-label={`Download ${inv.number}`}><Download size={14} /></button>
                     </div>
                   </td>
                 </tr>
@@ -96,8 +130,8 @@ export default function InvoicesPage() {
         size="lg"
         footer={
           <>
-            <button className="btn-ghost"><Printer size={14} /> Print</button>
-            <button className="btn-primary"><Download size={14} /> Download PDF</button>
+            <button className="btn-ghost" onClick={() => window.print()}><Printer size={14} /> Print</button>
+            <button className="btn-primary" onClick={() => selected && downloadInvoice(selected)}><Download size={14} /> Download CSV</button>
           </>
         }
       >
@@ -105,10 +139,10 @@ export default function InvoicesPage() {
           <div className="space-y-5">
             <div className="flex flex-wrap justify-between gap-4 p-4 bg-ink-900/50 rounded-xl border border-ink-600">
               <div>
-                <div className="text-white font-bold">{COMPANY.legalName}</div>
-                <div className="text-xs text-muted mt-1">{COMPANY.address}</div>
-                <div className="text-xs text-muted">{COMPANY.email} · {COMPANY.phone}</div>
-                <div className="text-xs text-muted mt-1">Reg: {COMPANY.registration}</div>
+                <div className="text-white font-bold">{company.legalName}</div>
+                <div className="text-xs text-muted mt-1">{company.address}</div>
+                <div className="text-xs text-muted">{company.email} · {company.phone}</div>
+                <div className="text-xs text-muted mt-1">Reg: {company.registration}</div>
               </div>
               <div className="text-right">
                 <div className="text-[10px] uppercase tracking-wider text-muted">Bill To</div>
@@ -183,8 +217,21 @@ export default function InvoicesPage() {
           </div>
         )}
       </Modal>
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="New Invoice" subtitle="Create an invoice for a client." footer={<><button type="button" className="btn-ghost" onClick={() => setCreateOpen(false)}><X size={14} /> Cancel</button><button type="submit" form="new-invoice-form" className="btn-primary"><Plus size={14} /> Create Invoice</button></>}>
+        <form id="new-invoice-form" onSubmit={createInvoice} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Client"><select className="input" name="clientId" required>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></Field>
+          <Field label="Description"><input className="input" name="description" required /></Field>
+          <Field label="Amount (MVR)"><input className="input" type="number" name="amount" min="0.01" step="0.01" required /></Field>
+          <Field label="Issue date"><input className="input" type="date" name="issueDate" defaultValue={new Date().toISOString().slice(0, 10)} required /></Field>
+          <Field label="Due date"><input className="input" type="date" name="dueDate" required /></Field>
+        </form>
+      </Modal>
     </div>
   );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="block"><div className="text-xs text-muted mb-1.5">{label}</div>{children}</label>;
 }
 
 function Stat({ label, value, variant }: { label: string; value: string; variant: 'warm' | 'hot' | 'win' | 'brand' }) {

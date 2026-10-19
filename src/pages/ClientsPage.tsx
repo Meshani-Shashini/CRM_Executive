@@ -1,28 +1,82 @@
-import { useState } from 'react';
-import { CLIENTS, ACTIVITIES, PRODUCT_CODES, USERS } from '../data/seed';
+import { useState, type FormEvent } from 'react';
+import { INSURERS, PRODUCT_CODES } from '../data/seed';
 import Badge from '../components/ui/Badge';
+import Modal from '../components/ui/Modal';
+import { useApp } from '../store/AppContext';
 import {
   Phone, Mail, MapPin, Calendar, FileText, MessageSquare, Upload,
-  Building2, Briefcase, ShieldCheck, Plus, Search,
+  Building2, Briefcase, ShieldCheck, Plus, Search, X,
 } from 'lucide-react';
-import type { Activity } from '../types';
+import type { Activity, Client } from '../types';
 
 const activityIcon = {
   call: Phone, meeting: Calendar, email: Mail, upload: Upload, note: MessageSquare, quote: FileText,
 };
 
 export default function ClientsPage() {
-  const [selectedId, setSelectedId] = useState(CLIENTS[0].id);
+  const { clients, setClients, activities, setActivities, user, users } = useApp();
+  const [selectedId, setSelectedId] = useState(clients[0]?.id ?? '');
   const [query, setQuery] = useState('');
-  const selected = CLIENTS.find((c) => c.id === selectedId)!;
-  const activities = ACTIVITIES.filter((a) => a.clientId === selectedId);
+  const [clientOpen, setClientOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [quoteOpen, setQuoteOpen] = useState(false);
+  const selected = clients.find((c) => c.id === selectedId) ?? clients[0];
+  const clientActivities = activities.filter((a) => a.clientId === selected?.id);
   const productName = (code: string) => PRODUCT_CODES.find((p) => p.code === code)?.name ?? code;
-  const owner = USERS.find((u) => u.id === selected.ownerId);
+  const owner = selected && users.find((u) => u.id === selected.ownerId);
 
-  const filtered = CLIENTS.filter((c) =>
+  const filtered = clients.filter((c) =>
     c.name.toLowerCase().includes(query.toLowerCase()) ||
     c.tin.toLowerCase().includes(query.toLowerCase())
   );
+
+  const createClient = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const productCode = String(data.get('productCode'));
+    const product = PRODUCT_CODES.find((item) => item.code === productCode);
+    const client: Client = {
+      id: `C-${Date.now()}`,
+      name: String(data.get('name')).trim(),
+      tin: String(data.get('tin')).trim(),
+      country: String(data.get('country')).trim(),
+      phone: String(data.get('phone')).trim(),
+      email: String(data.get('email')).trim(),
+      address: String(data.get('address')).trim(),
+      sumInsured: Number(data.get('sumInsured') || 0),
+      premium: Number(data.get('premium') || 0),
+      expiry: String(data.get('expiry')),
+      insurer: String(data.get('insurer')).trim(),
+      productCode,
+      class: product?.category ?? 'Miscellaneous',
+      ownerId: user.id,
+      tags: [],
+    };
+    setClients([client, ...clients]);
+    setSelectedId(client.id);
+    setClientOpen(false);
+  };
+
+  const addActivity = (event: FormEvent<HTMLFormElement>, type: Activity['type']) => {
+    event.preventDefault();
+    if (!selected) return;
+    const data = new FormData(event.currentTarget);
+    const description = String(data.get('description')).trim();
+    const activity: Activity = {
+      id: `a-${Date.now()}`,
+      clientId: selected.id,
+      type,
+      title: String(data.get('title')).trim(),
+      description: type === 'quote'
+        ? `Insurer: ${String(data.get('insurer'))}; premium MVR ${Number(data.get('premium')).toLocaleString()}. ${description}`
+        : description,
+      date: new Date().toLocaleString('sv-SE').slice(0, 16),
+      userId: user.id,
+    };
+    setActivities([activity, ...activities]);
+    if (type === 'quote') setQuoteOpen(false);
+    else setActivityOpen(false);
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4 h-[calc(100vh-8rem)]">
@@ -38,7 +92,7 @@ export default function ClientsPage() {
               className="bg-transparent text-sm text-white outline-none flex-1 placeholder:text-muted/70"
             />
           </div>
-          <button className="btn-primary w-full mt-2 !py-2"><Plus size={14} /> Add Client</button>
+          <button className="btn-primary w-full mt-2 !py-2" onClick={() => setClientOpen(true)}><Plus size={14} /> Add Client</button>
         </div>
         <div className="flex-1 overflow-y-auto">
           {filtered.map((c) => (
@@ -72,7 +126,7 @@ export default function ClientsPage() {
       </div>
 
       {/* Detail */}
-      <div className="flex flex-col gap-4 overflow-y-auto">
+      {selected ? <div className="flex flex-col gap-4 overflow-y-auto">
         {/* Header */}
         <div className="glass rounded-2xl p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -91,8 +145,8 @@ export default function ClientsPage() {
               </div>
             </div>
             <div className="flex gap-2">
-              <button className="btn-ghost !py-2"><FileText size={14} /> New Quote</button>
-              <button className="btn-primary !py-2"><Plus size={14} /> Log Activity</button>
+              <button className="btn-ghost !py-2" onClick={() => setQuoteOpen(true)}><FileText size={14} /> New Quote</button>
+              <button className="btn-primary !py-2" onClick={() => setActivityOpen(true)}><Plus size={14} /> Log Activity</button>
             </div>
           </div>
         </div>
@@ -127,7 +181,7 @@ export default function ClientsPage() {
           <div className="glass rounded-2xl p-5 flex flex-col">
             <h3 className="text-white font-semibold mb-4 flex items-center gap-2"><Calendar size={16} /> Activity Timeline</h3>
             <div className="space-y-3 flex-1 overflow-y-auto">
-              {activities.map((a: Activity, i) => {
+              {clientActivities.map((a: Activity, i) => {
                 const Icon = activityIcon[a.type];
                 return (
                   <div key={a.id} className="relative pl-8">
@@ -147,18 +201,53 @@ export default function ClientsPage() {
                   </div>
                 );
               })}
-              {activities.length === 0 && (
+              {clientActivities.length === 0 && (
                 <div className="text-center text-muted text-sm py-8">No activity yet</div>
               )}
             </div>
           </div>
         </div>
-      </div>
+      </div> : <div className="glass rounded-2xl flex items-center justify-center text-muted">No clients found.</div>}
+
+            <Modal open={clientOpen} onClose={() => setClientOpen(false)} title="Add Client" subtitle="Create a client record." footer={<><button type="button" className="btn-ghost" onClick={() => setClientOpen(false)}><X size={14} /> Cancel</button><button type="submit" form="new-client-form" className="btn-primary"><Plus size={14} /> Add Client</button></>}>
+              <form id="new-client-form" onSubmit={createClient} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="Client name"><input className="input" name="name" required /></Field>
+                <Field label="TIN"><input className="input" name="tin" required /></Field>
+                <Field label="Country"><input className="input" name="country" defaultValue="Maldives" required /></Field>
+                <Field label="Phone"><input className="input" name="phone" type="tel" /></Field>
+                <Field label="Email"><input className="input" name="email" type="email" /></Field>
+                <Field label="Address"><input className="input" name="address" /></Field>
+                <Field label="Product"><select className="input" name="productCode">{PRODUCT_CODES.map((product) => <option key={product.code} value={product.code}>{product.code} · {product.name}</option>)}</select></Field>
+                <Field label="Insurer"><select className="input" name="insurer">{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
+                <Field label="Expiry"><input className="input" name="expiry" type="date" required /></Field>
+                <Field label="Sum Insured (MVR)"><input className="input" name="sumInsured" type="number" min="0" defaultValue="0" /></Field>
+                <Field label="Premium (MVR)"><input className="input" name="premium" type="number" min="0" defaultValue="0" /></Field>
+              </form>
+            </Modal>
+            <Modal open={activityOpen} onClose={() => setActivityOpen(false)} title="Log Activity" subtitle={selected?.name} footer={<><button type="button" className="btn-ghost" onClick={() => setActivityOpen(false)}>Cancel</button><button type="submit" form="new-activity-form" className="btn-primary">Save Activity</button></>}>
+              <form id="new-activity-form" onSubmit={(event) => addActivity(event, (new FormData(event.currentTarget).get('type') as Activity['type']))} className="space-y-3">
+                <Field label="Activity type"><select className="input" name="type"><option value="call">Call</option><option value="meeting">Meeting</option><option value="email">Email</option><option value="note">Note</option><option value="upload">Upload</option></select></Field>
+                <Field label="Title"><input className="input" name="title" required /></Field>
+                <Field label="Details"><textarea className="input min-h-24" name="description" required /></Field>
+              </form>
+            </Modal>
+            <Modal open={quoteOpen} onClose={() => setQuoteOpen(false)} title="Create Quote" subtitle={`Prepare a quote for ${selected?.name ?? ''}.`} footer={<><button type="button" className="btn-ghost" onClick={() => setQuoteOpen(false)}>Cancel</button><button type="submit" form="new-quote-form" className="btn-primary">Save Quote</button></>}>
+              <form id="new-quote-form" onSubmit={(event) => addActivity(event, 'quote')} className="space-y-3">
+                <Field label="Product"><select className="input" name="title">{PRODUCT_CODES.map((product) => <option key={product.code} value={`${product.name} quote`}>{product.code} · {product.name}</option>)}</select></Field>
+                <Field label="Insurer"><select className="input" name="insurer">{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
+                <Field label="Premium (MVR)"><input className="input" name="premium" type="number" min="0" step="0.01" required /></Field>
+                <Field label="Coverage / notes"><textarea className="input min-h-24" name="description" placeholder="Enter coverage and terms" required /></Field>
+              </form>
+            </Modal>
     </div>
   );
 }
 
-function InfoRow({ icon: Icon, label, value }: { icon: typeof Phone; label: string; value: string }) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="block"><div className="text-xs text-muted mb-1.5">{label}</div>{children}</label>;
+}
+
+function InfoRow({ icon: Icon, label, value }: { icon:  typeof Phone; label: string; value: string }) {
   return (
     <div className="flex items-start gap-3">
       <Icon size={15} className="text-muted mt-0.5 shrink-0" />

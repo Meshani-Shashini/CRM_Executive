@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AppProvider } from './store/AppContext';
 import Sidebar, { type NavKey } from './components/Sidebar';
 import Topbar from './components/Topbar';
@@ -42,6 +42,13 @@ const accessMap: Record<NavKey, Role[]> = {
   mira: ['admin', 'finance'],
 };
 
+function pageFromHash(hash: string): NavKey | null {
+  const candidate = hash.replace(/^#\/?/, '');
+  return Object.prototype.hasOwnProperty.call(accessMap, candidate)
+    ? candidate as NavKey
+    : null;
+}
+
 const placeholders: Partial<Record<NavKey, { title: string; subtitle: string }>> = {
   plans: { title: 'My Plans', subtitle: 'Sales targets and personal plan tracking.' },
   reports: { title: 'Reports', subtitle: 'Custom brokerage performance reports.' },
@@ -59,9 +66,30 @@ const placeholders: Partial<Record<NavKey, { title: string; subtitle: string }>>
 };
 
 function Shell() {
-  const { hasAccess } = useApp();
-  const [page, setPage] = useState<NavKey>('dashboard');
+  const { hasAccess, storageError } = useApp();
+  const [page, setPage] = useState<NavKey>(() => pageFromHash(window.location.hash) ?? 'dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const syncPageFromHash = () => {
+      const nextPage = pageFromHash(window.location.hash);
+      if (nextPage) {
+        setPage(nextPage);
+        return;
+      }
+
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search}#/dashboard`,
+      );
+      setPage('dashboard');
+    };
+
+    syncPageFromHash();
+    window.addEventListener('hashchange', syncPageFromHash);
+    return () => window.removeEventListener('hashchange', syncPageFromHash);
+  }, []);
 
   const renderPage = () => {
     if (!hasAccess(accessMap[page])) {
@@ -92,9 +120,10 @@ function Shell() {
 
   return (
     <div className="flex h-screen bg-ink-950 overflow-hidden">
-      <Sidebar active={page} onNavigate={setPage} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar active={page} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Topbar page={page} onMenu={() => setSidebarOpen(true)} />
+        {storageError && <div role="alert" className="border-b border-hot/30 bg-hot/10 px-4 py-2 text-sm text-hot">{storageError}</div>}
         <main className="flex-1 overflow-y-auto p-4 lg:p-6 animate-fadeIn">
           {renderPage()}
         </main>
