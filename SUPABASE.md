@@ -32,8 +32,8 @@ The browser uses Supabase Auth and the public anon key. CRM records are stored i
    ```
 
    Supabase supplies `SUPABASE_URL` and `SUPABASE_ANON_KEY` to the function runtime. Never use the service-role key as a frontend variable.
-6. For normal authentication, set `VITE_ADMIN_LOGIN_EMAIL` in the ignored `.env` or `.env.local` file to the valid email address of the administrator account. The login form accepts `admin` as an alias for this email; Supabase still verifies the password.
-7. For a **local-only demo**, the ignored `.env.local` may set `VITE_AUTH_BYPASS=true`, `VITE_DEMO_ADMIN_USERNAME=admin`, and `VITE_DEMO_ADMIN_PASSWORD` to a temporary password. This bypass is enabled only by Vite's development mode, skips remote persistence, and disables sign-up. `VITE_*` values are included in browser code, so use only disposable demo credentials and never enable this for a production build. In demo mode, Supabase URL/key configuration may be omitted.
+6. In a Vercel deployment, set `DEMO_ADMIN_USERNAME` and `DEMO_ADMIN_PASSWORD` as server-side environment variables for the `api/demo-login` function. The login form accepts `admin` and validates the password server-side; neither credential needs a `VITE_*` variable. This mock session grants access to the demo UI only and does not load or persist CRM data. Do not use it for production data or sensitive workflows.
+7. For a **local-only demo**, the ignored `.env.local` may set `VITE_AUTH_BYPASS=true`, `VITE_DEMO_ADMIN_USERNAME=admin`, and `VITE_DEMO_ADMIN_PASSWORD` to a temporary password. This bypass is enabled only by Vite's development mode, skips remote persistence, and disables sign-up. `VITE_*` values are included in browser code, so use only disposable credentials and never enable the bypass for a production build. In demo mode, Supabase URL/key configuration may be omitted.
 8. Start the frontend with `npm run dev`. Without the local demo settings, normal Supabase authentication is used.
 
 ## Data and access behavior

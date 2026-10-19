@@ -53,7 +53,7 @@ export default function LoginPage() {
             ? 'Use the temporary local demo credentials to continue.'
             : creatingAccount
               ? 'New registrations receive Client access. A System Admin can assign staff roles.'
-              : 'Sign in with your registered email and password.'}
+              : 'Sign in with your registered email or use the temporary demo username.'}
         </p>
         {authError && <p role="alert" className="mb-4 rounded-lg border border-hot/30 bg-hot/10 px-3 py-2 text-sm text-hot">Authentication service unavailable: {authError}</p>}
         <form onSubmit={submit} className="space-y-4">

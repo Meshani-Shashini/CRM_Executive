@@ -64,7 +64,7 @@ interface TenantRecord {
 const AppContext = createContext<AppState | null>(null);
 const GUEST_USER: User = { id: '', name: 'Guest', email: '', role: 'client', title: '' };
 const DEMO_USER: User = {
-  id: 'local-development-admin',
+  id: 'vercel-demo-admin',
   name: 'Demo Administrator',
   email: 'admin',
   role: 'admin',
@@ -179,11 +179,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
     const login = email.trim().toLowerCase();
-    const authEmail = login === 'admin' ? import.meta.env.VITE_ADMIN_LOGIN_EMAIL?.trim() : login;
-    if (!authEmail) {
-      throw new Error('Set VITE_ADMIN_LOGIN_EMAIL to the valid Supabase email for the admin login alias.');
+    if (login === 'admin') {
+      const response = await fetch('/api/demo-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: login, password }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) {
+        throw new Error(result.error ?? 'Demo login failed.');
+      }
+      setUser(DEMO_USER);
+      setAuthError(null);
+      setDataReady(true);
+      return;
     }
-    const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email: login, password });
     if (error) throw new Error(error.message);
     if (!data.user) throw new Error('Supabase did not return a user for this sign-in.');
     const profile = await loadProfile(data.user.id);
@@ -212,7 +223,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [loadProfile]);
 
   const signOut = useCallback(async () => {
-    if (!AUTH_BYPASS) {
+    if (!AUTH_BYPASS && user.id !== DEMO_USER.id) {
       const { error } = await supabase.auth.signOut();
       if (error) throw new Error(error.message);
     }
@@ -233,7 +244,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setStageHistory([]);
     setAuthError(null);
     setPersistenceError(null);
-  }, []);
+  }, [user.id]);
 
   useEffect(() => {
     if (AUTH_BYPASS || authLoading || !user.id || user.id === DEMO_USER.id) return;
@@ -346,6 +357,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const createUser = useCallback(async (newUser: {
     name: string; email: string; password: string; role: Role; title: string;
   }) => {
+    if (user.id === DEMO_USER.id) {
+      throw new Error('User administration is unavailable in the local demo session.');
+    }
     const { data, error } = await supabase.functions.invoke('admin-create-user', {
       body: { ...newUser, role: ROLE_TO_PROFILE[newUser.role] },
     });
@@ -354,7 +368,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const profile = appUser(data.user as ProfileRecord);
     setUsers((current) => [...current, profile]);
     return profile;
-  }, []);
+  }, [user.id]);
 
   const hasAccess = useCallback((allowed: Role[]) => Boolean(user.id) && allowed.includes(user.role), [user.id, user.role]);
   const value = useMemo(() => ({
