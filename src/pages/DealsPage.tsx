@@ -5,7 +5,7 @@ import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
 import { Plus, Filter, X } from 'lucide-react';
 import type { Deal } from '../types';
-import { formatAmount, toMvr, type Currency } from '../utils/currency';
+import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 
 const stageColors: Record<string, 'cold' | 'warm' | 'win' | 'hot'> = {
   'Lead Identified': 'cold',
@@ -156,7 +156,7 @@ export default function DealsPage() {
           <Field label="Product"><select className="input" name="product" required defaultValue=""><option value="">Select product</option>{PRODUCT_CODES.map((product) => <option key={product.code}>{product.name}</option>)}</select></Field>
           <Field label="Insurer"><select className="input" name="insurer" required defaultValue=""><option value="">Select insurer</option>{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
           <Field label="Stage"><select className="input" name="stage" required defaultValue=""><option value="">Select stage</option>{availableStages.map((stage) => <option key={stage.id}>{stage.name}</option>)}</select></Field>
-          <Field label="Currency"><select className="input" name="currency" required value={dealCurrency} onChange={(event) => { setDealCurrency(event.target.value as Currency | ''); setDealAmount(''); setExchangeRate(''); }}><option value="">Select currency</option><option value="MVR">MVR</option><option value="USD">USD</option></select></Field>
+          <Field label="Currency"><select className="input" name="currency" required value={dealCurrency} onChange={(event) => { const currency = event.target.value as Currency | ''; setDealCurrency(currency); setDealAmount(''); setExchangeRate(currency === 'USD' ? String(DEFAULT_USD_TO_MVR_RATE) : ''); }}><option value="">Select currency</option><option value="MVR">MVR</option><option value="USD">USD</option></select></Field>
           <Field label={`Deal Value${dealCurrency ? ` (${dealCurrency})` : ''}`}><input className="input" name="value" type="number" min="0" step="0.01" required value={dealAmount} onChange={(event) => setDealAmount(event.target.value)} /></Field>
           {dealCurrency === 'USD' && <Field label="Exchange rate (1 USD = MVR)"><input className="input" name="exchangeRate" type="number" min="0.000001" step="any" required value={exchangeRate} onChange={(event) => { setExchangeRate(event.target.value); setCreateError(''); }} /></Field>}
           {dealCurrency === 'USD' && Number(dealAmount) > 0 && Number(exchangeRate) > 0 && <p className="sm:col-span-2 text-sm text-muted">Equivalent: {formatAmount(toMvr(Number(dealAmount), 'USD', Number(exchangeRate)), 'MVR')}</p>}
