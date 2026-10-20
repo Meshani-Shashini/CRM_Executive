@@ -24,6 +24,87 @@ const legacyStageNames: Record<string, string> = {
   'Internal Slip': 'Negotiation & Legal (MIRA Compliance)',
 };
 
+interface PipelineTemplateStage {
+  name: string;
+  winProbabilityPct: number;
+  stagnationDaysThreshold: number;
+}
+
+interface PipelineTemplate {
+  code: string;
+  name: string;
+  stages: PipelineTemplateStage[];
+}
+
+const PIPELINE_TEMPLATES: Record<string, PipelineTemplate> = {
+  commercialDefault: {
+    code: 'COMMERCIAL',
+    name: 'Commercial Brokerage',
+    stages: [
+      { name: 'Fact-Finding & Risk Survey', winProbabilityPct: 20, stagnationDaysThreshold: 30 },
+      { name: 'Market Placement / Tender', winProbabilityPct: 40, stagnationDaysThreshold: 30 },
+      { name: 'Quote Comparison Presented', winProbabilityPct: 60, stagnationDaysThreshold: 14 },
+      { name: 'Underwriter Negotiation', winProbabilityPct: 80, stagnationDaysThreshold: 14 },
+      { name: 'Policy Bound / Won', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
+      { name: 'Lost / Declined', winProbabilityPct: 0, stagnationDaysThreshold: 0 },
+    ],
+  },
+  commercialLargeAccounts: {
+    code: 'COMMERCIAL-LARGE',
+    name: 'Commercial Property & Marine (Large Accounts)',
+    stages: [
+      { name: 'Risk Survey', winProbabilityPct: 20, stagnationDaysThreshold: 30 },
+      { name: 'Underwriter Tender', winProbabilityPct: 40, stagnationDaysThreshold: 30 },
+      { name: 'Quote Comparison', winProbabilityPct: 60, stagnationDaysThreshold: 14 },
+      { name: 'Negotiation', winProbabilityPct: 80, stagnationDaysThreshold: 14 },
+      { name: 'Bound', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
+    ],
+  },
+  retailPersonal: {
+    code: 'RETAIL',
+    name: 'Retail & Personal Lines',
+    stages: [
+      { name: 'Inbound Lead', winProbabilityPct: 20, stagnationDaysThreshold: 2 },
+      { name: 'Automated Quote Issued', winProbabilityPct: 45, stagnationDaysThreshold: 2 },
+      { name: 'Payment Collection', winProbabilityPct: 75, stagnationDaysThreshold: 7 },
+      { name: 'Policy Issued', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
+    ],
+  },
+  annualRenewals: {
+    code: 'RENEWALS',
+    name: 'Annual Renewals',
+    stages: [
+      { name: 'Renewal Audit (90d out)', winProbabilityPct: 20, stagnationDaysThreshold: 14 },
+      { name: 'Expiring Loss Run Review', winProbabilityPct: 40, stagnationDaysThreshold: 14 },
+      { name: 'Market Re-tender', winProbabilityPct: 60, stagnationDaysThreshold: 30 },
+      { name: 'Client Renewal Sign-off', winProbabilityPct: 80, stagnationDaysThreshold: 14 },
+      { name: 'Renewed', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
+    ],
+  },
+  claims: {
+    code: 'CLAIMS',
+    name: 'Claims',
+    stages: [
+      { name: 'Claim Notified', winProbabilityPct: 20, stagnationDaysThreshold: 7 },
+      { name: 'Surveyor Assigned', winProbabilityPct: 40, stagnationDaysThreshold: 14 },
+      { name: 'Adjuster Assessment', winProbabilityPct: 60, stagnationDaysThreshold: 30 },
+      { name: 'Underwriter Settlement', winProbabilityPct: 80, stagnationDaysThreshold: 30 },
+      { name: 'Cheque Dispatched', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
+    ],
+  },
+};
+
+function availableTemplateKey(pipelines: Pipeline[]) {
+  return Object.entries(PIPELINE_TEMPLATES)
+    .find(([, template]) => !pipelines.some((pipeline) => pipeline.code.toLowerCase() === template.code.toLowerCase()))?.[0]
+    ?? 'commercialDefault';
+}
+
+function isLostStage(name: string) {
+  const normalized = name.toLowerCase();
+  return normalized.includes('lost') || normalized.includes('declined');
+}
+
 type HealthState = 'Healthy' | 'At Risk' | 'Rotting';
 type MomentumState = 'Surging' | 'Steady' | 'Stalling' | 'Rotting';
 type IntentTier = NonNullable<Deal['intentTier']>;
@@ -103,6 +184,10 @@ export default function PipelinesPage() {
   } = useApp();
   const [pipelineId, setPipelineId] = useState(pipelines.find((pipeline) => pipeline.isActive)?.id ?? '');
   const [pipelineModalOpen, setPipelineModalOpen] = useState(false);
+  const [pipelineTemplateKey, setPipelineTemplateKey] = useState(() => availableTemplateKey(pipelines));
+  const [pipelineName, setPipelineName] = useState(() => PIPELINE_TEMPLATES[availableTemplateKey(pipelines)].name);
+  const [pipelineCode, setPipelineCode] = useState(() => PIPELINE_TEMPLATES[availableTemplateKey(pipelines)].code);
+  const [pipelineError, setPipelineError] = useState('');
   const [configOpen, setConfigOpen] = useState(false);
   const [editingStage, setEditingStage] = useState<PipelineStage | null>(null);
   const [stageModalOpen, setStageModalOpen] = useState(false);
@@ -142,7 +227,7 @@ export default function PipelinesPage() {
     if (!deal) return;
     const current = stageForDeal(deal);
     if (!current || current.id === target.id) return;
-    if (target.name.toLowerCase().includes('proposal') || target.name === 'Closed-Lost') {
+    if (target.name.toLowerCase().includes('proposal') || isLostStage(target.name)) {
       setPendingMove({ dealId, stage: target });
       setMoveModalOpen(true);
       return;
@@ -192,7 +277,7 @@ export default function PipelinesPage() {
         stage: to.name,
         probability: to.winProbabilityPct,
         weighted: Math.round(deal.value * to.winProbabilityPct) / 100,
-        ...(to.name === 'Closed-Lost' ? { lossReason } : {}),
+        ...(isLostStage(to.name) ? { lossReason } : {}),
         ...(to.name.includes('Proposal') ? { proposalSummary: details } : {}),
       }
       : deal));
@@ -208,7 +293,7 @@ export default function PipelinesPage() {
     const current = stageForDeal(deal);
     if (!current) return;
     const data = new FormData(event.currentTarget);
-    const isLost = pendingMove.stage.name === 'Closed-Lost';
+    const isLost = isLostStage(pendingMove.stage.name);
     const details = isLost
       ? String(data.get('notes') ?? '').trim()
       : String(data.get('proposalSummary') ?? '').trim();
@@ -247,17 +332,56 @@ export default function PipelinesPage() {
 
   const savePipeline = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
+    const template = PIPELINE_TEMPLATES[pipelineTemplateKey] ?? PIPELINE_TEMPLATES.commercialDefault;
+    const name = pipelineName.trim();
+    const code = pipelineCode.trim().toUpperCase();
+    if (!name || !code) {
+      setPipelineError('Enter a pipeline name and code.');
+      return;
+    }
+    if (pipelines.some((pipeline) => pipeline.code.toLowerCase() === code.toLowerCase())) {
+      setPipelineError('A pipeline with this code already exists. Choose a unique code.');
+      return;
+    }
     const pipeline: Pipeline = {
       id: makeId(),
       tenantId: TENANT_ID,
-      name: String(data.get('name')).trim(),
-      code: String(data.get('code')).trim().toUpperCase(),
+      name,
+      code,
       isActive: true,
     };
     setPipelines((current) => [...current, pipeline]);
+    const newStages: PipelineStage[] = template.stages.map((stage, index) => ({
+      id: makeId(),
+      pipelineId: pipeline.id,
+      name: stage.name,
+      stageOrder: index + 1,
+      winProbabilityPct: stage.winProbabilityPct,
+      stagnationDaysThreshold: stage.stagnationDaysThreshold,
+    }));
+    setPipelineStages((current) => [...current, ...newStages]);
     setPipelineId(pipeline.id);
+    setPipelineError('');
     setPipelineModalOpen(false);
+  };
+
+  const openPipelineModal = () => {
+    const key = availableTemplateKey(pipelines);
+    const template = PIPELINE_TEMPLATES[key];
+    setPipelineTemplateKey(key);
+    setPipelineName(template.name);
+    setPipelineCode(template.code);
+    setPipelineError('');
+    setPipelineModalOpen(true);
+  };
+
+  const changePipelineTemplate = (key: string) => {
+    const template = PIPELINE_TEMPLATES[key];
+    if (!template) return;
+    setPipelineTemplateKey(key);
+    setPipelineName(template.name);
+    setPipelineCode(template.code);
+    setPipelineError('');
   };
 
   const reorderStage = (stage: PipelineStage, direction: -1 | 1) => {
@@ -306,7 +430,7 @@ export default function PipelinesPage() {
       return (!healthFilter || health === healthFilter) && (!intentFilter || intent === intentFilter);
     });
 
-  const moveTitle = pendingMove?.stage.name === 'Closed-Lost'
+  const moveTitle = pendingMove && isLostStage(pendingMove.stage.name)
     ? 'Close deal as lost'
     : 'Proposal readiness';
 
@@ -322,7 +446,7 @@ export default function PipelinesPage() {
             {pipelines.filter((pipeline) => pipeline.isActive).length === 0 && <option value="">No active pipelines</option>}
             {pipelines.filter((pipeline) => pipeline.isActive).map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
           </select>
-          {user.role === 'admin' && <button className="btn-primary" onClick={() => setPipelineModalOpen(true)}><Plus size={15} /> New Pipeline</button>}
+          {user.role === 'admin' && <button className="btn-primary" onClick={openPipelineModal}><Plus size={15} /> New Pipeline</button>}
           {user.role === 'admin' && <button className="btn-ghost" onClick={() => setConfigOpen((open) => !open)}><Settings2 size={15} /> {configOpen ? 'Back to Board' : 'Configure Stages'}</button>}
         </div>
       </div>
@@ -475,16 +599,30 @@ export default function PipelinesPage() {
           <Field label="Stagnation threshold (days)"><input className="input" name="stagnationDaysThreshold" type="number" min="0" step="1" defaultValue={editingStage?.stagnationDaysThreshold ?? ''} required /></Field>
         </form>
       </Modal>
-      <Modal open={pipelineModalOpen} onClose={() => setPipelineModalOpen(false)} title="Create Pipeline" subtitle="Set up a pipeline before adding stages." size="sm" footer={<><button type="button" className="btn-ghost" onClick={() => setPipelineModalOpen(false)}>Cancel</button><button type="submit" form="new-pipeline-form" className="btn-primary"><Plus size={14} /> Create Pipeline</button></>}>
+      <Modal open={pipelineModalOpen} onClose={() => { setPipelineModalOpen(false); setPipelineError(''); }} title="Create Pipeline" subtitle="Choose a business-line template, then adjust its stage configuration." size="sm" footer={<><button type="button" className="btn-ghost" onClick={() => { setPipelineModalOpen(false); setPipelineError(''); }}>Cancel</button><button type="submit" form="new-pipeline-form" className="btn-primary"><Plus size={14} /> Create Pipeline</button></>}>
         <form id="new-pipeline-form" onSubmit={savePipeline} className="space-y-3">
-          <Field label="Pipeline name"><input className="input" name="name" required /></Field>
-          <Field label="Code"><input className="input" name="code" required /></Field>
+          <Field label="Business line template">
+            <select className="input" value={pipelineTemplateKey} onChange={(event) => changePipelineTemplate(event.target.value)}>
+              {Object.entries(PIPELINE_TEMPLATES).map(([key, template]) => <option key={key} value={key}>{template.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Pipeline name"><input className="input" value={pipelineName} onChange={(event) => setPipelineName(event.target.value)} required /></Field>
+          <Field label="Code"><input className="input" value={pipelineCode} onChange={(event) => setPipelineCode(event.target.value)} required /></Field>
+          <div className="rounded-lg border border-ink-600 bg-ink-900/50 p-3">
+            <div className="mb-2 text-xs font-medium text-muted">Stages created from this template</div>
+            <ol className="space-y-1 text-xs text-muted">
+              {PIPELINE_TEMPLATES[pipelineTemplateKey].stages.map((stage, index) => (
+                <li key={stage.name}>{index + 1}. {stage.name} · {stage.winProbabilityPct}%</li>
+              ))}
+            </ol>
+          </div>
+          {pipelineError && <p role="alert" className="text-sm text-hot">{pipelineError}</p>}
         </form>
       </Modal>
 
       <Modal open={moveModalOpen} onClose={() => { setMoveModalOpen(false); setPendingMove(null); }} title={moveTitle} subtitle={pendingMove ? `${deals.find((deal) => deal.id === pendingMove.dealId)?.client} → ${pendingMove.stage.name}` : undefined} size="md" footer={<><button className="btn-ghost" onClick={() => { setMoveModalOpen(false); setPendingMove(null); }}>Cancel</button><button type="submit" form="stage-gate-form" className="btn-primary"><Check size={14} /> Confirm Stage</button></>}>
         <form id="stage-gate-form" onSubmit={submitGatedMove} className="space-y-3">
-          {pendingMove?.stage.name === 'Closed-Lost' ? (
+          {pendingMove && isLostStage(pendingMove.stage.name) ? (
             <>
               <Field label="Loss reason (required)"><select className="input" name="lossReason" required defaultValue=""><option value="" disabled>Select a reason</option>{LOSS_REASONS.map((reason) => <option key={reason}>{reason}</option>)}</select></Field>
               <Field label="Additional notes"><textarea className="input min-h-20" name="notes" /></Field>

@@ -19,7 +19,14 @@ export default function DashboardPage() {
     (total, deal) => total + toMvr(deal.weighted, deal.currency, deal.exchangeRate),
     0,
   );
-  const wonDeals = deals.filter((deal) => deal.stage.toLowerCase() === 'closed-won');
+  const wonDeals = deals.filter((deal) => {
+    const stage = deal.stage.trim().toLowerCase();
+    return stage === 'closed-won'
+      || stage.includes('won')
+      || stage.includes('bound')
+      || stage.includes('renewed')
+      || stage === 'policy issued';
+  });
   const wonValue = wonDeals.reduce(
     (total, deal) => total + toMvr(deal.value, deal.currency, deal.exchangeRate),
     0,

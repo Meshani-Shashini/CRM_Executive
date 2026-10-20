@@ -3,7 +3,7 @@ import { PRODUCT_CODES } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
-import { Columns3, Filter, List, Plus, X } from 'lucide-react';
+import { Columns3, Filter, List, Plus, X, Pencil } from 'lucide-react';
 import type { Client, Lead } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 
@@ -17,9 +17,13 @@ export default function LeadsPage() {
   const [selectedPipelineId, setSelectedPipelineId] = useState('');
   const [view, setView] = useState<'kanban' | 'table'>('kanban');
   const [newLeadOpen, setNewLeadOpen] = useState(false);
+  const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [newOrganizationOpen, setNewOrganizationOpen] = useState(false);
   const [organizationQuery, setOrganizationQuery] = useState('');
   const [personName, setPersonName] = useState('');
+  const [leadTitle, setLeadTitle] = useState('');
+  const [productCode, setProductCode] = useState('');
+  const [closeDate, setCloseDate] = useState('');
   const [ownerId, setOwnerId] = useState('');
   const [leadCurrency, setLeadCurrency] = useState<Currency | ''>('');
   const [leadValue, setLeadValue] = useState('');
@@ -60,8 +64,12 @@ export default function LeadsPage() {
   );
 
   const resetLeadForm = () => {
+    setEditingLead(null);
     setOrganizationQuery('');
     setPersonName('');
+    setLeadTitle('');
+    setProductCode('');
+    setCloseDate('');
     setOwnerId('');
     setLeadCurrency('');
     setLeadValue('');
@@ -74,6 +82,24 @@ export default function LeadsPage() {
 
   const openLeadForm = () => {
     resetLeadForm();
+    setNewLeadOpen(true);
+  };
+
+  const openEditLead = (lead: Lead) => {
+    if (user.role !== 'admin' && user.role !== 'sales') return;
+    setFormError('');
+    setEditingLead(lead);
+    setOrganizationQuery(lead.client);
+    setPersonName(lead.person ?? lead.contact);
+    setLeadTitle(lead.title ?? `${lead.client} lead`);
+    setProductCode(lead.productCode);
+    setCloseDate(lead.closeDate ?? lead.renewalDate);
+    setOwnerId(lead.ownerId);
+    setSelectedPipelineId(lead.pipelineId ?? activePipelines[0]?.id ?? '');
+    setLeadCurrency(lead.currency ?? 'MVR');
+    setLeadValue(String(lead.value ?? lead.premium));
+    setExchangeRate(lead.currency === 'USD' ? String(lead.exchangeRate ?? DEFAULT_USD_TO_MVR_RATE) : '');
+    setVisibility(lead.visibility ?? 'company');
     setNewLeadOpen(true);
   };
 
@@ -113,9 +139,9 @@ export default function LeadsPage() {
 
   const createLead = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (user.role !== 'admin' && user.role !== 'sales') return;
     const data = new FormData(event.currentTarget);
-    const title = String(data.get('title') ?? '').trim();
-    const productCode = String(data.get('productCode') ?? '');
+    const title = leadTitle.trim();
     const product = PRODUCT_CODES.find((item) => item.code === productCode);
     const selectedPersonName = personName.trim();
     const person = users.find((candidate) =>
@@ -125,13 +151,14 @@ export default function LeadsPage() {
     const amount = Number(data.get('value'));
     const rate = leadCurrency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
     const selectedStage = stages[0];
+    const expectedCloseDate = closeDate;
 
     if (!selectedOrganization) {
       setFormError('Choose an existing organization or create it first.');
       return;
     }
-    if (!selectedPersonName || !owner || !product || !selectedPipeline || !selectedStage || !visibility) {
-      setFormError('Enter a sales person, choose an owner and product, select a pipeline with a stage, and complete required fields.');
+    if (!title || !expectedCloseDate || !selectedPersonName || !owner || !product || !selectedPipeline || !selectedStage || !visibility) {
+      setFormError('Enter a title and expected close date, a sales person, choose an owner and product, select a pipeline with a stage, and complete required fields.');
       return;
     }
     if (!leadCurrency || !Number.isFinite(amount) || amount < 0 ||
@@ -140,11 +167,11 @@ export default function LeadsPage() {
       return;
     }
 
-    const closeDate = String(data.get('closeDate'));
     const valueMvr = toMvr(amount, leadCurrency, rate);
     const lead: Lead = {
-      id: `L-${crypto.randomUUID()}`,
-      ...(person ? { personId: person.id } : {}),
+      ...(editingLead ?? {}),
+      id: editingLead?.id ?? `L-${crypto.randomUUID()}`,
+      personId: person?.id,
       person: selectedPersonName,
       clientId: selectedOrganization.id,
       client: selectedOrganization.name,
@@ -152,22 +179,24 @@ export default function LeadsPage() {
       value: amount,
       valueMvr,
       currency: leadCurrency,
-      ...(rate ? { exchangeRate: rate } : {}),
+      exchangeRate: rate,
       pipelineId: selectedPipeline.id,
-      closeDate,
+      closeDate: expectedCloseDate,
       visibility,
       contact: selectedPersonName,
       country: selectedOrganization.country,
       insuranceClass: product.category,
       productCode: product.code,
-      temperature: 'WARM',
-      status: 'TO-DO',
-      funnelStage: selectedStage.name,
-      renewalDate: closeDate,
+      temperature: editingLead?.temperature ?? 'WARM',
+      status: editingLead?.status ?? 'TO-DO',
+      funnelStage: editingLead?.pipelineId === selectedPipeline.id
+        ? editingLead.funnelStage
+        : selectedStage.name,
+      renewalDate: expectedCloseDate,
       sumInsured: valueMvr,
       premium: valueMvr,
       ownerId: owner.id,
-      lastActivity: 'Just now',
+      lastActivity: editingLead?.lastActivity ?? 'Just now',
     };
     if (!personOptions.some((name) => name.toLowerCase() === selectedPersonName.toLowerCase())) {
       setCustomerLookups((current) => ({
@@ -175,10 +204,12 @@ export default function LeadsPage() {
         salesPersons: [...current.salesPersons, selectedPersonName],
       }));
     }
-    setLeads((current) => [lead, ...current]);
-    setSelectedPipelineId(selectedPipeline.id);
+    setLeads((current) => editingLead
+      ? current.map((existing) => existing.id === editingLead.id ? lead : existing)
+      : [lead, ...current]);
     setNewLeadOpen(false);
     resetLeadForm();
+    setSelectedPipelineId(selectedPipeline.id);
   };
 
   return (
@@ -235,6 +266,11 @@ export default function LeadsPage() {
                         {lead.currency === 'USD' && <span>{formatAmount(lead.valueMvr ?? lead.premium, 'MVR')}</span>}
                       </div>
                       <div className="text-[11px] text-muted mt-1">Expected close {new Date(`${lead.closeDate ?? lead.renewalDate}T00:00:00`).toLocaleDateString('en-US')}</div>
+                      {(user.role === 'admin' || user.role === 'sales') && (
+                        <button type="button" className="btn-ghost mt-2 !py-1.5" onClick={() => openEditLead(lead)}>
+                          <Pencil size={13} /> Edit Lead
+                        </button>
+                      )}
                     </article>
                   ))}
                   {stageLeads.length === 0 && <div className="text-center text-[11px] text-muted/60 py-8">No leads in this stage.</div>}
@@ -255,6 +291,7 @@ export default function LeadsPage() {
                 <th className="text-right px-4 py-3 font-medium">Lead Value</th>
                 <th className="text-left px-4 py-3 font-medium">Expected Close</th>
                 <th className="text-left px-4 py-3 font-medium">Visibility</th>
+                {(user.role === 'admin' || user.role === 'sales') && <th className="text-right px-4 py-3 font-medium">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -267,9 +304,16 @@ export default function LeadsPage() {
                   <td className="px-4 py-3 text-right text-white">{formatAmount(lead.value ?? lead.premium, lead.currency ?? 'MVR')}{lead.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(lead.valueMvr ?? lead.premium, 'MVR')}</div>}</td>
                   <td className="px-4 py-3 text-muted">{new Date(`${lead.closeDate ?? lead.renewalDate}T00:00:00`).toLocaleDateString('en-US')}</td>
                   <td className="px-4 py-3 text-muted">{!lead.visibility || lead.visibility === 'company' ? 'Entire company' : 'Owner visibility group'}</td>
+                  {(user.role === 'admin' || user.role === 'sales') && (
+                    <td className="px-4 py-3 text-right">
+                      <button type="button" className="btn-ghost !py-1.5" onClick={() => openEditLead(lead)}>
+                        <Pencil size={13} /> Edit Lead
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
-              {visibleLeads.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">No leads yet.</td></tr>}
+              {visibleLeads.length === 0 && <tr><td colSpan={user.role === 'admin' || user.role === 'sales' ? 8 : 7} className="px-4 py-8 text-center text-muted">No leads yet.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -278,10 +322,10 @@ export default function LeadsPage() {
       <Modal
         open={newLeadOpen}
         onClose={() => { setNewLeadOpen(false); resetLeadForm(); }}
-        title="Add Lead"
-        subtitle="Create a lead in a sales pipeline."
+        title={editingLead ? 'Edit Lead' : 'Add Lead'}
+        subtitle={editingLead ? 'Update this lead in its sales pipeline.' : 'Create a lead in a sales pipeline.'}
         size="lg"
-        footer={<><button type="button" className="btn-ghost" onClick={() => { setNewLeadOpen(false); resetLeadForm(); }}><X size={14} /> Cancel</button><button type="submit" form="new-lead-form" className="btn-primary"><Plus size={14} /> Save Lead</button></>}
+        footer={<><button type="button" className="btn-ghost" onClick={() => { setNewLeadOpen(false); resetLeadForm(); }}><X size={14} /> Cancel</button><button type="submit" form="new-lead-form" className="btn-primary"><Plus size={14} /> {editingLead ? 'Update Lead' : 'Save Lead'}</button></>}
       >
         <form id="new-lead-form" onSubmit={createLead} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Sales Person">
@@ -319,7 +363,7 @@ export default function LeadsPage() {
             </datalist>
             {organizationQuery.trim() && !selectedOrganization && <p className="mt-1 text-xs text-warm">This organization is new. Create it to continue.</p>}
           </Field>
-          <Field label="Title *"><input className="input" name="title" maxLength={200} required /></Field>
+          <Field label="Title *"><input className="input" name="title" maxLength={200} required value={leadTitle} onChange={(event) => setLeadTitle(event.target.value)} /></Field>
           <Field label="Pipeline">
             <select className="input" required value={selectedPipelineId} onChange={(event) => setSelectedPipelineId(event.target.value)}>
               <option value="">Select pipeline</option>
@@ -348,7 +392,7 @@ export default function LeadsPage() {
             </>
           )}
           <Field label="Type of Insurance Product">
-            <select className="input" name="productCode" required defaultValue="">
+            <select className="input" name="productCode" required value={productCode} onChange={(event) => setProductCode(event.target.value)}>
               <option value="">Select product class</option>
               {['Bonds', 'Engineering', 'Fire', 'Marine', 'Miscellaneous'].map((category) => (
                 <optgroup key={category} label={category}>
@@ -364,7 +408,7 @@ export default function LeadsPage() {
             </select>
           </Field>
           <Field label="Expected Close Date">
-            <input className="input" name="closeDate" type="date" required />
+            <input className="input" name="closeDate" type="date" required value={closeDate} onChange={(event) => setCloseDate(event.target.value)} />
           </Field>
           <fieldset className="sm:col-span-2">
             <legend className="mb-2 text-xs text-muted">Visibility Settings</legend>

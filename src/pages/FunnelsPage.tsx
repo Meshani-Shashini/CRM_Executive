@@ -3,6 +3,11 @@ import { BarChart3, TrendingDown } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import { useApp } from '../store/AppContext';
 
+function isLostStage(name: string) {
+  const normalized = name.toLowerCase();
+  return normalized.includes('lost') || normalized.includes('declined');
+}
+
 export default function FunnelsPage() {
   const { pipelines, pipelineStages, stageHistory } = useApp();
   const [pipelineId, setPipelineId] = useState(pipelines.find((pipeline) => pipeline.isActive)?.id ?? '');
@@ -13,7 +18,7 @@ export default function FunnelsPage() {
   }, [pipelines, pipelineId]);
   const stages = useMemo(
     () => pipelineStages
-      .filter((stage) => stage.pipelineId === pipelineId && stage.name !== 'Closed-Lost')
+      .filter((stage) => stage.pipelineId === pipelineId && !isLostStage(stage.name) && stage.winProbabilityPct > 0)
       .sort((a, b) => a.stageOrder - b.stageOrder),
     [pipelineStages, pipelineId],
   );
@@ -40,9 +45,14 @@ export default function FunnelsPage() {
     };
   });
   const maxCount = Math.max(1, ...stageStats.map((item) => item.entered));
-  const lostStage = pipelineStages.find((stage) => stage.pipelineId === pipelineId && stage.name === 'Closed-Lost');
+  const lostStage = pipelineStages.find((stage) => stage.pipelineId === pipelineId && isLostStage(stage.name));
   const lostCount = lostStage
     ? new Set(stageHistory.filter((entry) => entry.toStageId === lostStage.id).map((entry) => entry.dealId)).size
+    : 0;
+  const wonStage = stages.find((stage) => stage.winProbabilityPct === 100)
+    ?? stages[stages.length - 1];
+  const wonCount = wonStage
+    ? new Set(stageHistory.filter((entry) => entry.toStageId === wonStage.id).map((entry) => entry.dealId)).size
     : 0;
   const totalTracked = new Set(stageHistory.filter((entry) => stages.some((stage) => stage.id === entry.toStageId)).map((entry) => entry.dealId)).size;
 
@@ -61,7 +71,7 @@ export default function FunnelsPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Metric label="Deals tracked in funnel" value={totalTracked} icon={<BarChart3 size={16} className="text-brand-400" />} />
-        <Metric label="Closed won" value={stageStats[stageStats.length - 1]?.entered ?? 0} icon={<Badge variant="win">Won</Badge>} />
+        <Metric label="Closed won" value={wonCount} icon={<Badge variant="win">Won</Badge>} />
         <Metric label="Closed lost" value={lostCount} icon={<TrendingDown size={16} className="text-hot" />} />
       </div>
 
