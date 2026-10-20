@@ -7,6 +7,7 @@ export interface User {
   name: string;
   email: string;
   role: Role;
+  clientId?: string;
   avatar?: string;
   title?: string;
 }
@@ -50,6 +51,7 @@ export interface Client {
   phone: string;
   email: string;
   address: string;
+  contactPerson?: string;
   sumInsured: number;
   premium: number;
   expiry: string;

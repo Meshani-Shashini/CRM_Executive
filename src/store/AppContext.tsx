@@ -58,6 +58,7 @@ interface ProfileRecord {
   email: string;
   role: 'System Admin' | 'Sales' | 'Accountant' | 'Client';
   title: string;
+  client_record_id?: string | null;
 }
 
 interface TenantRecord {
@@ -102,6 +103,7 @@ function appUser(profile: ProfileRecord): User {
     email: profile.email,
     role: ROLE_TO_APP[profile.role],
     title: profile.title,
+    ...(profile.client_record_id ? { clientId: profile.client_record_id } : {}),
   };
 }
 
@@ -143,7 +145,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const loadProfile = useCallback(async (userId: string): Promise<User> => {
     const { data, error } = await supabase
       .from('user_profiles')
-      .select('id, name, email, role, title')
+      .select('id, name, email, role, title, client_record_id')
       .eq('id', userId)
       .single();
     if (error) throw new Error(`Could not load your Supabase profile: ${error.message}`);
@@ -345,7 +347,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const loadUsers = async () => {
       const { data, error } = await supabase
         .from('user_profiles')
-        .select('id, name, email, role, title')
+        .select('id, name, email, role, title, client_record_id')
         .eq('tenant_id', TENANT_ID)
         .order('name');
       if (error) {
