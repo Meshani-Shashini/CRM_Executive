@@ -2,12 +2,13 @@ import { useState, type FormEvent } from 'react';
 import { INSURERS, PRODUCT_CODES } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
+import NewCustomerAccountModal from '../components/clients/NewCustomerAccountModal';
 import { useApp } from '../store/AppContext';
 import {
   Phone, Mail, MapPin, Calendar, FileText, MessageSquare, Upload,
-  Building2, Briefcase, ShieldCheck, Plus, Search, X,
+  Building2, Briefcase, ShieldCheck, Plus, Search,
 } from 'lucide-react';
-import type { Activity, Client } from '../types';
+import type { Activity } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 
 const activityIcon = {
@@ -15,7 +16,7 @@ const activityIcon = {
 };
 
 export default function ClientsPage() {
-  const { clients, setClients, activities, setActivities, user, users } = useApp();
+  const { clients, activities, setActivities, user, users } = useApp();
   const [selectedId, setSelectedId] = useState(clients[0]?.id ?? '');
   const [query, setQuery] = useState('');
   const [clientOpen, setClientOpen] = useState(false);
@@ -33,33 +34,6 @@ export default function ClientsPage() {
     c.name.toLowerCase().includes(query.toLowerCase()) ||
     c.tin.toLowerCase().includes(query.toLowerCase())
   );
-
-  const createClient = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    const productCode = String(data.get('productCode'));
-    const product = PRODUCT_CODES.find((item) => item.code === productCode);
-    const client: Client = {
-      id: `C-${Date.now()}`,
-      name: String(data.get('name')).trim(),
-      tin: String(data.get('tin')).trim(),
-      country: String(data.get('country')).trim(),
-      phone: String(data.get('phone')).trim(),
-      email: String(data.get('email')).trim(),
-      address: String(data.get('address')).trim(),
-      sumInsured: Number(data.get('sumInsured')),
-      premium: Number(data.get('premium')),
-      expiry: String(data.get('expiry')),
-      insurer: String(data.get('insurer')).trim(),
-      productCode,
-      class: product?.category ?? 'Miscellaneous',
-      ownerId: user.id,
-      tags: [],
-    };
-    setClients([client, ...clients]);
-    setSelectedId(client.id);
-    setClientOpen(false);
-  };
 
   const addActivity = (event: FormEvent<HTMLFormElement>, type: Activity['type']) => {
     event.preventDefault();
@@ -107,7 +81,9 @@ export default function ClientsPage() {
               className="bg-transparent text-sm text-white outline-none flex-1 placeholder:text-muted/70"
             />
           </div>
-          <button className="btn-primary w-full mt-2 !py-2" onClick={() => setClientOpen(true)}><Plus size={14} /> Add Client</button>
+          {(user.role === 'admin' || user.role === 'sales') && (
+            <button className="btn-primary w-full mt-2 !py-2" onClick={() => setClientOpen(true)}><Plus size={14} /> Add Client</button>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto">
           {filtered.map((c) => (
@@ -154,6 +130,7 @@ export default function ClientsPage() {
                 <div className="text-sm text-muted mt-0.5">TIN: {selected.tin} · {selected.country}</div>
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   <Badge variant="brand" dot>{selected.class}</Badge>
+                  {selected.accountStatus === 'draft' && <Badge variant="muted">Draft</Badge>}
                   <Badge variant="muted">{productName(selected.productCode)}</Badge>
                   {selected.tags.map((t) => <Badge key={t} variant="win">{t}</Badge>)}
                 </div>
@@ -184,7 +161,12 @@ export default function ClientsPage() {
               <div className="grid grid-cols-2 gap-3">
                 <Metric label="Sum Insured" value={`MVR ${selected.sumInsured.toLocaleString()}`} />
                 <Metric label="Premium" value={`MVR ${selected.premium.toLocaleString()}`} />
-                <Metric label="Expiry" value={new Date(selected.expiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} />
+                <Metric
+                  label="Expiry"
+                  value={selected.expiry
+                    ? new Date(selected.expiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                    : '—'}
+                />
                 <Metric label="Insurer" value={selected.insurer} />
                 <Metric label="Class" value={selected.class} />
                 <Metric label="Product" value={`${selected.productCode} · ${productName(selected.productCode)}`} />
@@ -224,21 +206,15 @@ export default function ClientsPage() {
         </div>
       </div> : <div className="glass rounded-2xl flex items-center justify-center text-muted">No clients found.</div>}
 
-            <Modal open={clientOpen} onClose={() => setClientOpen(false)} title="Add Client" subtitle="Create a client record." footer={<><button type="button" className="btn-ghost" onClick={() => setClientOpen(false)}><X size={14} /> Cancel</button><button type="submit" form="new-client-form" className="btn-primary"><Plus size={14} /> Add Client</button></>}>
-              <form id="new-client-form" onSubmit={createClient} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Client name"><input className="input" name="name" required /></Field>
-                <Field label="TIN"><input className="input" name="tin" required /></Field>
-                <Field label="Country"><input className="input" name="country" required /></Field>
-                <Field label="Phone"><input className="input" name="phone" type="tel" /></Field>
-                <Field label="Email"><input className="input" name="email" type="email" /></Field>
-                <Field label="Address"><input className="input" name="address" /></Field>
-                <Field label="Product"><select className="input" name="productCode" required defaultValue=""><option value="">Select product</option>{PRODUCT_CODES.map((product) => <option key={product.code} value={product.code}>{product.code} · {product.name}</option>)}</select></Field>
-                <Field label="Insurer"><select className="input" name="insurer" required defaultValue=""><option value="">Select insurer</option>{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
-                <Field label="Expiry"><input className="input" name="expiry" type="date" required /></Field>
-                <Field label="Sum Insured (MVR)"><input className="input" name="sumInsured" type="number" min="0" step="0.01" required /></Field>
-                <Field label="Premium (MVR)"><input className="input" name="premium" type="number" min="0" step="0.01" required /></Field>
-              </form>
-            </Modal>
+            {clientOpen && (
+              <NewCustomerAccountModal
+                onClose={() => setClientOpen(false)}
+                onCreated={(clientId) => {
+                  setSelectedId(clientId);
+                  setClientOpen(false);
+                }}
+              />
+            )}
             <Modal open={activityOpen} onClose={() => setActivityOpen(false)} title="Log Activity" subtitle={selected?.name} footer={<><button type="button" className="btn-ghost" onClick={() => setActivityOpen(false)}>Cancel</button><button type="submit" form="new-activity-form" className="btn-primary">Save Activity</button></>}>
               <form id="new-activity-form" onSubmit={(event) => addActivity(event, (new FormData(event.currentTarget).get('type') as Activity['type']))} className="space-y-3">
                 <Field label="Activity type"><select className="input" name="type"><option value="call">Call</option><option value="meeting">Meeting</option><option value="email">Email</option><option value="note">Note</option><option value="upload">Upload</option></select></Field>

@@ -1,178 +1,275 @@
-import { useState, type FormEvent } from 'react';
-import { FUNNELS, PRODUCT_CODES } from '../data/catalogs';
+import { useMemo, useState, type FormEvent } from 'react';
+import { PRODUCT_CODES } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
-import { Flame, Sun, Snowflake, List, Columns3, Filter, Plus, X } from 'lucide-react';
-import type { Lead, LeadTemperature } from '../types';
+import { Columns3, Filter, List, Plus, X } from 'lucide-react';
+import type { Client, Lead } from '../types';
+import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 
-const tempVariant: Record<LeadTemperature, 'hot' | 'warm' | 'cold'> = {
-  HOT: 'hot', WARM: 'warm', COLD: 'cold',
-};
-const tempIcon = { HOT: Flame, WARM: Sun, COLD: Snowflake };
+type Visibility = Lead['visibility'];
 
 export default function LeadsPage() {
-  const { leads, setLeads, user } = useApp();
-  const [funnelId, setFunnelId] = useState(FUNNELS[0].id);
+  const {
+    leads, setLeads, clients, setClients, user, users, pipelines, pipelineStages,
+    customerLookups, setCustomerLookups,
+  } = useApp();
+  const [selectedPipelineId, setSelectedPipelineId] = useState('');
   const [view, setView] = useState<'kanban' | 'table'>('kanban');
   const [newLeadOpen, setNewLeadOpen] = useState(false);
+  const [newOrganizationOpen, setNewOrganizationOpen] = useState(false);
+  const [organizationQuery, setOrganizationQuery] = useState('');
+  const [personName, setPersonName] = useState('');
+  const [ownerId, setOwnerId] = useState('');
+  const [leadCurrency, setLeadCurrency] = useState<Currency | ''>('');
+  const [leadValue, setLeadValue] = useState('');
+  const [exchangeRate, setExchangeRate] = useState('');
+  const [visibility, setVisibility] = useState<Visibility | ''>('');
+  const [formError, setFormError] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
   const [temperatureFilter, setTemperatureFilter] = useState('');
   const [stageFilter, setStageFilter] = useState('');
-  const funnel = FUNNELS.find((f) => f.id === funnelId)!;
+  const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
+  const selectedPipeline = activePipelines.find((pipeline) => pipeline.id === selectedPipelineId);
+  const stages = useMemo(() => pipelineStages
+    .filter((stage) => stage.pipelineId === selectedPipelineId)
+    .sort((left, right) => left.stageOrder - right.stageOrder), [pipelineStages, selectedPipelineId]);
+  const selectedOrganization = clients.find(
+    (client) => client.name.trim().toLowerCase() === organizationQuery.trim().toLowerCase(),
+  );
+  const staffOptions = useMemo(() => {
+    const staff = users.filter((candidate) => candidate.role === 'admin' || candidate.role === 'sales');
+    if ((user.role === 'admin' || user.role === 'sales') && !staff.some((candidate) => candidate.id === user.id)) {
+      return [...staff, user];
+    }
+    return staff;
+  }, [user, users]);
+  const personOptions = useMemo(() => [...new Set([
+    ...users.filter((candidate) => candidate.role === 'sales').map((candidate) => candidate.name),
+    ...customerLookups.salesPersons,
+  ])], [customerLookups.salesPersons, users]);
+  const boardPipeline = selectedPipeline ?? activePipelines[0];
+  const boardStages = pipelineStages
+    .filter((stage) => stage.pipelineId === boardPipeline?.id)
+    .sort((left, right) => left.stageOrder - right.stageOrder);
   const visibleLeads = leads.filter((lead) =>
+    (!boardPipeline || lead.pipelineId === boardPipeline.id ||
+      (!lead.pipelineId && boardPipeline.id === activePipelines[0]?.id)) &&
     (!temperatureFilter || lead.temperature === temperatureFilter) &&
     (!stageFilter || lead.funnelStage === stageFilter)
   );
 
-  const productName = (code: string) => PRODUCT_CODES.find((p) => p.code === code)?.name ?? code;
+  const resetLeadForm = () => {
+    setOrganizationQuery('');
+    setPersonName('');
+    setOwnerId('');
+    setLeadCurrency('');
+    setLeadValue('');
+    setExchangeRate('');
+    setVisibility('');
+    setFormError('');
+    setSelectedPipelineId('');
+    setNewOrganizationOpen(false);
+  };
+
+  const openLeadForm = () => {
+    resetLeadForm();
+    setNewLeadOpen(true);
+  };
+
+  const createOrganization = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const name = String(data.get('name') ?? '').trim();
+    if (!name) return;
+    const existing = clients.find((client) => client.name.trim().toLowerCase() === name.toLowerCase());
+    if (existing) {
+      setOrganizationQuery(existing.name);
+      setNewOrganizationOpen(false);
+      return;
+    }
+
+    const organization: Client = {
+      id: `org-${crypto.randomUUID()}`,
+      name,
+      tin: '',
+      country: '',
+      phone: '',
+      email: '',
+      address: '',
+      sumInsured: 0,
+      premium: 0,
+      expiry: '',
+      insurer: '',
+      productCode: '',
+      class: '',
+      ownerId: user.id,
+      tags: [],
+    };
+    setClients((current) => [organization, ...current]);
+    setOrganizationQuery(name);
+    setNewOrganizationOpen(false);
+  };
 
   const createLead = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    const productCode = String(data.get('productCode'));
+    const title = String(data.get('title') ?? '').trim();
+    const productCode = String(data.get('productCode') ?? '');
     const product = PRODUCT_CODES.find((item) => item.code === productCode);
+    const selectedPersonName = personName.trim();
+    const person = users.find((candidate) =>
+      candidate.role === 'sales' && candidate.name.trim().toLowerCase() === selectedPersonName.toLowerCase(),
+    );
+    const owner = staffOptions.find((candidate) => candidate.id === ownerId);
+    const amount = Number(data.get('value'));
+    const rate = leadCurrency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
+    const selectedStage = stages[0];
+
+    if (!selectedOrganization) {
+      setFormError('Choose an existing organization or create it first.');
+      return;
+    }
+    if (!selectedPersonName || !owner || !product || !selectedPipeline || !selectedStage || !visibility) {
+      setFormError('Enter a sales person, choose an owner and product, select a pipeline with a stage, and complete required fields.');
+      return;
+    }
+    if (!leadCurrency || !Number.isFinite(amount) || amount < 0 ||
+      (leadCurrency === 'USD' && (!Number.isFinite(rate) || !rate || rate <= 0))) {
+      setFormError('Choose a currency, enter a non-negative lead value, and enter a positive exchange rate for USD.');
+      return;
+    }
+
+    const closeDate = String(data.get('closeDate'));
+    const valueMvr = toMvr(amount, leadCurrency, rate);
     const lead: Lead = {
-      id: `L-${Date.now()}`,
-      client: String(data.get('client')).trim(),
-      contact: String(data.get('contact')).trim(),
-      country: String(data.get('country')).trim(),
-      insuranceClass: product?.category ?? 'Miscellaneous',
-      productCode,
-      temperature: data.get('temperature') as LeadTemperature,
+      id: `L-${crypto.randomUUID()}`,
+      ...(person ? { personId: person.id } : {}),
+      person: selectedPersonName,
+      clientId: selectedOrganization.id,
+      client: selectedOrganization.name,
+      title,
+      value: amount,
+      valueMvr,
+      currency: leadCurrency,
+      ...(rate ? { exchangeRate: rate } : {}),
+      pipelineId: selectedPipeline.id,
+      closeDate,
+      visibility,
+      contact: selectedPersonName,
+      country: selectedOrganization.country,
+      insuranceClass: product.category,
+      productCode: product.code,
+      temperature: 'WARM',
       status: 'TO-DO',
-      funnelStage: funnel.stages[0],
-      renewalDate: String(data.get('renewalDate')),
-      sumInsured: Number(data.get('sumInsured')),
-      premium: Number(data.get('premium')),
-      ownerId: user.id,
+      funnelStage: selectedStage.name,
+      renewalDate: closeDate,
+      sumInsured: valueMvr,
+      premium: valueMvr,
+      ownerId: owner.id,
       lastActivity: 'Just now',
     };
-    setLeads([lead, ...leads]);
+    if (!personOptions.some((name) => name.toLowerCase() === selectedPersonName.toLowerCase())) {
+      setCustomerLookups((current) => ({
+        ...current,
+        salesPersons: [...current.salesPersons, selectedPersonName],
+      }));
+    }
+    setLeads((current) => [lead, ...current]);
+    setSelectedPipelineId(selectedPipeline.id);
     setNewLeadOpen(false);
+    resetLeadForm();
   };
 
   return (
     <div className="space-y-5">
-      {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 justify-between">
-        <div className="flex items-center gap-2">
-          <div className="flex gap-1 bg-ink-800/60 border border-ink-600 rounded-lg p-1">
-            {FUNNELS.map((f) => (
-              <button
-                key={f.id}
-                onClick={() => { setFunnelId(f.id); setStageFilter(''); }}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
-                  funnelId === f.id ? 'bg-brand-500 text-white' : 'text-muted hover:text-white'
-                }`}
-              >
-                {f.name}
-              </button>
-            ))}
-          </div>
+        <div className="flex min-w-0 items-center gap-2">
+          <label className="sr-only" htmlFor="lead-pipeline-filter">Pipeline</label>
+          <select
+            id="lead-pipeline-filter"
+            className="input w-auto min-w-52"
+            value={boardPipeline?.id ?? ''}
+            onChange={(event) => { setSelectedPipelineId(event.target.value); setStageFilter(''); }}
+          >
+            {activePipelines.length === 0 && <option value="">No pipelines available</option>}
+            {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
+          </select>
         </div>
         <div className="flex items-center gap-2">
           <button className="btn-ghost !py-1.5" onClick={() => setFilterOpen(true)}><Filter size={14} /> Filter</button>
           <div className="flex gap-1 bg-ink-800/60 border border-ink-600 rounded-lg p-1">
-            <button onClick={() => setView('kanban')} className={`p-1.5 rounded-md ${view === 'kanban' ? 'bg-ink-700 text-white' : 'text-muted'}`}><Columns3 size={15} /></button>
-            <button onClick={() => setView('table')} className={`p-1.5 rounded-md ${view === 'table' ? 'bg-ink-700 text-white' : 'text-muted'}`}><List size={15} /></button>
+            <button aria-label="Kanban view" aria-pressed={view === 'kanban'} onClick={() => setView('kanban')} className={`p-1.5 rounded-md ${view === 'kanban' ? 'bg-ink-700 text-white' : 'text-muted'}`}><Columns3 size={15} /></button>
+            <button aria-label="Table view" aria-pressed={view === 'table'} onClick={() => setView('table')} className={`p-1.5 rounded-md ${view === 'table' ? 'bg-ink-700 text-white' : 'text-muted'}`}><List size={15} /></button>
           </div>
-          <button className="btn-primary !py-1.5" onClick={() => setNewLeadOpen(true)}><Plus size={14} /> New Lead</button>
+          <button className="btn-primary !py-1.5" onClick={openLeadForm} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create a pipeline before adding a lead' : undefined}><Plus size={14} /> Add Lead</button>
         </div>
       </div>
 
-      {view === 'kanban' ? (
+      {activePipelines.length === 0 ? (
+        <div className="glass rounded-2xl p-8 text-center text-sm text-muted">Create an active pipeline and at least one stage before adding leads.</div>
+      ) : boardStages.length === 0 ? (
+        <div className="glass rounded-2xl p-8 text-center text-sm text-muted">Add at least one stage to this pipeline before adding leads.</div>
+      ) : view === 'kanban' ? (
         <div className="flex gap-3 overflow-x-auto pb-3">
-          {funnel.stages.map((stage) => {
-            const stageLeads = visibleLeads.filter((l) => l.funnelStage === stage);
+          {boardStages.map((stage) => {
+            const stageLeads = visibleLeads.filter((lead) => lead.funnelStage === stage.name);
             return (
-              <div key={stage} className="w-72 shrink-0">
+              <div key={stage.id} className="w-72 shrink-0">
                 <div className="flex items-center justify-between mb-2 px-1">
-                  <div className="text-sm font-semibold text-white">{stage}</div>
+                  <div className="text-sm font-semibold text-white">{stage.name}</div>
                   <span className="pill bg-ink-700 text-muted border border-ink-600">{stageLeads.length}</span>
                 </div>
                 <div className="space-y-2 min-h-[200px] bg-ink-900/40 rounded-xl p-2">
-                  {stageLeads.map((l) => {
-                    const TIcon = tempIcon[l.temperature];
-                    return (
-                      <div key={l.id} className="glass-soft rounded-xl p-3 hover:border-ink-500 transition cursor-pointer group">
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="text-sm font-semibold text-white truncate">{l.client}</div>
-                          <Badge variant={tempVariant[l.temperature]} dot>
-                            <TIcon size={10} /> {l.temperature}
-                          </Badge>
-                        </div>
-                        <div className="text-[11px] text-muted mb-2">{l.contact} · {l.country}</div>
-                        <div className="flex flex-wrap gap-1 mb-2">
-                          <span className="pill bg-brand-400/10 text-brand-400 border border-brand-400/30 !px-1.5">
-                            {l.productCode} · {productName(l.productCode)}
-                          </span>
-                          <Badge variant={l.status === 'IN-PROGRESS' ? 'warm' : l.status === 'TO-DO' ? 'cold' : 'muted'}>
-                            {l.status}
-                          </Badge>
-                        </div>
-                        <div className="flex items-center justify-between text-[11px] text-muted pt-2 border-t border-ink-700/60">
-                          <span>MVR {(l.premium / 1000).toFixed(0)}k</span>
-                          <span>Renew {new Date(l.renewalDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
-                        </div>
+                  {stageLeads.map((lead) => (
+                    <article key={lead.id} className="glass-soft rounded-xl p-3">
+                      <h3 className="text-sm font-semibold text-white">{lead.title ?? `${lead.client} lead`}</h3>
+                      <div className="text-[11px] text-muted mt-1">{lead.client} · Person: {lead.person ?? lead.contact}</div>
+                      <div className="text-[11px] text-muted mt-1">Owner: {staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId}</div>
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        <Badge variant="brand">{PRODUCT_CODES.find((product) => product.code === lead.productCode)?.name ?? lead.productCode}</Badge>
+                        <Badge variant={!lead.visibility || lead.visibility === 'company' ? 'win' : 'muted'}>{!lead.visibility || lead.visibility === 'company' ? 'Entire company' : 'Owner visibility group'}</Badge>
                       </div>
-                    );
-                  })}
-                  {stageLeads.length === 0 && (
-                    <div className="text-center text-[11px] text-muted/60 py-8">Drop leads here</div>
-                  )}
+                      <div className="flex items-center justify-between text-[11px] text-muted pt-2 mt-2 border-t border-ink-700/60">
+                        <span>{formatAmount(lead.value ?? lead.premium, lead.currency ?? 'MVR')}</span>
+                        {lead.currency === 'USD' && <span>{formatAmount(lead.valueMvr ?? lead.premium, 'MVR')}</span>}
+                      </div>
+                      <div className="text-[11px] text-muted mt-1">Expected close {new Date(`${lead.closeDate ?? lead.renewalDate}T00:00:00`).toLocaleDateString('en-US')}</div>
+                    </article>
+                  ))}
+                  {stageLeads.length === 0 && <div className="text-center text-[11px] text-muted/60 py-8">No leads in this stage.</div>}
                 </div>
               </div>
             );
           })}
         </div>
       ) : (
-        <div className="glass rounded-2xl overflow-hidden">
+        <div className="glass rounded-2xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-ink-900/60 text-muted text-[11px] uppercase tracking-wider">
               <tr>
-                <th className="text-left px-4 py-3 font-medium">Client</th>
-                <th className="text-left px-4 py-3 font-medium">Product</th>
-                <th className="text-left px-4 py-3 font-medium">Temp</th>
-                <th className="text-left px-4 py-3 font-medium">Status</th>
-                <th className="text-left px-4 py-3 font-medium">Stage</th>
-                <th className="text-right px-4 py-3 font-medium">Premium</th>
-                <th className="text-left px-4 py-3 font-medium">Renewal</th>
-                <th className="text-left px-4 py-3 font-medium">Activity</th>
+                <th className="text-left px-4 py-3 font-medium">Title / Organization</th>
+                <th className="text-left px-4 py-3 font-medium">Person</th>
+                <th className="text-left px-4 py-3 font-medium">Owner</th>
+                <th className="text-left px-4 py-3 font-medium">Product Class</th>
+                <th className="text-right px-4 py-3 font-medium">Lead Value</th>
+                <th className="text-left px-4 py-3 font-medium">Expected Close</th>
+                <th className="text-left px-4 py-3 font-medium">Visibility</th>
               </tr>
             </thead>
             <tbody>
-              {visibleLeads.map((l) => {
-                const TIcon = tempIcon[l.temperature];
-                return (
-                  <tr key={l.id} className="table-row hover:bg-ink-750/40">
-                    <td className="px-4 py-3">
-                      <div className="text-white font-medium">{l.client}</div>
-                      <div className="text-[11px] text-muted">{l.contact}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="pill bg-brand-400/10 text-brand-400 border border-brand-400/30 !px-1.5">
-                        {l.productCode}
-                      </span>
-                      <div className="text-[11px] text-muted mt-1">{productName(l.productCode)}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant={tempVariant[l.temperature]} dot>
-                        <TIcon size={10} /> {l.temperature}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant={l.status === 'IN-PROGRESS' ? 'warm' : l.status === 'TO-DO' ? 'cold' : 'muted'}>
-                        {l.status}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3 text-muted">{l.funnelStage}</td>
-                    <td className="px-4 py-3 text-right text-white font-medium">MVR {l.premium.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-muted">{new Date(l.renewalDate).toLocaleDateString('en-GB')}</td>
-                    <td className="px-4 py-3 text-muted text-xs">{l.lastActivity}</td>
-                  </tr>
-                );
-              })}
+              {visibleLeads.map((lead) => (
+                <tr key={lead.id} className="table-row">
+                  <td className="px-4 py-3"><div className="text-white font-medium">{lead.title ?? `${lead.client} lead`}</div><div className="text-[11px] text-muted">{lead.client}</div></td>
+                  <td className="px-4 py-3 text-muted">{lead.person ?? lead.contact}</td>
+                  <td className="px-4 py-3 text-muted">{staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId}</td>
+                  <td className="px-4 py-3 text-muted">{PRODUCT_CODES.find((product) => product.code === lead.productCode)?.name ?? lead.insuranceClass}</td>
+                  <td className="px-4 py-3 text-right text-white">{formatAmount(lead.value ?? lead.premium, lead.currency ?? 'MVR')}{lead.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(lead.valueMvr ?? lead.premium, 'MVR')}</div>}</td>
+                  <td className="px-4 py-3 text-muted">{new Date(`${lead.closeDate ?? lead.renewalDate}T00:00:00`).toLocaleDateString('en-US')}</td>
+                  <td className="px-4 py-3 text-muted">{!lead.visibility || lead.visibility === 'company' ? 'Entire company' : 'Owner visibility group'}</td>
+                </tr>
+              ))}
+              {visibleLeads.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">No leads yet.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -180,42 +277,125 @@ export default function LeadsPage() {
 
       <Modal
         open={newLeadOpen}
-        onClose={() => setNewLeadOpen(false)}
-        title="Create Lead"
-        subtitle="Add a prospect to the active sales funnel."
-        footer={
-          <>
-            <button type="button" className="btn-ghost" onClick={() => setNewLeadOpen(false)}><X size={14} /> Cancel</button>
-            <button type="submit" form="new-lead-form" className="btn-primary"><Plus size={14} /> Create Lead</button>
-          </>
-        }
+        onClose={() => { setNewLeadOpen(false); resetLeadForm(); }}
+        title="Add Lead"
+        subtitle="Create a lead in a sales pipeline."
+        size="lg"
+        footer={<><button type="button" className="btn-ghost" onClick={() => { setNewLeadOpen(false); resetLeadForm(); }}><X size={14} /> Cancel</button><button type="submit" form="new-lead-form" className="btn-primary"><Plus size={14} /> Save Lead</button></>}
       >
         <form id="new-lead-form" onSubmit={createLead} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Client / Company"><input className="input" name="client" required /></Field>
-          <Field label="Contact"><input className="input" name="contact" required /></Field>
-          <Field label="Country"><input className="input" name="country" required /></Field>
-          <Field label="Product"><select className="input" name="productCode" required><option value="">Select product</option>{PRODUCT_CODES.map((p) => <option key={p.code} value={p.code}>{p.code} · {p.name}</option>)}</select></Field>
-          <Field label="Temperature"><select className="input" name="temperature" required><option value="">Select temperature</option><option>WARM</option><option>HOT</option><option>COLD</option></select></Field>
-          <Field label="Renewal Date"><input className="input" name="renewalDate" type="date" required /></Field>
-          <Field label="Sum Insured (MVR)"><input className="input" name="sumInsured" type="number" min="0" required /></Field>
-          <Field label="Premium (MVR)"><input className="input" name="premium" type="number" min="0" required /></Field>
+          <Field label="Sales Person">
+            <input
+              className="input"
+              list="lead-sales-persons"
+              required
+              maxLength={120}
+              value={personName}
+              onChange={(event) => setPersonName(event.target.value)}
+              placeholder="Select or type a sales person"
+              autoComplete="off"
+            />
+            <datalist id="lead-sales-persons">
+              {personOptions.map((person) => <option key={person} value={person} />)}
+            </datalist>
+            <p className="mt-1 text-[11px] text-muted">New names are saved to the sales-person list when the lead is created.</p>
+          </Field>
+          <Field label="Organization">
+            <input
+              className="input"
+              list="lead-organizations"
+              required
+              value={organizationQuery}
+              onChange={(event) => setOrganizationQuery(event.target.value)}
+              onBlur={() => {
+                if (organizationQuery.trim() && !clients.some((client) => client.name.trim().toLowerCase() === organizationQuery.trim().toLowerCase())) {
+                  setNewOrganizationOpen(true);
+                }
+              }}
+              placeholder="Search or enter an organization"
+            />
+            <datalist id="lead-organizations">
+              {clients.map((client) => <option key={client.id} value={client.name} />)}
+            </datalist>
+            {organizationQuery.trim() && !selectedOrganization && <p className="mt-1 text-xs text-warm">This organization is new. Create it to continue.</p>}
+          </Field>
+          <Field label="Title *"><input className="input" name="title" maxLength={200} required /></Field>
+          <Field label="Pipeline">
+            <select className="input" required value={selectedPipelineId} onChange={(event) => setSelectedPipelineId(event.target.value)}>
+              <option value="">Select pipeline</option>
+              {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Lead Value Currency">
+            <select className="input" required value={leadCurrency} onChange={(event) => {
+              const currency = event.target.value as Currency | '';
+              setLeadCurrency(currency);
+              setLeadValue('');
+              setExchangeRate(currency === 'USD' ? String(DEFAULT_USD_TO_MVR_RATE) : '');
+            }}>
+              <option value="">Select currency</option><option value="USD">USD</option><option value="MVR">MVR</option>
+            </select>
+          </Field>
+          <Field label={`Lead Value${leadCurrency ? ` (${leadCurrency})` : ''}`}>
+            <input className="input" name="value" type="number" min="0" step="0.01" required value={leadValue} onChange={(event) => setLeadValue(event.target.value)} />
+          </Field>
+          {leadCurrency === 'USD' && (
+            <>
+              <Field label="Exchange rate (MVR per USD)">
+                <input className="input" name="exchangeRate" type="number" min="0.000001" step="any" required value={exchangeRate} onChange={(event) => setExchangeRate(event.target.value)} />
+              </Field>
+              {Number(leadValue) > 0 && Number(exchangeRate) > 0 && <p className="self-end text-sm text-muted">MVR equivalent: {formatAmount(toMvr(Number(leadValue), 'USD', Number(exchangeRate)), 'MVR')}</p>}
+            </>
+          )}
+          <Field label="Type of Insurance Product">
+            <select className="input" name="productCode" required defaultValue="">
+              <option value="">Select product class</option>
+              {['Bonds', 'Engineering', 'Fire', 'Marine', 'Miscellaneous'].map((category) => (
+                <optgroup key={category} label={category}>
+                  {PRODUCT_CODES.filter((product) => product.category === category).map((product) => <option key={product.code} value={product.code}>{product.name}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          </Field>
+          <Field label="Owner">
+            <select className="input" required value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>
+              <option value="">Select owner</option>
+              {staffOptions.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Expected Close Date">
+            <input className="input" name="closeDate" type="date" required />
+          </Field>
+          <fieldset className="sm:col-span-2">
+            <legend className="mb-2 text-xs text-muted">Visibility Settings</legend>
+            <div className="flex flex-wrap gap-4">
+              <RadioOption name="visibility" value="company" checked={visibility === 'company'} onChange={() => setVisibility('company')} label="Entire company" />
+              <RadioOption name="visibility" value="owner_group" checked={visibility === 'owner_group'} onChange={() => setVisibility('owner_group')} label="Owner's visibility group" />
+            </div>
+          </fieldset>
+          {formError && <p role="alert" className="sm:col-span-2 text-sm text-hot">{formError}</p>}
+          {selectedPipelineId && stages.length === 0 && <p role="alert" className="sm:col-span-2 text-sm text-hot">This pipeline has no stages. Add a stage in Pipelines before saving leads.</p>}
         </form>
       </Modal>
+
       <Modal
-        open={filterOpen}
-        onClose={() => setFilterOpen(false)}
-        title="Filter Leads"
-        footer={
-          <>
-            <button className="btn-ghost" onClick={() => { setTemperatureFilter(''); setStageFilter(''); }}>Clear</button>
-            <button className="btn-primary" onClick={() => setFilterOpen(false)}>Apply Filter</button>
-          </>
-        }
+        open={newOrganizationOpen}
+        onClose={() => setNewOrganizationOpen(false)}
+        title="Create New Customer / Organization"
+        subtitle="The lead form will remain open while you add this organization."
         size="sm"
+        layer="overlay"
+        footer={<><button type="button" className="btn-ghost" onClick={() => setNewOrganizationOpen(false)}>Cancel</button><button type="submit" form="new-organization-form" className="btn-primary"><Plus size={14} /> Create Organization</button></>}
       >
+        <form id="new-organization-form" onSubmit={createOrganization}>
+          <Field label="Organization name"><input className="input" name="name" defaultValue={organizationQuery} required autoFocus /></Field>
+        </form>
+      </Modal>
+
+      <Modal open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Leads" size="sm" footer={<><button type="button" className="btn-ghost" onClick={() => { setTemperatureFilter(''); setStageFilter(''); }}>Clear</button><button type="button" className="btn-primary" onClick={() => setFilterOpen(false)}>Apply Filter</button></>}>
         <div className="space-y-3">
-          <Field label="Funnel stage"><select className="input" value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}><option value="">All stages</option>{funnel.stages.map((stage) => <option key={stage}>{stage}</option>)}</select></Field>
-          <Field label="Temperature"><select className="input" value={temperatureFilter} onChange={(e) => setTemperatureFilter(e.target.value)}><option value="">All temperatures</option><option>HOT</option><option>WARM</option><option>COLD</option></select></Field>
+          <Field label="Pipeline stage"><select className="input" value={stageFilter} onChange={(event) => setStageFilter(event.target.value)}><option value="">All stages</option>{boardStages.map((stage) => <option key={stage.id} value={stage.name}>{stage.name}</option>)}</select></Field>
+          <Field label="Temperature"><select className="input" value={temperatureFilter} onChange={(event) => setTemperatureFilter(event.target.value)}><option value="">All temperatures</option><option>HOT</option><option>WARM</option><option>COLD</option></select></Field>
         </div>
       </Modal>
     </div>
@@ -224,4 +404,21 @@ export default function LeadsPage() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="block"><div className="text-xs text-muted mb-1.5">{label}</div>{children}</label>;
+}
+
+function RadioOption({
+  name, value, checked, onChange, label,
+}: {
+  name: string;
+  value: Visibility;
+  checked: boolean;
+  onChange: () => void;
+  label: string;
+}) {
+  return (
+    <label className="inline-flex items-center gap-2 text-sm text-white">
+      <input type="radio" className="accent-brand-400" name={name} value={value} required checked={checked} onChange={onChange} />
+      {label}
+    </label>
+  );
 }

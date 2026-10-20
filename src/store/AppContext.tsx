@@ -7,12 +7,15 @@ import type {
   Role, StageHistoryAudit, TaxRate, User,
 } from '../types';
 import { COMPANY } from '../data/catalogs';
+import { createDefaultCustomerLookups, mergeCustomerLookups, type CustomerLookups } from '../data/customerLookups';
 import { supabase, TENANT_ID } from '../lib/supabase';
 
 interface AppState {
   user: User;
   authLoading: boolean;
   authError: string | null;
+  viewAsRole: Role | null;
+  setViewAsRole: (role: Role | null) => void;
   signIn: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -20,9 +23,11 @@ interface AppState {
   taxRates: TaxRate[];
   setTaxRates: (items: TaxRate[]) => void;
   leads: Lead[];
-  setLeads: (items: Lead[]) => void;
+  setLeads: Dispatch<SetStateAction<Lead[]>>;
   clients: Client[];
-  setClients: (items: Client[]) => void;
+  setClients: Dispatch<SetStateAction<Client[]>>;
+  customerLookups: CustomerLookups;
+  setCustomerLookups: Dispatch<SetStateAction<CustomerLookups>>;
   activities: Activity[];
   setActivities: (items: Activity[]) => void;
   deals: Deal[];
@@ -110,11 +115,13 @@ function writeArray(resource: string, items: unknown[]) {
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User>(GUEST_USER);
+  const [viewAsRole, setViewAsRoleState] = useState<Role | null>(null);
   const [authLoading, setAuthLoading] = useState(!AUTH_BYPASS);
   const [authError, setAuthError] = useState<string | null>(null);
   const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [customerLookups, setCustomerLookups] = useState<CustomerLookups>(createDefaultCustomerLookups);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -128,6 +135,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [dataReady, setDataReady] = useState(AUTH_BYPASS);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const setViewAsRole = useCallback((role: Role | null) => {
+    if (user.role !== 'admin' && !AUTH_BYPASS) return;
+    setViewAsRoleState(role === user.role ? null : role);
+  }, [user.role]);
 
   const loadProfile = useCallback(async (userId: string): Promise<User> => {
     const { data, error } = await supabase
@@ -217,10 +228,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (error) throw new Error(error.message);
     }
     setUser(GUEST_USER);
+    setViewAsRoleState(null);
     setDataReady(false);
     setTaxRates([]);
     setLeads([]);
     setClients([]);
+    setCustomerLookups(createDefaultCustomerLookups());
     setActivities([]);
     setDeals([]);
     setInvoices([]);
@@ -251,6 +264,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setTaxRates(asArray<TaxRate>(records, 'tax-rates'));
         setLeads(asArray<Lead>(records, 'leads'));
         setClients(asArray<Client>(records, 'clients'));
+        const customerLookupsRecord = records.find((record) => record.resource === 'customer-lookups');
+        setCustomerLookups(mergeCustomerLookups(customerLookupsRecord?.data.options));
         setActivities(asArray<Activity>(records, 'activities'));
         setDeals(asArray<Deal>(records, 'deals'));
         setInvoices(asArray<Invoice>(records, 'invoices'));
@@ -284,6 +299,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       'tax-rates': taxRates,
       leads,
       clients,
+      'customer-lookups': [{ id: 'customer-lookups', options: customerLookups }],
       activities,
       deals,
       invoices,
@@ -296,7 +312,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     const writableByRole: Record<Role, string[]> = {
       admin: Object.keys(allResources),
-      sales: ['leads', 'clients', 'activities', 'deals', 'stage-history'],
+      sales: ['leads', 'clients', 'customer-lookups', 'activities', 'deals', 'stage-history'],
       finance: ['invoices', 'payments'],
       client: [],
     };
@@ -320,7 +336,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [
     dataReady, user.id, user.role, taxRates, leads, clients, activities, deals,
-    invoices, payments, pipelines, pipelineStages, stageHistory, company, emailTemplates,
+    invoices, payments, pipelines, pipelineStages, stageHistory, company, emailTemplates, customerLookups,
   ]);
 
   useEffect(() => {
@@ -356,16 +372,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return profile;
   }, []);
 
-  const hasAccess = useCallback((allowed: Role[]) => Boolean(user.id) && allowed.includes(user.role), [user.id, user.role]);
+  const activeViewRole = viewAsRole ?? user.role;
+  const hasAccess = useCallback(
+    (allowed: Role[]) => Boolean(user.id) && allowed.includes(activeViewRole),
+    [user.id, activeViewRole],
+  );
   const value = useMemo(() => ({
-    user, authLoading, authError, signIn, register, signOut, hasAccess,
-    taxRates, setTaxRates, leads, setLeads, clients, setClients, activities, setActivities,
+    user, authLoading, authError, viewAsRole, setViewAsRole,
+    signIn, register, signOut, hasAccess,
+    taxRates, setTaxRates, leads, setLeads, clients, setClients, customerLookups, setCustomerLookups,
+    activities, setActivities,
     deals, setDeals, invoices, setInvoices, payments, setPayments, users, setUsers,
     createUser, company, setCompany, emailTemplates, setEmailTemplates, persistenceError,
     pipelines, setPipelines, pipelineStages, setPipelineStages, stageHistory, setStageHistory,
   }), [
-    user, authLoading, authError, signIn, register, signOut, hasAccess,
-    taxRates, leads, clients, activities, deals, invoices, payments, users,
+    user, authLoading, authError, viewAsRole, setViewAsRole, signIn, register, signOut, hasAccess,
+    taxRates, leads, clients, customerLookups, activities, deals, invoices, payments, users,
     createUser, company, emailTemplates, persistenceError, pipelines, pipelineStages, stageHistory,
   ]);
 

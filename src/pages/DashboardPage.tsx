@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   TrendingUp, Target, Users, AlertTriangle, CheckCircle2,
 } from 'lucide-react';
@@ -11,7 +11,10 @@ type DashboardTab = typeof tabs[number];
 
 export default function DashboardPage() {
   const [tab, setTab] = useState<DashboardTab>('Company');
-  const { deals, leads, clients, activities } = useApp();
+  const { deals, leads, clients, activities, viewAsRole } = useApp();
+  useEffect(() => {
+    setTab(viewAsRole === 'sales' ? 'Leads' : 'Company');
+  }, [viewAsRole]);
   const weightedPipeline = deals.reduce(
     (total, deal) => total + toMvr(deal.weighted, deal.currency, deal.exchangeRate),
     0,

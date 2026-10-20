@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { AlertTriangle, ArrowDown, ArrowUp, Check, Plus, Settings2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, Plus, Settings2, Zap } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { TENANT_ID } from '../lib/supabase';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
-import type { Pipeline, PipelineStage, StageHistoryAudit } from '../types';
+import type { Deal, Pipeline, PipelineStage, StageHistoryAudit } from '../types';
 import { formatAmount, toMvr } from '../utils/currency';
 
 const LOSS_REASONS = [
@@ -24,6 +24,74 @@ const legacyStageNames: Record<string, string> = {
   'Internal Slip': 'Negotiation & Legal (MIRA Compliance)',
 };
 
+type HealthState = 'Healthy' | 'At Risk' | 'Rotting';
+type MomentumState = 'Surging' | 'Steady' | 'Stalling' | 'Rotting';
+type IntentTier = NonNullable<Deal['intentTier']>;
+
+function intentForDeal(deal: Deal): IntentTier {
+  if (deal.intentTier) return deal.intentTier;
+  if (deal.probability >= 75) return 'P1';
+  if (deal.probability >= 40) return 'P2';
+  return 'P3';
+}
+
+function dealHealth(elapsed: number | null, threshold: number): HealthState {
+  if (threshold <= 0 || elapsed === null) return 'Healthy';
+  if (elapsed >= threshold) return 'Rotting';
+  if (elapsed >= threshold * 0.7) return 'At Risk';
+  return 'Healthy';
+}
+
+function dealMomentum(elapsed: number | null, threshold: number): MomentumState {
+  if (elapsed === null) return 'Steady';
+  if (threshold <= 0) return elapsed <= 1 ? 'Surging' : 'Steady';
+  if (elapsed >= threshold) return 'Rotting';
+  if (elapsed >= threshold * 0.7) return 'Stalling';
+  if (elapsed >= threshold * 0.4) return 'Steady';
+  return 'Surging';
+}
+
+function dealHealthScore(elapsed: number | null, threshold: number, probability: number) {
+  const probabilityScore = Math.min(100, Math.max(0, probability));
+  const freshnessScore = threshold <= 0
+    ? 100
+    : elapsed === null
+      ? 50
+      : Math.min(100, Math.max(0, 100 * (1 - elapsed / threshold)));
+  return Math.round(probabilityScore * 0.65 + freshnessScore * 0.35);
+}
+
+const momentumVariants: Record<MomentumState, 'win' | 'muted' | 'warm' | 'hot'> = {
+  Surging: 'win',
+  Steady: 'muted',
+  Stalling: 'warm',
+  Rotting: 'hot',
+};
+
+const healthVariants: Record<HealthState, 'win' | 'warm' | 'hot'> = {
+  Healthy: 'win',
+  'At Risk': 'warm',
+  Rotting: 'hot',
+};
+
+const healthFilterClasses: Record<HealthState, string> = {
+  Healthy: 'bg-win/15 text-win border-win/40',
+  'At Risk': 'bg-warm/15 text-warm border-warm/40',
+  Rotting: 'bg-hot/15 text-hot border-hot/40',
+};
+
+const intentLabels: Record<IntentTier, string> = {
+  P1: 'Ready to Buy',
+  P2: 'Evaluating',
+  P3: 'Nurture',
+};
+
+const intentVariants: Record<IntentTier, 'win' | 'brand' | 'muted'> = {
+  P1: 'win',
+  P2: 'brand',
+  P3: 'muted',
+};
+
 function makeId() {
   return crypto.randomUUID();
 }
@@ -41,6 +109,8 @@ export default function PipelinesPage() {
   const [pendingMove, setPendingMove] = useState<{ dealId: string; stage: PipelineStage } | null>(null);
   const [moveModalOpen, setMoveModalOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [healthFilter, setHealthFilter] = useState<HealthState | ''>('');
+  const [intentFilter, setIntentFilter] = useState<IntentTier | ''>('');
   const selectedPipeline = pipelines.find((pipeline) => pipeline.id === pipelineId);
   const stages = useMemo(
     () => pipelineStages.filter((stage) => stage.pipelineId === pipelineId).sort((a, b) => a.stageOrder - b.stageOrder),
@@ -220,9 +290,21 @@ export default function PipelinesPage() {
 
   const stageElapsedDays = (dealId: string, currentStage: PipelineStage) => {
     const currentEntry = historyForDeal(dealId).find((entry) => entry.toStageId === currentStage.id && !entry.exitedAt);
-    if (!currentEntry) return null;
-    return Math.max(0, Math.floor((now - Date.parse(currentEntry.enteredAt)) / 86400000));
+    const enteredAt = currentEntry?.enteredAt
+      ?? deals.find((deal) => deal.id === dealId)?.createdAt;
+    if (!enteredAt) return null;
+    const enteredAtTime = Date.parse(enteredAt);
+    if (!Number.isFinite(enteredAtTime)) return null;
+    return Math.max(0, Math.floor((now - enteredAtTime) / 86400000));
   };
+
+  const visibleDealsForStage = (stage: PipelineStage) => pipelineDeals
+    .filter((deal) => stageForDeal(deal)?.id === stage.id)
+    .filter((deal) => {
+      const health = dealHealth(stageElapsedDays(deal.id, stage), stage.stagnationDaysThreshold);
+      const intent = intentForDeal(deal);
+      return (!healthFilter || health === healthFilter) && (!intentFilter || intent === intentFilter);
+    });
 
   const moveTitle = pendingMove?.stage.name === 'Closed-Lost'
     ? 'Close deal as lost'
@@ -275,9 +357,50 @@ export default function PipelinesPage() {
           </div>
         </div>
       ) : (
-        <div className="flex gap-3 overflow-x-auto pb-3">
+        <>
+        <div className="space-y-3">
+          <div role="group" className="flex flex-wrap items-center gap-2" aria-label="Deal health and intent filters">
+            <span className="text-xs text-muted">Health</span>
+            {(['Healthy', 'At Risk', 'Rotting'] as const).map((health) => (
+              <button
+                key={health}
+                type="button"
+                aria-pressed={healthFilter === health}
+                onClick={() => setHealthFilter((current) => current === health ? '' : health)}
+                className={`rounded-full border px-3 py-1 text-xs transition ${healthFilter === health ? healthFilterClasses[health] : 'border-ink-600 text-muted hover:bg-ink-700 hover:text-white'}`}
+              >
+                {health}
+              </button>
+            ))}
+            <span className="ml-2 text-xs text-muted">Intent</span>
+            {(['P1', 'P2', 'P3'] as const).map((tier) => (
+              <button
+                key={tier}
+                type="button"
+                aria-pressed={intentFilter === tier}
+                onClick={() => setIntentFilter((current) => current === tier ? '' : tier)}
+                className={`rounded-full border px-3 py-1 text-xs transition ${
+                  intentFilter === tier
+                    ? 'border-brand-400/50 bg-brand-400/15 text-brand-300'
+                    : 'border-ink-600 text-muted hover:bg-ink-700 hover:text-white'
+                }`}
+              >
+                {tier}
+              </button>
+            ))}
+            {(healthFilter || intentFilter) && (
+              <button
+                type="button"
+                className="px-2 py-1 text-xs text-muted hover:text-white"
+                onClick={() => { setHealthFilter(''); setIntentFilter(''); }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-3">
           {stages.map((stage) => {
-            const stageDeals = pipelineDeals.filter((deal) => stageForDeal(deal)?.id === stage.id);
+            const stageDeals = visibleDealsForStage(stage);
             return (
               <section key={stage.id} className="w-72 shrink-0 rounded-xl bg-ink-900/50 p-2">
                 <div className="flex items-start justify-between gap-2 px-2 py-2">
@@ -290,22 +413,38 @@ export default function PipelinesPage() {
                 <div className="space-y-2 min-h-32">
                   {stageDeals.map((deal) => {
                     const elapsed = stageElapsedDays(deal.id, stage);
-                    const isRotting = elapsed !== null && stage.stagnationDaysThreshold > 0 && elapsed >= stage.stagnationDaysThreshold;
+                    const health = dealHealth(elapsed, stage.stagnationDaysThreshold);
+                    const momentum = dealMomentum(elapsed, stage.stagnationDaysThreshold);
+                    const intent = intentForDeal(deal);
+                    const score = dealHealthScore(elapsed, stage.stagnationDaysThreshold, deal.probability);
                     const recentHistory = historyForDeal(deal.id)[0];
                     return (
-                      <article key={deal.id} className={`rounded-xl border bg-ink-800/80 p-3 ${isRotting ? 'border-hot/70 shadow-[0_0_0_1px_rgba(255,70,70,0.15)]' : 'border-ink-600'}`}>
+                      <article key={deal.id} className={`rounded-xl border bg-ink-800/80 p-3 ${health === 'Rotting' ? 'border-hot/70 shadow-[0_0_0_1px_rgba(255,70,70,0.15)]' : health === 'At Risk' ? 'border-warm/60' : 'border-ink-600'}`}>
                         <div className="flex items-start justify-between gap-2">
-                          <div className="text-sm font-semibold text-white">{deal.client}</div>
-                          {isRotting && <Badge variant="hot" dot><AlertTriangle size={10} /> Rotting</Badge>}
+                          <div className="min-w-0 text-sm font-semibold text-white">{deal.client}</div>
+                          <div
+                            className={`shrink-0 flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold ${
+                              score >= 75 ? 'border-win/40 bg-win/10 text-win' : score >= 45 ? 'border-warm/40 bg-warm/10 text-warm' : 'border-hot/40 bg-hot/10 text-hot'
+                            }`}
+                            title="Rule-based health estimate from win probability and stage-age threshold; not an AI-generated prediction."
+                            aria-label={`Estimated deal health score ${score} out of 100`}
+                          >
+                            <Zap size={11} /> {score}
+                          </div>
                         </div>
                         <div className="mt-1 text-xs text-muted">{deal.product} · {deal.insurer}</div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          <Badge variant={momentumVariants[momentum]} dot>{momentum}</Badge>
+                          <Badge variant={intentVariants[intent]}>{intent}: {intentLabels[intent]}</Badge>
+                          <Badge variant={healthVariants[health]}>{health === 'At Risk' ? 'At Risk' : health}</Badge>
+                        </div>
                         <div className="mt-3 flex justify-between text-xs">
                           <span className="text-white">{formatAmount(deal.value, deal.currency)}</span>
                           {deal.currency === 'USD' && <span className="text-muted">{formatAmount(toMvr(deal.value, deal.currency, deal.exchangeRate), 'MVR')}</span>}
                           <span className="text-brand-400">{deal.probability}%</span>
                         </div>
                         <div className="mt-2 flex items-center justify-between text-[10px] text-muted">
-                          <span>{elapsed === null ? 'Stage age starts on next move' : `${elapsed} day${elapsed === 1 ? '' : 's'} in stage`}</span>
+                          <span>{elapsed === null ? 'Stage age unavailable' : `${elapsed} day${elapsed === 1 ? '' : 's'} in stage`}</span>
                           {recentHistory?.lossReason && <span className="text-hot">{recentHistory.lossReason}</span>}
                         </div>
                         <label className="block mt-3">
@@ -324,7 +463,9 @@ export default function PipelinesPage() {
               </section>
             );
           })}
+          </div>
         </div>
+        </>
       )}
 
       <Modal open={stageModalOpen} onClose={() => { setStageModalOpen(false); setEditingStage(null); }} title={editingStage ? 'Edit Pipeline Stage' : 'Add Pipeline Stage'} subtitle={selectedPipeline?.name} size="sm" footer={<><button className="btn-ghost" onClick={() => { setStageModalOpen(false); setEditingStage(null); }}>Cancel</button><button type="submit" form="pipeline-stage-form" className="btn-primary"><Check size={14} /> Save Stage</button></>}>

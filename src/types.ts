@@ -16,7 +16,18 @@ export type ActivityStatus = 'IN-PROGRESS' | 'TO-DO' | 'BACKLOG' | 'COMPLETED';
 
 export interface Lead {
   id: string;
+  personId?: string;
+  person?: string;
+  clientId?: string;
   client: string;
+  title?: string;
+  value?: number;
+  valueMvr?: number;
+  currency?: 'MVR' | 'USD';
+  exchangeRate?: number;
+  pipelineId?: string;
+  closeDate?: string;
+  visibility?: 'company' | 'owner_group';
   contact: string;
   country: string;
   insuranceClass: string;
@@ -47,6 +58,46 @@ export interface Client {
   class: string;
   ownerId: string;
   tags: string[];
+  accountStatus?: 'draft' | 'active';
+  insuredEntity?: InsuredEntityDetails;
+}
+
+export interface InsuredEntityDetails {
+  entityType: string;
+  industrySector: string;
+  segment: string;
+  accountHandler: string;
+  branch: string;
+  legalEntityName: string;
+  tradeName: string;
+  companyRegNo: string;
+  gstStatus: string;
+  businessType: string;
+  administrativeAtoll: string;
+  islandLocation: string;
+  postalBilling: string;
+  vesselMarineBase: string;
+  primaryStakeholder: {
+    fullName: string;
+    designation: string;
+    email: string;
+    whatsappMobile: string;
+    identificationType: string;
+    idReferenceNo: string;
+    pepSanctionStatus: string;
+  };
+  targetPremium: number;
+  targetPremiumCurrency: 'MVR' | 'USD' | '';
+  targetPremiumMvr: number;
+  exchangeRate?: number;
+  estimatedBrokeragePct: number;
+  targetLines: string[];
+  nextAction: {
+    type: string;
+    dueDate: string;
+    assignedTo: string;
+    notes: string;
+  };
 }
 
 export interface Activity {
@@ -134,6 +185,7 @@ export interface MiraRow {
 export interface Deal {
   id: string;
   pipelineId?: string;
+  createdAt?: string;
   client: string;
   product: string;
   value: number;
@@ -145,6 +197,7 @@ export interface Deal {
   ownerId: string;
   closeDate: string;
   insurer: string;
+  intentTier?: 'P1' | 'P2' | 'P3';
   proposalSummary?: string;
   lossReason?: string;
 }

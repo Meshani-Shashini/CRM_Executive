@@ -88,7 +88,8 @@ export default function Sidebar({
   open: boolean;
   onClose: () => void;
 }) {
-  const { user, signOut, company } = useApp();
+  const { user, viewAsRole, setViewAsRole, signOut, company } = useApp();
+  const activeRole = viewAsRole ?? user.role;
   const [signOutError, setSignOutError] = useState('');
 
   return (
@@ -120,7 +121,7 @@ export default function Sidebar({
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto no-scrollbar px-3 py-3 space-y-4">
           {GROUPS.map((g) => {
-            const visibleItems = g.items.filter((i) => i.roles.includes(user.role));
+            const visibleItems = g.items.filter((i) => i.roles.includes(activeRole));
             if (visibleItems.length === 0) return null;
             return (
               <div key={g.label}>
@@ -166,12 +167,39 @@ export default function Sidebar({
             </div>
             <div className="flex-1 leading-tight min-w-0">
               <div className="text-sm text-white truncate">{user.name}</div>
-              <div className="text-[10px] text-muted truncate">{user.email}</div>
+              {viewAsRole && <div className="text-[10px] text-warm truncate">Viewing as {roleLabel[viewAsRole]}</div>}
             </div>
             <span className="pill bg-brand-400/10 text-brand-400 border border-brand-400/30 !px-1.5 !py-0.5 !text-[9px]">
-              {roleLabel[user.role]}
+              {roleLabel[activeRole]}
             </span>
           </div>
+          {user.role === 'admin' && (
+            <div className="mt-2 grid grid-cols-2 gap-1" role="group" aria-label="Preview role">
+              {([
+                ['admin', 'Admin'],
+                ['sales', 'Sales'],
+                ['finance', 'Finance'],
+                ['client', 'Client'],
+              ] as const).map(([role, label]) => (
+                <button
+                  key={role}
+                  type="button"
+                  aria-pressed={activeRole === role}
+                  onClick={() => {
+                    setViewAsRole(role);
+                    const route = role === 'finance' ? 'invoices' : role === 'client' ? 'clients' : 'dashboard';
+                    window.location.hash = `#/${route}`;
+                    onClose();
+                  }}
+                  className={`rounded-md px-2 py-1.5 text-[10px] font-medium transition ${
+                    activeRole === role ? 'bg-brand-500 text-white' : 'text-muted hover:bg-ink-700 hover:text-white'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           {signOutError && <p role="alert" className="mt-2 px-2 text-xs text-hot">{signOutError}</p>}
           <button
             type="button"

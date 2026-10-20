@@ -56,6 +56,7 @@ export default function DealsPage() {
     const deal: Deal = {
       id: `d-${Date.now()}`,
       pipelineId: String(data.get('pipelineId')),
+      createdAt: new Date().toISOString(),
       client: String(data.get('client')),
       product: String(data.get('product')),
       value,
@@ -67,6 +68,7 @@ export default function DealsPage() {
       ownerId: user.id,
       closeDate: String(data.get('closeDate')),
       insurer: String(data.get('insurer')),
+      intentTier: String(data.get('intentTier')) as Deal['intentTier'],
     };
     setDeals([deal, ...deals]);
     setCreateOpen(false);
@@ -162,6 +164,13 @@ export default function DealsPage() {
           {dealCurrency === 'USD' && Number(dealAmount) > 0 && Number(exchangeRate) > 0 && <p className="sm:col-span-2 text-sm text-muted">Equivalent: {formatAmount(toMvr(Number(dealAmount), 'USD', Number(exchangeRate)), 'MVR')}</p>}
           {createError && <p role="alert" className="sm:col-span-2 text-sm text-hot">{createError}</p>}
           <Field label="Probability (%)"><input className="input" name="probability" type="number" min="0" max="100" step="0.01" required /></Field>
+          <Field label="Intent Tier">
+            <select className="input" name="intentTier" required defaultValue="P3">
+              <option value="P1">P1 · Ready to Buy</option>
+              <option value="P2">P2 · Evaluating</option>
+              <option value="P3">P3 · Nurture</option>
+            </select>
+          </Field>
           <Field label="Expected Close"><input className="input" name="closeDate" type="date" required /></Field>
         </form>
       </Modal>

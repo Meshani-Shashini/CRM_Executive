@@ -42,7 +42,9 @@ export default function Topbar({
   page: string;
   onMenu: () => void;
 }) {
-  const { user, signOut } = useApp();
+  const { user, viewAsRole, setViewAsRole, signOut } = useApp();
+  const canPreviewRoles = user.role === 'admin';
+  const activeRole = viewAsRole ?? user.role;
   const [profileOpen, setProfileOpen] = useState(false);
   const [signOutError, setSignOutError] = useState('');
   const profileRef = useRef<HTMLDivElement>(null);
@@ -104,7 +106,9 @@ export default function Topbar({
             </div>
             <div className="hidden sm:block leading-tight text-left">
               <div className="text-sm text-white">{user.name}</div>
-              <div className="text-[10px] text-muted">{user.title}</div>
+              <div className="text-[10px] text-muted">
+                {viewAsRole ? `Viewing as ${roleLabel[viewAsRole]}` : user.title}
+              </div>
             </div>
             <ChevronDown size={14} className={`text-muted hidden sm:block transition-transform ${profileOpen ? 'rotate-180' : ''}`} />
           </button>
@@ -112,9 +116,39 @@ export default function Topbar({
             <div role="menu" aria-label="Account menu" className="absolute right-0 top-full mt-2 w-64 rounded-xl border border-ink-600 bg-ink-900 p-2 shadow-xl">
               <div className="px-3 py-2 border-b border-ink-700">
                 <div className="text-sm text-white">{user.name}</div>
-                <div className="text-xs text-muted truncate">{user.email}</div>
-                <div className="text-[10px] text-brand-400 mt-1">{roleLabel[user.role]}</div>
+                <div className="text-[10px] text-brand-400 mt-1">{roleLabel[activeRole]}</div>
+                {viewAsRole && <div className="mt-1 text-[10px] text-warm">View-only role preview</div>}
               </div>
+              {canPreviewRoles && (
+                <div className="border-b border-ink-700 p-2">
+                  <div className="px-1 pb-2 text-[10px] uppercase tracking-wider text-muted">View role</div>
+                  <div role="group" aria-label="Preview role" className="grid grid-cols-2 gap-1">
+                    {([
+                      ['admin', 'Admin'],
+                      ['sales', 'Sales'],
+                      ['finance', 'Finance'],
+                      ['client', 'Client'],
+                    ] as const).map(([role, label]) => (
+                      <button
+                        key={role}
+                        type="button"
+                        aria-pressed={activeRole === role}
+                        onClick={() => {
+                          setViewAsRole(role);
+                          const route = role === 'finance' ? 'invoices' : role === 'client' ? 'clients' : 'dashboard';
+                          window.location.hash = `#/${route}`;
+                          setProfileOpen(false);
+                        }}
+                        className={`rounded-md px-2 py-2 text-xs font-medium transition ${
+                          activeRole === role ? 'bg-brand-500 text-white' : 'text-muted hover:bg-ink-700 hover:text-white'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {signOutError && <p role="alert" className="px-3 py-2 text-xs text-hot">{signOutError}</p>}
               <button
                 type="button"

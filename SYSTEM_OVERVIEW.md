@@ -1,73 +1,71 @@
 # System overview
 
-## What the system is
+## What this system does
 
-The Insurance Brokers Management System (IBMS) is a browser-based CRM for an insurance brokerage. It brings together lead and deal tracking, client records, policy-related workflows, invoices and payments, pipeline configuration, and administration. The interface is a single-page React application; Supabase provides sign-in, user profiles, and shared record storage.
+The Insurance Brokers Management System (IBMS) is a browser-based CRM for an insurance brokerage. It provides interfaces for managing leads, clients, sales deals and pipelines, policy and finance records, and administration. The frontend is a React single-page application written in TypeScript and built with Vite. Supabase provides authentication, user profiles, database storage, and an Edge Function for administrator-created accounts.
 
-## Application flow
+## How a session works
 
-1. `src/main.tsx` mounts the React application. `src/App.tsx` wraps the interface in `AppProvider`, which owns authentication and shared application state.
-2. On startup, the provider restores any saved Supabase session and loads that user's profile. Until this check finishes, the application displays a loading message. Signed-out users see the sign-in and client-registration screen.
-3. After sign-in, the provider loads the tenant's records. A new or cleared tenant starts with empty CRM collections; administrators can configure pipelines and stages.
-4. The sidebar navigates between modules using URL hashes such as `#/leads`. The application checks the user's role before rendering each route; unauthorized routes show an access-restricted message.
-5. Page components read and update shared state through `useApp()`. In a connected session, eligible changes are sent to Supabase after a short debounce. Save and load failures are shown in the application shell.
+1. `src/main.tsx` mounts the React app, and `src/App.tsx` wraps the application shell in `AppProvider`.
+2. With normal authentication, the provider restores any saved Supabase session and loads the associated user profile. The application shows a brief session-check screen while this runs. Without a signed-in user, it displays the login and client-registration screen.
+3. After login, the provider loads tenant records from Supabase. Pages use the shared state exposed by `useApp()`. With the local development demo bypass enabled, login uses the configured demo credentials, records remain empty and in memory, and remote persistence is skipped.
+4. The sidebar navigates using URL hashes such as `#/leads`. The shell checks the current user's role before showing a module; disallowed routes display an access-restricted message.
+5. In a normal Supabase session, changes to writable shared collections are debounced briefly, then synchronized through the `sync_tenant_records` RPC. Read or save errors are surfaced in the application shell.
 
-## Main areas
+## Main modules
 
-| Area | Purpose |
+| Module | Current behavior |
 | --- | --- |
-| Dashboard | Executive summary and lead, deal, and staff views, calculated from current tenant records. |
-| Leads | Create and filter leads, and view them by funnel stage in a board or table. |
-| Clients | Search client records, create clients, and keep client-related activities and quote notes. |
-| Deals and Pipelines | Track deal value and probability; configure pipeline stages, move deals through stages, record stage history, and capture loss reasons. |
-| Funnels | Summarize stage entries and conversions from recorded deal stage history. |
-| Calendar | View renewal and other scheduled events. |
-| Policy and finance | Quotation slips, invoices, payments, and the MIRA Form 1 reporting area. |
-| Settings | Configure company, tax, email-template, and user-related settings for administrators. |
+| Dashboard | Summarizes current leads, deals, clients, activities, and team records; empty collections show empty-state messages. |
+| Leads | Creates leads with a sales person, searchable organization, title, pipeline, USD/MVR value, insurance product class, owner, expected close date, and company/owner-group visibility metadata. A new organization can be added in an overlay without closing the lead form. Existing legacy leads continue to display using MVR and legacy field fallbacks. |
+| Clients | Searches and creates insured-entity customer accounts with classification, MIRA/compliance, Maldives location, stakeholder, target portfolio, and next-action details; logs client activities and quote details. Custom dropdown values are persisted in the tenant-scoped `customer-lookups` collection. |
+| Deals | Creates deals attached to configured pipelines and stages, records intent tier (P1/P2/P3), and displays values and weighted values. Older deals without an intent tier are categorized from their probability. |
+| Pipelines | Lets administrators create pipelines and configure stages. Users can move deals between stages; stage history tracks time in stage, proposal details, and loss reasons. Kanban cards show momentum and health states based on each stage's configured stagnation threshold, plus intent tier and a rule-based health score from win probability and stage age. Below 40% of the threshold, momentum is Surging; 40–69% is Steady; 70–99% is Stalling/At Risk; at or above 100% is Rotting. The score weights win probability at 65% and remaining threshold-based freshness at 35%. Health and intent chips filter the board. The score is a transparent heuristic, not an AI-generated prediction. |
+| Funnels | Calculates stage-entry and conversion metrics from deal stage history. |
+| Invoices and Payments | Creates invoices, records payments, calculates invoice totals, and updates invoice payment status. |
+| Settings | Provides administrator controls for company settings, tax rates, email templates, and user provisioning. |
+| Calendar | Renders a calendar and upcoming-events area; no event collection is currently connected, so it starts empty. |
+| MIRA Form 1 | Provides a report layout, date filters, print, and CSV export; its row collection is currently empty and not connected to CRM records. |
+| Quotation Request Slips | Shows an empty list and a request form; submitting the form currently closes it without persisting a slip. |
 
-The navigation also includes plans, reports, documents, quotations, internal slips, payment requests, renewals, information requests, rate cards, targets, and the audit log. These routes currently display “Coming soon” placeholder screens rather than full workflows.
+Other navigation entries—such as plans, reports, documents, quotations, internal slips, payment requests, renewals, information requests, rate cards, targets, and audit log—currently render “Coming soon” placeholder pages. The top-bar search and notification controls are visual UI only.
 
-Quotes and deals can be recorded in MVR or USD. USD entry requires an editable per-form rate (MVR per USD); the form shows the MVR equivalent and saves the rate with the record. MVR amounts remain MVR. Cross-currency deal summaries are normalized to MVR using each deal's saved rate.
+## Currency handling
+
+Quote premiums and deal values support MVR and USD. Choosing USD prefills an editable conversion rate of **15.42 MVR per USD**; this is a configurable form default, not a live exchange-rate feed. The entered amount and rate are saved with the quote or deal, and the form shows the MVR equivalent. MVR amounts are not converted. Deal totals and weighted summaries normalize each deal to MVR using its stored rate.
 
 ## Roles and access
 
-The application uses four internal role keys, mapped to profile labels in Supabase:
+Application role keys map to Supabase profile roles:
 
-| App role | Supabase profile role | Typical access |
+| Application role | Supabase role | Typical access |
 | --- | --- | --- |
-| `admin` | System Admin | All current modules, settings, user administration, and all supported record collections. |
-| `sales` | Sales | Leads, deals, clients, calendar, pipelines, quotations, and sales workflows. |
+| `admin` | System Admin | All implemented modules, settings, user administration, and supported record collections. |
+| `sales` | Sales | Leads, deals, clients, pipelines, calendar, and sales workflows. |
 | `finance` | Accountant | Dashboard, clients, invoices, payments, reports, funnels, and MIRA. |
 | `client` | Client | Matched client details, documents, invoices, and payments. |
 
-The route and navigation checks improve the user experience, but database permissions are enforced separately in the Supabase migration. Registration creates a Client profile; it does not let a registrant choose a staff role. An administrator provisions staff accounts through the `admin-create-user` Edge Function.
+The frontend hides or blocks modules according to role, while PostgreSQL row-level security and the write RPC enforce data permissions independently. New sign-ups receive the Client role and cannot choose their own staff role. Administrator account creation uses the `admin-create-user` Edge Function, which verifies the caller and uses the Supabase service-role key only within the function runtime.
+
+The Admin profile menu and sidebar provide Admin, Sales, Finance, and Client view-preview buttons. Previewing another role changes the visible navigation and routes but does not change the authenticated user, Supabase role, or database permissions. This is an admin-only UI preview, not user impersonation. Lead visibility selection is currently stored as record metadata and is not enforced as per-lead authorization by the database policies. Staff database access remains governed by the broader tenant role policies until visibility-group membership and enforcement are implemented.
+
+## Authentication modes
+
+- **Normal mode:** Supabase Auth verifies the account credentials. `VITE_ADMIN_LOGIN_EMAIL` optionally maps the login name `admin` to a real Supabase email; it does not bypass password verification. User profiles supply the role used by the app.
+- **Local demo mode:** `VITE_AUTH_BYPASS=true` enables a development-only login when running Vite in development mode. `VITE_DEMO_ADMIN_USERNAME` and `VITE_DEMO_ADMIN_PASSWORD` configure its credentials. This mode skips Supabase sign-in and data persistence and disables registration. Vite `VITE_*` settings are exposed to browser code, so demo credentials must be disposable and the bypass must not be used as production authentication.
 
 ## Data and persistence
 
-The shared client-side state includes leads, clients, activities, deals, invoices, payments, tax rates, pipelines and stages, stage-history entries, company settings, and email templates. The browser uses the Supabase URL and public anon key configured as `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`; authentication sessions persist in the browser.
+The app's shared state covers leads, clients, activities, deals, invoices, payments, tax rates, pipelines, pipeline stages, deal stage history, company settings, and email templates. These collections begin empty; bundled product codes and insurer options are reference catalogs, not example customer records.
 
-CRM collections are stored as JSON records in the tenant-scoped `tenant_records` table. The app loads records for its configured tenant and saves each permitted collection through the `sync_tenant_records` RPC. That function validates the collection and record IDs, checks the caller's profile role, and synchronizes the collection. PostgreSQL row-level security restricts reads: staff roles can read tenant records, while clients can read only records associated with their profile email and matched client.
+In a connected session, records are represented in the tenant-scoped `tenant_records` table as JSON data keyed by tenant, resource, and record ID. Reads are filtered by PostgreSQL row-level security. Writes go through the `sync_tenant_records` RPC, which validates record IDs and checks the caller's role before synchronizing a collection. Clients are limited to records associated with their profile and matched client. Supabase Auth sessions are persisted in the browser.
 
-The current setup uses one fixed tenant ID in the frontend and database bootstrap. It is configured for a single tenant and is not yet a tenant-selection or tenant-provisioning system. Development can explicitly enable `VITE_AUTH_BYPASS=true`; this uses a local development administrator with empty in-memory records and skips remote persistence.
+The deployment currently uses a fixed tenant ID (`00000000-0000-4000-8000-000000000001`); it is not a tenant-selection or tenant-provisioning system. Migration `20261019020000_clear_demo_tenant_records.sql` deletes all CRM rows for that tenant if applied, but preserves Auth accounts and user profiles. Review the target database before applying it.
 
-## Supabase components
+The New Customer Account form stores insured-entity details, stakeholder screening status, target lines/premium, and the required next action in the client record. Its searchable lookup options are tenant-level state; new options are synced through `sync_tenant_records` and require migration `20261020070000_customer_account_lookups.sql`. MIRA/NID checks and PEP/sanctions screening are not connected to external verification providers; the form records user-entered statuses only.
 
-- **`user_profiles`** associates each Supabase Auth user with a name, email, tenant, title, and role. A database trigger creates a Client profile for each newly registered auth user.
-- **`tenant_records`** stores application records by tenant, resource name, and record ID.
-- **`sync_tenant_records`** is the authenticated RPC used for role-checked record writes.
-- **`admin-create-user`** verifies the caller's Supabase session and System Admin role, validates the submitted user details, creates the auth account with the service-role credential held by the function runtime, and assigns the requested profile.
+## Local setup
 
-The service-role key must stay in Supabase Edge Function secrets and must not be placed in a `VITE_*` variable or shipped to the browser.
+Install packages with `npm install`. Configure `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the ignored `.env` file for normal Supabase usage. Configure `VITE_ADMIN_LOGIN_EMAIL` if using the `admin` email alias. Start the frontend with `npm run dev`. The project also provides `npm run typecheck`, `npm run lint`, and `npm run build`.
 
-## Current boundaries
-
-- This is a frontend application; core CRM data access is through Supabase rather than a custom application server.
-- Some navigation items are visual placeholders, and dashboard summary data includes fixed demonstration values.
-- The top-bar search and notification controls are visual UI elements and do not currently perform search or notification workflows.
-- Product and insurer catalogs are static reference options; tenant-specific CRM records are not initialized from bundled sample data.
-- The latest database migration deletes all CRM records for the configured tenant while preserving Auth accounts and user profiles. Review the target before applying it.
-- Setup steps for applying the database migration, promoting the initial administrator, and deploying the user-provisioning function are in [SUPABASE.md](./SUPABASE.md).
-
-## Running locally
-
-Install dependencies with `npm install`, configure `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and `VITE_ADMIN_LOGIN_EMAIL` in the ignored `.env` or `.env.local` file, and start the development server with `npm run dev`. The `admin` login alias maps to the configured Supabase email and does not bypass Supabase password authentication. For a local demo only, enable `VITE_AUTH_BYPASS=true` and set `VITE_DEMO_ADMIN_USERNAME` and `VITE_DEMO_ADMIN_PASSWORD` in ignored `.env.local`; these values are exposed to the browser, so use disposable credentials and never enable the bypass in production. The project also provides `npm run build`, `npm run typecheck`, and `npm run lint`.
+Database migration, administrator promotion, Edge Function deployment, and environment setup instructions are in [SUPABASE.md](./SUPABASE.md).

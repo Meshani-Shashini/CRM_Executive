@@ -9,13 +9,14 @@ interface ModalProps {
   children: ReactNode;
   footer?: ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  layer?: 'base' | 'overlay';
 }
 
-export default function Modal({ open, onClose, title, subtitle, children, footer, size = 'md' }: ModalProps) {
+export default function Modal({ open, onClose, title, subtitle, children, footer, size = 'md', layer = 'base' }: ModalProps) {
   if (!open) return null;
   const w = { sm: 'max-w-md', md: 'max-w-xl', lg: 'max-w-3xl', xl: 'max-w-5xl' }[size];
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fadeIn" onClick={onClose}>
+    <div className={`fixed inset-0 ${layer === 'overlay' ? 'z-[60]' : 'z-50'} flex items-center justify-center p-4 animate-fadeIn`} onClick={onClose}>
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
       <div
         className={`relative ${w} w-full glass rounded-2xl shadow-glass flex flex-col max-h-[90vh] animate-slideUp`}

@@ -13,7 +13,16 @@ The browser uses Supabase Auth and the public anon key. CRM records are stored i
    npx supabase db push
    ```
 
-   **The newest migration deletes all `tenant_records` for the configured tenant.** This is intentionally destructive and preserves Auth users and `user_profiles`; review the target project before applying it.
+   Migration `20261019020000_clear_demo_tenant_records.sql` deletes all `tenant_records` for the configured tenant. It is intentionally destructive and preserves Auth users and `user_profiles`. Review the target project before applying it. Migration `20261020070000_customer_account_lookups.sql` updates the record-sync permissions for saved customer lookup options; it does not clear existing records.
+
+   If the cleanup migration is already recorded as applied, `db push` will not run it again. To clear records added since then, sign out of the app, confirm the Supabase project is the one configured for this app, then run this in that project's SQL Editor:
+
+   ```sql
+   DELETE FROM public.tenant_records
+   WHERE tenant_id = '00000000-0000-4000-8000-000000000001';
+   ```
+
+   This removes **all CRM collections** for the app's configured tenant, not just dashboard examples. Afterward, reopen the app and sign in so the dashboard fetches the empty collections.
 3. Sign up the intended first administrator using the app. If email confirmation is enabled, confirm that address first.
 4. In the Supabase SQL Editor, promote only that known account to System Admin:
 
