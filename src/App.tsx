@@ -131,7 +131,6 @@ function Shell() {
       <Sidebar active={page} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Topbar page={page} onMenu={() => setSidebarOpen(true)} />
-        {user.id === 'vercel-demo-admin' && <div role="status" className="border-b border-warm/30 bg-warm/10 px-4 py-2 text-sm text-warm">Demo session: changes are stored only in this browser session and are not saved to Supabase.</div>}
         {persistenceError && <div role="alert" className="border-b border-hot/30 bg-hot/10 px-4 py-2 text-sm text-hot">{persistenceError}</div>}
         <main className="flex-1 overflow-y-auto p-4 lg:p-6 animate-fadeIn">
           {renderPage()}
