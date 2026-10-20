@@ -188,6 +188,8 @@ export interface Deal {
   id: string;
   pipelineId?: string;
   createdAt?: string;
+  renewalForClientId?: string;
+  renewalExpiry?: string;
   client: string;
   product: string;
   value: number;
@@ -199,6 +201,7 @@ export interface Deal {
   ownerId: string;
   closeDate: string;
   insurer: string;
+  disposition?: 'won' | 'lost';
   intentTier?: 'P1' | 'P2' | 'P3';
   proposalSummary?: string;
   lossReason?: string;
@@ -230,6 +233,7 @@ export interface StageHistoryAudit {
   enteredAt: string;
   exitedAt: string | null;
   durationSeconds: number | null;
+  outcome?: 'won' | 'lost';
   lossReason?: string;
   details?: string;
 }

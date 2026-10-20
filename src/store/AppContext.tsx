@@ -39,6 +39,7 @@ interface AppState {
   users: User[];
   setUsers: (items: User[]) => void;
   createUser: (user: { name: string; email: string; password: string; role: Role; title: string }) => Promise<User>;
+  updateUserProfile: (user: Pick<User, 'id' | 'name' | 'title' | 'role'>) => Promise<User>;
   company: typeof COMPANY;
   setCompany: (company: typeof COMPANY) => void;
   emailTemplates: Record<string, string>;
@@ -374,6 +375,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return profile;
   }, []);
 
+  const updateUserProfile = useCallback(async (updatedUser: Pick<User, 'id' | 'name' | 'title' | 'role'>) => {
+    if (user.role !== 'admin') throw new Error('Only System Admins can update user profiles.');
+    if (updatedUser.id === user.id && updatedUser.role !== user.role) {
+      throw new Error('You cannot change your own role.');
+    }
+    const { data, error } = await supabase
+      .from('user_profiles')
+      .update({
+        name: updatedUser.name.trim(),
+        title: updatedUser.title?.trim() ?? '',
+        role: ROLE_TO_PROFILE[updatedUser.role],
+      })
+      .eq('id', updatedUser.id)
+      .eq('tenant_id', TENANT_ID)
+      .select('id, name, email, role, title, client_record_id')
+      .single();
+    if (error) throw new Error(`Could not update user profile: ${error.message}`);
+    const profile = appUser(data as ProfileRecord);
+    setUsers((current) => current.map((item) => item.id === profile.id ? profile : item));
+    return profile;
+  }, [user.id, user.role]);
+
   const activeViewRole = viewAsRole ?? user.role;
   const hasAccess = useCallback(
     (allowed: Role[]) => Boolean(user.id) && allowed.includes(activeViewRole),
@@ -385,12 +408,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     taxRates, setTaxRates, leads, setLeads, clients, setClients, customerLookups, setCustomerLookups,
     activities, setActivities,
     deals, setDeals, invoices, setInvoices, payments, setPayments, users, setUsers,
-    createUser, company, setCompany, emailTemplates, setEmailTemplates, persistenceError,
+    createUser, updateUserProfile, company, setCompany, emailTemplates, setEmailTemplates, persistenceError,
     pipelines, setPipelines, pipelineStages, setPipelineStages, stageHistory, setStageHistory,
   }), [
     user, authLoading, authError, viewAsRole, setViewAsRole, signIn, register, signOut, hasAccess,
     taxRates, leads, clients, customerLookups, activities, deals, invoices, payments, users,
-    createUser, company, emailTemplates, persistenceError, pipelines, pipelineStages, stageHistory,
+    createUser, updateUserProfile, company, emailTemplates, persistenceError, pipelines, pipelineStages, stageHistory,
   ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

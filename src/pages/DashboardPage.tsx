@@ -20,7 +20,9 @@ export default function DashboardPage() {
     0,
   );
   const wonDeals = deals.filter((deal) => {
+    if (deal.disposition) return deal.disposition === 'won';
     const stage = deal.stage.trim().toLowerCase();
+    if ((stage.includes('bound') || stage.includes('won')) && (stage.includes('lost') || stage.includes('declin'))) return false;
     return stage === 'closed-won'
       || stage.includes('won')
       || stage.includes('bound')

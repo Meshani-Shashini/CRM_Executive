@@ -5,7 +5,13 @@ import { useApp } from '../store/AppContext';
 
 function isLostStage(name: string) {
   const normalized = name.toLowerCase();
-  return normalized.includes('lost') || normalized.includes('declined');
+  return (normalized.includes('lost') || normalized.includes('declined'))
+    && !(normalized.includes('policy bound') && normalized.includes('lost'));
+}
+
+function isCombinedDispositionStage(name: string) {
+  const normalized = name.toLowerCase();
+  return normalized.includes('policy bound') && normalized.includes('lost');
 }
 
 export default function FunnelsPage() {
@@ -45,14 +51,22 @@ export default function FunnelsPage() {
     };
   });
   const maxCount = Math.max(1, ...stageStats.map((item) => item.entered));
-  const lostStage = pipelineStages.find((stage) => stage.pipelineId === pipelineId && isLostStage(stage.name));
-  const lostCount = lostStage
-    ? new Set(stageHistory.filter((entry) => entry.toStageId === lostStage.id).map((entry) => entry.dealId)).size
-    : 0;
+  const lostStages = pipelineStages.filter((stage) => stage.pipelineId === pipelineId && isLostStage(stage.name));
+  const combinedStage = pipelineStages.find((stage) => stage.pipelineId === pipelineId && isCombinedDispositionStage(stage.name));
+  const lostCount = new Set([
+    ...stageHistory
+      .filter((entry) => lostStages.some((stage) => stage.id === entry.toStageId))
+      .map((entry) => entry.dealId),
+    ...stageHistory
+      .filter((entry) => entry.toStageId === combinedStage?.id && entry.outcome === 'lost')
+      .map((entry) => entry.dealId),
+  ]).size;
   const wonStage = stages.find((stage) => stage.winProbabilityPct === 100)
     ?? stages[stages.length - 1];
   const wonCount = wonStage
-    ? new Set(stageHistory.filter((entry) => entry.toStageId === wonStage.id).map((entry) => entry.dealId)).size
+    ? new Set(stageHistory
+      .filter((entry) => entry.toStageId === wonStage.id && (!combinedStage || wonStage.id !== combinedStage.id || entry.outcome === 'won'))
+      .map((entry) => entry.dealId)).size
     : 0;
   const totalTracked = new Set(stageHistory.filter((entry) => stages.some((stage) => stage.id === entry.toStageId)).map((entry) => entry.dealId)).size;
 

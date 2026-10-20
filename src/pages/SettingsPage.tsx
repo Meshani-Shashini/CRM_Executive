@@ -6,19 +6,20 @@ import {
   Settings as SettingsIcon, Percent, Mail, Users as UsersIcon, ShieldAlert,
   Save, Plus, Pencil, Trash2, Check, Lock,
 } from 'lucide-react';
-import type { TaxRate, Role } from '../types';
+import type { TaxRate, Role, User } from '../types';
 
 type Tab = 'general' | 'tax' | 'email' | 'users';
 
 export default function SettingsPage() {
   const {
-    user, hasAccess, taxRates, setTaxRates, users, createUser,
+    user, hasAccess, taxRates, setTaxRates, users, createUser, updateUserProfile,
     company, setCompany, emailTemplates, setEmailTemplates,
   } = useApp();
   const [tab, setTab] = useState<Tab>('tax');
   const [editing, setEditing] = useState<TaxRate | null>(null);
   const [open, setOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
   const [userError, setUserError] = useState('');
   const [userSubmitting, setUserSubmitting] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<string | null>(null);
@@ -85,6 +86,26 @@ export default function SettingsPage() {
       setNotice(`User ${name} added.`);
     } catch (error) {
       setUserError(error instanceof Error ? error.message : 'Could not create user.');
+    } finally {
+      setUserSubmitting(false);
+    }
+  };
+
+  const saveUserProfile = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editingUser) return;
+    const data = new FormData(event.currentTarget);
+    const name = String(data.get('name') ?? '').trim();
+    const title = String(data.get('title') ?? '').trim();
+    const role = String(data.get('role') ?? editingUser.role) as Role;
+    setUserSubmitting(true);
+    try {
+      await updateUserProfile({ id: editingUser.id, name, title, role });
+      setEditingUser(null);
+      setUserError('');
+      setNotice(`User profile for ${name} updated. Authentication email is unchanged.`);
+    } catch (error) {
+      setUserError(error instanceof Error ? error.message : 'Could not update user profile.');
     } finally {
       setUserSubmitting(false);
     }
@@ -204,10 +225,15 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <div className="text-sm text-white">{u.name}</div>
-                    <div className="text-[11px] text-muted">{u.email}</div>
+                    {u.title && <div className="text-[11px] text-muted">{u.title}</div>}
                   </div>
                 </div>
-                <Badge variant={u.role === 'admin' ? 'hot' : 'brand'}>{roleLabel[u.role]}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant={u.role === 'admin' ? 'hot' : 'brand'}>{roleLabel[u.role]}</Badge>
+                  <button type="button" className="btn-ghost !px-2 !py-1.5" onClick={() => { setEditingUser(u); setUserError(''); }} aria-label={`Edit profile for ${u.name}`} title="Edit user profile">
+                    <Pencil size={14} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -224,6 +250,35 @@ export default function SettingsPage() {
           <Field label="Temporary password (minimum 12 characters)"><input className="input" name="password" type="password" minLength={12} maxLength={72} autoComplete="new-password" required /></Field>
           <Field label="Role"><select className="input" name="role"><option value="sales">Sales</option><option value="finance">Accountant</option><option value="client">Client</option><option value="admin">System Admin</option></select></Field>
         </form>
+      </Modal>
+      <Modal
+        open={editingUser !== null}
+        onClose={() => { setEditingUser(null); setUserError(''); }}
+        title="Edit User Profile"
+        subtitle="Update the display name, job title, or application role. Authentication email cannot be changed here."
+        footer={<>
+          <button type="button" className="btn-ghost" onClick={() => { setEditingUser(null); setUserError(''); }}>Cancel</button>
+          <button type="submit" form="edit-user-form" className="btn-primary" disabled={userSubmitting}>
+            <Save size={14} /> {userSubmitting ? 'Saving…' : 'Save Profile'}
+          </button>
+        </>}
+      >
+        {editingUser && (
+          <form id="edit-user-form" onSubmit={saveUserProfile} className="space-y-3">
+            <Field label="Full name"><input className="input" name="name" defaultValue={editingUser.name} required /></Field>
+            <Field label="Job title"><input className="input" name="title" defaultValue={editingUser.title ?? ''} /></Field>
+            <Field label="Role">
+              <select className="input" name="role" defaultValue={editingUser.role} disabled={editingUser.id === user.id}>
+                <option value="sales">Sales</option>
+                <option value="finance">Accountant</option>
+                <option value="client">Client</option>
+                <option value="admin">System Admin</option>
+              </select>
+              {editingUser.id === user.id && <span className="mt-1 block text-xs text-muted">Your own role cannot be changed here.</span>}
+            </Field>
+            {userError && <p role="alert" className="text-sm text-hot">{userError}</p>}
+          </form>
+        )}
       </Modal>
       <Modal open={editingTemplate !== null} onClose={() => setEditingTemplate(null)} title={`Edit ${editingTemplate ?? ''} template`} footer={<><button className="btn-ghost" onClick={() => setEditingTemplate(null)}>Cancel</button><button type="submit" form="edit-template-form" className="btn-primary"><Save size={14} /> Save</button></>}>
         <form id="edit-template-form" onSubmit={saveTemplate}><Field label="Template content"><textarea className="input min-h-40" value={templateText} onChange={(event) => setTemplateText(event.target.value)} required /></Field></form>

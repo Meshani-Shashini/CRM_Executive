@@ -56,7 +56,7 @@ BEGIN
         jsonb_build_object(
           'id', '00000000-0000-4000-8000-000000000102',
           'pipelineId', default_pipeline_id,
-          'name', 'Market Placement / Tender',
+          'name', 'Market Placement / Outender',
           'stageOrder', 2,
           'winProbabilityPct', 40,
           'stagnationDaysThreshold', 30
@@ -69,7 +69,7 @@ BEGIN
         jsonb_build_object(
           'id', '00000000-0000-4000-8000-000000000103',
           'pipelineId', default_pipeline_id,
-          'name', 'Quote Comparison Presented',
+          'name', 'Quote Comparison & Presentation',
           'stageOrder', 3,
           'winProbabilityPct', 60,
           'stagnationDaysThreshold', 14
@@ -95,7 +95,7 @@ BEGIN
         jsonb_build_object(
           'id', '00000000-0000-4000-8000-000000000105',
           'pipelineId', default_pipeline_id,
-          'name', 'Policy Bound / Won',
+          'name', 'Policy Bound / won',
           'stageOrder', 5,
           'winProbabilityPct', 100,
           'stagnationDaysThreshold', 0
