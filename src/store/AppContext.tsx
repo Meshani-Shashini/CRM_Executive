@@ -9,6 +9,11 @@ import type {
 import { COMPANY } from '../data/catalogs';
 import { createDefaultCustomerLookups, mergeCustomerLookups, type CustomerLookups } from '../data/customerLookups';
 import { supabase, TENANT_ID } from '../lib/supabase';
+import {
+  createSampleLeads,
+  initializeSampleLeads as persistSampleLeads,
+  SAMPLE_LEAD_IDS,
+} from '../lib/sampleLeads';
 
 interface AppState {
   user: User;
@@ -19,6 +24,7 @@ interface AppState {
   signIn: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  initializeSampleLeads: (ownerIds?: string[]) => Promise<void>;
   hasAccess: (allowed: Role[]) => boolean;
   taxRates: TaxRate[];
   setTaxRates: (items: TaxRate[]) => void;
@@ -289,6 +295,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setPersistenceError(null);
   }, []);
 
+  const initializeSampleLeads = useCallback(async (ownerIds = [user.id]) => {
+    const validOwnerIds = ownerIds.filter(Boolean);
+    if (validOwnerIds.length === 0) {
+      throw new Error('Sign in as a staff user or provide an existing staff owner ID before seeding sample Leads.');
+    }
+
+    const samples = AUTH_BYPASS
+      ? createSampleLeads(validOwnerIds)
+      : await persistSampleLeads(validOwnerIds);
+    const sampleIdSet = new Set<string>(SAMPLE_LEAD_IDS);
+    setLeads((current) => [
+      ...current.filter((lead) => !sampleIdSet.has(lead.id)),
+      ...samples,
+    ]);
+  }, [user.id]);
+
   useEffect(() => {
     if (AUTH_BYPASS || authLoading || !user.id || user.id === DEMO_USER.id) return;
     let cancelled = false;
@@ -442,14 +464,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
   const value = useMemo(() => ({
     user, authLoading, authError, viewAsRole, setViewAsRole,
-    signIn, register, signOut, hasAccess,
+    signIn, register, signOut, initializeSampleLeads, hasAccess,
     taxRates, setTaxRates, leads, setLeads, clients, setClients, customerLookups, setCustomerLookups,
     activities, setActivities,
     deals, setDeals, invoices, setInvoices, payments, setPayments, users, setUsers,
     createUser, updateUserProfile, company, setCompany, emailTemplates, setEmailTemplates, persistenceError,
     pipelines, setPipelines, pipelineStages, setPipelineStages, stageHistory, setStageHistory,
   }), [
-    user, authLoading, authError, viewAsRole, setViewAsRole, signIn, register, signOut, hasAccess,
+    user, authLoading, authError, viewAsRole, setViewAsRole, signIn, register, signOut, initializeSampleLeads, hasAccess,
     taxRates, leads, clients, customerLookups, activities, deals, invoices, payments, users,
     createUser, updateUserProfile, company, emailTemplates, persistenceError, pipelines, pipelineStages, stageHistory,
   ]);

@@ -47,7 +47,7 @@ The browser uses Supabase Auth and the public anon key. CRM records are stored i
 
 ## Seed sample Leads
 
-The reusable `initializeSampleLeads` helper in `src/lib/sampleLeads.ts` creates eight realistic Maldives insurance-brokerage Leads across MVR and USD, then merges them into the authenticated tenant through `sync_tenant_records`. It preserves non-sample Leads and is safe to run repeatedly because the sample IDs are stable.
+The reusable `initializeSampleLeads` helper in `src/lib/sampleLeads.ts` creates eight realistic Maldives insurance-brokerage Leads across MVR and USD, then merges them into the authenticated tenant through `sync_tenant_records`. It preserves non-sample Leads and is safe to run repeatedly because the sample IDs are stable. From a component, `useApp().initializeSampleLeads()` also updates the in-memory Leads collection immediately; in normal mode the next tenant-records load hydrates the same collection from Supabase.
 
 Call it from an authenticated development-only action or the browser console after importing the helper. Pass the IDs of real System Admin or Sales profiles from the current tenant:
 

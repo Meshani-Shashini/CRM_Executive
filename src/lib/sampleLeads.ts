@@ -50,7 +50,7 @@ function lead(input: {
     currency: input.currency,
     ...(input.currency === 'USD' ? { exchangeRate: USD_TO_MVR } : {}),
     closeDate,
-    visibility: 'company',
+    visibility: 'individual',
     contact: input.person,
     country: 'Maldives',
     insuranceClass: input.insuranceClass,

@@ -28,7 +28,8 @@ export interface Lead {
   exchangeRate?: number;
   pipelineId?: string;
   closeDate?: string;
-  visibility?: 'company' | 'owner_group';
+  /** Legacy values are retained for backwards-compatible reads; new Leads are always individual. */
+  visibility?: 'individual' | 'company' | 'owner_group';
   contact: string;
   country: string;
   insuranceClass: string;

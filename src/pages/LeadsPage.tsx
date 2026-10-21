@@ -8,8 +8,6 @@ import type { Client, Lead } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
 
-type Visibility = Lead['visibility'];
-
 export default function LeadsPage() {
   const {
     leads, setLeads, clients, setClients, user, users, pipelines, pipelineStages,
@@ -29,7 +27,6 @@ export default function LeadsPage() {
   const [leadCurrency, setLeadCurrency] = useState<Currency | ''>('');
   const [leadValue, setLeadValue] = useState('');
   const [exchangeRate, setExchangeRate] = useState('');
-  const [visibility, setVisibility] = useState<Visibility | ''>('');
   const [formError, setFormError] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
   const [temperatureFilter, setTemperatureFilter] = useState(() => hashParams().get('temperature') ?? '');
@@ -75,6 +72,7 @@ export default function LeadsPage() {
     return () => window.removeEventListener('hashchange', applyHashFilters);
   }, []);
   const visibleLeads = leads.filter((lead) =>
+    (user.role === 'admin' || (user.role === 'sales' && lead.ownerId === user.id)) &&
     (!boardPipeline || lead.pipelineId === boardPipeline.id ||
       (!lead.pipelineId && boardPipeline.id === activePipelines[0]?.id)) &&
     (!temperatureFilter || lead.temperature === temperatureFilter) &&
@@ -96,7 +94,6 @@ export default function LeadsPage() {
     setLeadCurrency('');
     setLeadValue('');
     setExchangeRate('');
-    setVisibility('');
     setFormError('');
     setSelectedPipelineId('');
     setNewOrganizationOpen(false);
@@ -121,7 +118,6 @@ export default function LeadsPage() {
     setLeadCurrency(lead.currency ?? 'MVR');
     setLeadValue(String(lead.value ?? lead.premium));
     setExchangeRate(lead.currency === 'USD' ? String(lead.exchangeRate ?? DEFAULT_USD_TO_MVR_RATE) : '');
-    setVisibility(lead.visibility ?? 'company');
     setNewLeadOpen(true);
   };
 
@@ -169,7 +165,9 @@ export default function LeadsPage() {
     const person = users.find((candidate) =>
       candidate.role === 'sales' && candidate.name.trim().toLowerCase() === selectedPersonName.toLowerCase(),
     );
-    const owner = staffOptions.find((candidate) => candidate.id === ownerId);
+    const owner = user.role === 'sales'
+      ? user
+      : staffOptions.find((candidate) => candidate.id === ownerId);
     const amount = Number(data.get('value'));
     const rate = leadCurrency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
     const selectedStage = stages[0];
@@ -179,7 +177,7 @@ export default function LeadsPage() {
       setFormError('Choose an existing organization or create it first.');
       return;
     }
-    if (!title || !expectedCloseDate || !selectedPersonName || !owner || !product || !selectedPipeline || !selectedStage || !visibility) {
+    if (!title || !expectedCloseDate || !selectedPersonName || !owner || !product || !selectedPipeline || !selectedStage) {
       setFormError('Enter a title and expected close date, a sales person, choose an owner and product, select a pipeline with a stage, and complete required fields.');
       return;
     }
@@ -204,7 +202,7 @@ export default function LeadsPage() {
       exchangeRate: rate,
       pipelineId: selectedPipeline.id,
       closeDate: expectedCloseDate,
-      visibility,
+      visibility: 'individual',
       contact: selectedPersonName,
       country: selectedOrganization.country,
       insuranceClass: product.category,
@@ -281,7 +279,6 @@ export default function LeadsPage() {
                       <div className="text-[11px] text-muted mt-1">Owner: {staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId}</div>
                       <div className="flex flex-wrap gap-1 mt-2">
                         <Badge variant="brand">{PRODUCT_CODES.find((product) => product.code === lead.productCode)?.name ?? lead.productCode}</Badge>
-                        <Badge variant={!lead.visibility || lead.visibility === 'company' ? 'win' : 'muted'}>{!lead.visibility || lead.visibility === 'company' ? 'Entire company' : 'Owner visibility group'}</Badge>
                       </div>
                       <div className="flex items-center justify-between text-[11px] text-muted pt-2 mt-2 border-t border-ink-700/60">
                         <span>{formatAmount(lead.value ?? lead.premium, lead.currency ?? 'MVR')}</span>
@@ -312,7 +309,6 @@ export default function LeadsPage() {
                 <th className="text-left px-4 py-3 font-medium">Product Class</th>
                 <th className="text-right px-4 py-3 font-medium">Lead Value</th>
                 <th className="text-left px-4 py-3 font-medium">Expected Close</th>
-                <th className="text-left px-4 py-3 font-medium">Visibility</th>
                 {(user.role === 'admin' || user.role === 'sales') && <th className="text-right px-4 py-3 font-medium">Actions</th>}
               </tr>
             </thead>
@@ -325,7 +321,6 @@ export default function LeadsPage() {
                   <td className="px-4 py-3 text-muted">{PRODUCT_CODES.find((product) => product.code === lead.productCode)?.name ?? lead.insuranceClass}</td>
                   <td className="px-4 py-3 text-right text-white">{formatAmount(lead.value ?? lead.premium, lead.currency ?? 'MVR')}{lead.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(lead.valueMvr ?? lead.premium, 'MVR')}</div>}</td>
                   <td className="px-4 py-3 text-muted">{new Date(`${lead.closeDate ?? lead.renewalDate}T00:00:00`).toLocaleDateString('en-US')}</td>
-                  <td className="px-4 py-3 text-muted">{!lead.visibility || lead.visibility === 'company' ? 'Entire company' : 'Owner visibility group'}</td>
                   {(user.role === 'admin' || user.role === 'sales') && (
                     <td className="px-4 py-3 text-right">
                       <button type="button" className="btn-ghost !py-1.5" onClick={() => openEditLead(lead)}>
@@ -335,7 +330,7 @@ export default function LeadsPage() {
                   )}
                 </tr>
               ))}
-              {visibleLeads.length === 0 && <tr><td colSpan={user.role === 'admin' || user.role === 'sales' ? 8 : 7} className="px-4 py-8 text-center text-muted">No leads yet.</td></tr>}
+              {visibleLeads.length === 0 && <tr><td colSpan={user.role === 'admin' || user.role === 'sales' ? 7 : 6} className="px-4 py-8 text-center text-muted">No leads yet.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -424,21 +419,18 @@ export default function LeadsPage() {
             </select>
           </Field>
           <Field label="Owner">
-            <select className="input" required value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>
-              <option value="">Select owner</option>
-              {staffOptions.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
-            </select>
+            {user.role === 'sales' ? (
+              <input className="input" value={user.name} readOnly aria-readonly="true" />
+            ) : (
+              <select className="input" required value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>
+                <option value="">Select owner</option>
+                {staffOptions.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
+              </select>
+            )}
           </Field>
           <Field label="Expected Close Date">
             <input className="input" name="closeDate" type="date" required value={closeDate} onChange={(event) => setCloseDate(event.target.value)} />
           </Field>
-          <fieldset className="sm:col-span-2">
-            <legend className="mb-2 text-xs text-muted">Visibility Settings</legend>
-            <div className="flex flex-wrap gap-4">
-              <RadioOption name="visibility" value="company" checked={visibility === 'company'} onChange={() => setVisibility('company')} label="Entire company" />
-              <RadioOption name="visibility" value="owner_group" checked={visibility === 'owner_group'} onChange={() => setVisibility('owner_group')} label="Owner's visibility group" />
-            </div>
-          </fieldset>
           {formError && <p role="alert" className="sm:col-span-2 text-sm text-hot">{formError}</p>}
           {selectedPipelineId && stages.length === 0 && <p role="alert" className="sm:col-span-2 text-sm text-hot">This pipeline has no stages. Add a stage in Pipelines before saving leads.</p>}
         </form>
@@ -472,19 +464,3 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label className="block"><div className="text-xs text-muted mb-1.5">{label}</div>{children}</label>;
 }
 
-function RadioOption({
-  name, value, checked, onChange, label,
-}: {
-  name: string;
-  value: Visibility;
-  checked: boolean;
-  onChange: () => void;
-  label: string;
-}) {
-  return (
-    <label className="inline-flex items-center gap-2 text-sm text-white">
-      <input type="radio" className="accent-brand-400" name={name} value={value} required checked={checked} onChange={onChange} />
-      {label}
-    </label>
-  );
-}
