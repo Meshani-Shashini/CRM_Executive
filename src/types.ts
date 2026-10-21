@@ -14,6 +14,7 @@ export interface User {
 
 export type LeadTemperature = 'HOT' | 'WARM' | 'COLD';
 export type ActivityStatus = 'IN-PROGRESS' | 'TO-DO' | 'BACKLOG' | 'COMPLETED';
+export type LeadFunnelStage = 'L0: Capture' | 'L1: KYC/AML Triage' | 'L2: LOB Scoping' | 'L3: Qualified Opportunity';
 
 export interface Lead {
   id: string;
@@ -42,6 +43,9 @@ export interface Lead {
   premium: number;
   ownerId: string;
   lastActivity: string;
+  leadFunnelStage?: LeadFunnelStage;
+  dealId?: string;
+  routedAt?: string;
 }
 
 export interface Client {
@@ -150,6 +154,7 @@ export interface Invoice {
   items: InvoiceItem[];
   installments: { id: string; label: string; due: string; amount: number; paid: boolean }[];
   currency: 'MVR' | 'USD';
+  linkedDealId?: string;
 }
 
 export interface Payment {
@@ -191,6 +196,10 @@ export interface Deal {
   createdAt?: string;
   renewalForClientId?: string;
   renewalExpiry?: string;
+  renewalForDealId?: string;
+  renewalDealId?: string;
+  policyExpiry?: string;
+  linkedInvoiceId?: string;
   client: string;
   product: string;
   value: number;
@@ -206,6 +215,8 @@ export interface Deal {
   intentTier?: 'P1' | 'P2' | 'P3';
   proposalSummary?: string;
   lossReason?: string;
+  nextActivityAt?: string;
+  nextActivityTitle?: string;
 }
 
 export interface Pipeline {

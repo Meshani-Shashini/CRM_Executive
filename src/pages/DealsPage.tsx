@@ -91,6 +91,8 @@ export default function DealsPage() {
       closeDate: String(data.get('closeDate')),
       insurer: String(data.get('insurer')),
       intentTier: String(data.get('intentTier')) as Deal['intentTier'],
+      nextActivityAt: String(data.get('nextActivityAt') ?? '') || undefined,
+      nextActivityTitle: String(data.get('nextActivityTitle') ?? '').trim() || undefined,
     };
     setDeals([deal, ...deals]);
     setCreateOpen(false);
@@ -194,6 +196,8 @@ export default function DealsPage() {
             </select>
           </Field>
           <Field label="Expected Close"><input className="input" name="closeDate" type="date" required /></Field>
+          <Field label="Next activity date"><input className="input" name="nextActivityAt" type="date" /></Field>
+          <Field label="Next activity"><input className="input" name="nextActivityTitle" placeholder="e.g. Call client for documents" maxLength={120} /></Field>
         </form>
       </Modal>
       <Modal open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Deals" size="sm" footer={<><button className="btn-ghost" onClick={() => setStageFilter('')}>Clear</button><button className="btn-primary" onClick={() => setFilterOpen(false)}>Apply Filter</button></>}>

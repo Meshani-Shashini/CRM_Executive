@@ -4,9 +4,16 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
 import { Columns3, Filter, List, Plus, X, Pencil } from 'lucide-react';
-import type { Client, Lead } from '../types';
+import type { Client, Lead, LeadFunnelStage } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
+
+const PRE_PIPELINE_STAGES: LeadFunnelStage[] = [
+  'L0: Capture',
+  'L1: KYC/AML Triage',
+  'L2: LOB Scoping',
+  'L3: Qualified Opportunity',
+];
 
 export default function LeadsPage() {
   const {
@@ -24,6 +31,7 @@ export default function LeadsPage() {
   const [productCode, setProductCode] = useState('');
   const [closeDate, setCloseDate] = useState('');
   const [ownerId, setOwnerId] = useState('');
+  const [leadFunnelStage, setLeadFunnelStage] = useState<LeadFunnelStage>('L0: Capture');
   const [leadCurrency, setLeadCurrency] = useState<Currency | ''>('');
   const [leadValue, setLeadValue] = useState('');
   const [exchangeRate, setExchangeRate] = useState('');
@@ -71,17 +79,20 @@ export default function LeadsPage() {
     window.addEventListener('hashchange', applyHashFilters);
     return () => window.removeEventListener('hashchange', applyHashFilters);
   }, []);
-  const visibleLeads = leads.filter((lead) =>
+  const matchesLeadFilters = (lead: Lead) =>
     (user.role === 'admin' || (user.role === 'sales' && lead.ownerId === user.id)) &&
-    (!boardPipeline || lead.pipelineId === boardPipeline.id ||
-      (!lead.pipelineId && boardPipeline.id === activePipelines[0]?.id)) &&
     (!temperatureFilter || lead.temperature === temperatureFilter) &&
     (!stageFilter || lead.funnelStage === stageFilter) &&
     (!ownerFilter || lead.ownerId === ownerFilter) &&
     (!leadIdFilter || lead.id === leadIdFilter) &&
     (!insuranceClassFilter || lead.insuranceClass === insuranceClassFilter) &&
-    (!statusFilter || (statusFilter === 'active' ? lead.status !== 'COMPLETED' : lead.status === statusFilter))
+    (!statusFilter || (statusFilter === 'active' ? lead.status !== 'COMPLETED' : lead.status === statusFilter));
+  const visibleLeads = leads.filter((lead) =>
+    matchesLeadFilters(lead) &&
+    (!boardPipeline || lead.pipelineId === boardPipeline.id ||
+      (!lead.pipelineId && !lead.leadFunnelStage && boardPipeline.id === activePipelines[0]?.id))
   );
+  const prePipelineLeads = leads.filter((lead) => matchesLeadFilters(lead) && !lead.pipelineId && Boolean(lead.leadFunnelStage));
 
   const resetLeadForm = () => {
     setEditingLead(null);
@@ -91,6 +102,7 @@ export default function LeadsPage() {
     setProductCode('');
     setCloseDate('');
     setOwnerId('');
+    setLeadFunnelStage('L0: Capture');
     setLeadCurrency('');
     setLeadValue('');
     setExchangeRate('');
@@ -114,6 +126,7 @@ export default function LeadsPage() {
     setProductCode(lead.productCode);
     setCloseDate(lead.closeDate ?? lead.renewalDate);
     setOwnerId(lead.ownerId);
+    setLeadFunnelStage(lead.leadFunnelStage ?? (lead.pipelineId ? 'L3: Qualified Opportunity' : 'L0: Capture'));
     setSelectedPipelineId(lead.pipelineId ?? activePipelines[0]?.id ?? '');
     setLeadCurrency(lead.currency ?? 'MVR');
     setLeadValue(String(lead.value ?? lead.premium));
@@ -171,14 +184,17 @@ export default function LeadsPage() {
     const amount = Number(data.get('value'));
     const rate = leadCurrency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
     const selectedStage = stages[0];
+    const isQualified = leadFunnelStage === 'L3: Qualified Opportunity';
     const expectedCloseDate = closeDate;
 
     if (!selectedOrganization) {
       setFormError('Choose an existing organization or create it first.');
       return;
     }
-    if (!title || !expectedCloseDate || !selectedPersonName || !owner || !product || !selectedPipeline || !selectedStage) {
-      setFormError('Enter a title and expected close date, a sales person, choose an owner and product, select a pipeline with a stage, and complete required fields.');
+    if (!title || !expectedCloseDate || !selectedPersonName || !owner || !product || (isQualified && (!selectedPipeline || !selectedStage))) {
+      setFormError(isQualified
+        ? 'Qualified opportunities must be routed to an active pipeline with a stage.'
+        : 'Enter a title and expected close date, a sales person, choose an owner and product, and complete required fields.');
       return;
     }
     if (!leadCurrency || !Number.isFinite(amount) || amount < 0 ||
@@ -200,7 +216,7 @@ export default function LeadsPage() {
       valueMvr,
       currency: leadCurrency,
       exchangeRate: rate,
-      pipelineId: selectedPipeline.id,
+      ...(isQualified && selectedPipeline ? { pipelineId: selectedPipeline.id } : {}),
       closeDate: expectedCloseDate,
       visibility: 'individual',
       contact: selectedPersonName,
@@ -209,14 +225,17 @@ export default function LeadsPage() {
       productCode: product.code,
       temperature: editingLead?.temperature ?? 'WARM',
       status: editingLead?.status ?? 'TO-DO',
-      funnelStage: editingLead?.pipelineId === selectedPipeline.id
-        ? editingLead.funnelStage
-        : selectedStage.name,
+      funnelStage: isQualified && selectedStage
+        ? editingLead?.pipelineId === selectedPipeline?.id ? editingLead?.funnelStage ?? selectedStage.name : selectedStage.name
+        : leadFunnelStage,
       renewalDate: expectedCloseDate,
       sumInsured: valueMvr,
       premium: valueMvr,
       ownerId: owner.id,
       lastActivity: editingLead?.lastActivity ?? 'Just now',
+      leadFunnelStage,
+      ...(isQualified ? { dealId: editingLead?.dealId ?? `D-${Date.now()}` } : {}),
+      ...(isQualified && selectedPipeline ? { routedAt: editingLead?.routedAt ?? new Date().toISOString() } : {}),
     };
     if (!personOptions.some((name) => name.toLowerCase() === selectedPersonName.toLowerCase())) {
       setCustomerLookups((current) => ({
@@ -229,7 +248,7 @@ export default function LeadsPage() {
       : [lead, ...current]);
     setNewLeadOpen(false);
     resetLeadForm();
-    setSelectedPipelineId(selectedPipeline.id);
+    if (selectedPipeline) setSelectedPipelineId(selectedPipeline.id);
   };
 
   return (
@@ -336,6 +355,33 @@ export default function LeadsPage() {
         </div>
       )}
 
+      {prePipelineLeads.length > 0 && (
+        <section className="glass rounded-2xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-white font-semibold">Pre-Pipeline Lead Funnel</h2>
+              <p className="text-xs text-muted mt-1">Qualify Leads through L0–L3 before routing them to an active pipeline.</p>
+            </div>
+            <Badge variant="brand">{prePipelineLeads.length} Leads</Badge>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            {PRE_PIPELINE_STAGES.map((stage) => {
+              const stageLeads = prePipelineLeads.filter((lead) => lead.leadFunnelStage === stage);
+              return <div key={stage} className="rounded-xl bg-ink-900/50 p-3">
+                <div className="flex items-center justify-between text-sm text-white"><span>{stage}</span><Badge variant="muted">{stageLeads.length}</Badge></div>
+                <div className="mt-3 space-y-2">
+                  {stageLeads.map((lead) => <button key={lead.id} type="button" onClick={() => openEditLead(lead)} className="w-full rounded-lg border border-ink-700 p-2 text-left hover:border-brand-400/50">
+                    <div className="text-xs font-medium text-white truncate">{lead.client}</div>
+                    <div className="text-[11px] text-muted truncate">{lead.title ?? 'Untitled lead'}{lead.dealId ? ` · ${lead.dealId}` : ''}</div>
+                  </button>)}
+                  {stageLeads.length === 0 && <div className="py-4 text-center text-[11px] text-muted/60">No Leads</div>}
+                </div>
+              </div>;
+            })}
+          </div>
+        </section>
+      )}
+
       <Modal
         open={newLeadOpen}
         onClose={() => { setNewLeadOpen(false); resetLeadForm(); }}
@@ -381,9 +427,14 @@ export default function LeadsPage() {
             {organizationQuery.trim() && !selectedOrganization && <p className="mt-1 text-xs text-warm">This organization is new. Create it to continue.</p>}
           </Field>
           <Field label="Title *"><input className="input" name="title" maxLength={200} required value={leadTitle} onChange={(event) => setLeadTitle(event.target.value)} /></Field>
+          <Field label="Pre-pipeline stage">
+            <select className="input" value={leadFunnelStage} onChange={(event) => setLeadFunnelStage(event.target.value as LeadFunnelStage)}>
+              {PRE_PIPELINE_STAGES.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
+            </select>
+          </Field>
           <Field label="Pipeline">
-            <select className="input" required value={selectedPipelineId} onChange={(event) => setSelectedPipelineId(event.target.value)}>
-              <option value="">Select pipeline</option>
+            <select className="input" value={selectedPipelineId} onChange={(event) => setSelectedPipelineId(event.target.value)}>
+              <option value="">{leadFunnelStage === 'L3: Qualified Opportunity' ? 'Select pipeline to route' : 'Not routed yet'}</option>
               {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
             </select>
           </Field>

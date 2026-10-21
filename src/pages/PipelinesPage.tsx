@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { ArrowDown, ArrowUp, Check, Plus, Settings2, Zap } from 'lucide-react';
+import { ArrowDown, ArrowUp, CalendarClock, Check, Plus, Settings2, Zap } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { TENANT_ID } from '../lib/supabase';
 import Modal from '../components/ui/Modal';
@@ -22,9 +22,10 @@ const legacyStageNames: Record<string, string> = {
   'Key Person Identified': 'Market Placement / Outender',
   Quoted: 'Quote Comparison & Presentation',
   'Internal Slip': 'Underwriter Negotiation',
-  'Closed-Won': 'Policy Bound / won',
+  'Closed-Won': 'Policy Bound / Won',
+  'Policy Bound / Won': 'Policy Bound / Won',
   'Closed-Lost': 'Lost / Declined',
-  'Policy Bound / won , Lost / Declined': 'Policy Bound / won',
+  'Policy Bound / won , Lost / Declined': 'Policy Bound / Won',
   'Market Placement / Tender': 'Market Placement / Outender',
   'Qualified (Discovery)': 'Fact-Finding & Risk Survey',
   'Solution Alignment': 'Market Placement / Outender',
@@ -50,25 +51,25 @@ interface PipelineTemplate {
 const PIPELINE_TEMPLATES: Record<string, PipelineTemplate> = {
   commercialDefault: {
     code: 'COMMERCIAL',
-    name: 'Commercial Brokerage',
+    name: 'Commercial Lines',
     stages: [
       { name: 'Fact-Finding & Risk Survey', winProbabilityPct: 20, stagnationDaysThreshold: 30 },
       { name: 'Market Placement / Outender', winProbabilityPct: 40, stagnationDaysThreshold: 30 },
       { name: 'Quote Comparison & Presentation', winProbabilityPct: 60, stagnationDaysThreshold: 14 },
       { name: 'Underwriter Negotiation', winProbabilityPct: 80, stagnationDaysThreshold: 14 },
-      { name: 'Policy Bound / won', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
+      { name: 'Policy Bound / Won', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
       { name: 'Lost / Declined', winProbabilityPct: 0, stagnationDaysThreshold: 0 },
     ],
   },
-  commercialLargeAccounts: {
-    code: 'COMMERCIAL-LARGE',
-    name: 'Commercial Property & Marine (Large Accounts)',
+  smeRetailFastTrack: {
+    code: 'SME-RETAIL',
+    name: 'SME/Retail Fast-Track',
     stages: [
       { name: 'Fact-Finding & Risk Survey', winProbabilityPct: 20, stagnationDaysThreshold: 30 },
       { name: 'Market Placement / Outender', winProbabilityPct: 40, stagnationDaysThreshold: 30 },
       { name: 'Quote Comparison & Presentation', winProbabilityPct: 60, stagnationDaysThreshold: 14 },
       { name: 'Underwriter Negotiation', winProbabilityPct: 80, stagnationDaysThreshold: 14 },
-      { name: 'Policy Bound / won', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
+      { name: 'Policy Bound / Won', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
       { name: 'Lost / Declined', winProbabilityPct: 0, stagnationDaysThreshold: 0 },
     ],
   },
@@ -84,7 +85,7 @@ const PIPELINE_TEMPLATES: Record<string, PipelineTemplate> = {
   },
   annualRenewals: {
     code: 'RENEWALS',
-    name: 'Annual Renewals',
+    name: 'Annual Policy Renewals',
     stages: [
       { name: 'Renewal Audit (90d out)', winProbabilityPct: 20, stagnationDaysThreshold: 14 },
       { name: 'Expiring Loss Run Review', winProbabilityPct: 40, stagnationDaysThreshold: 14 },
@@ -95,7 +96,7 @@ const PIPELINE_TEMPLATES: Record<string, PipelineTemplate> = {
   },
   claims: {
     code: 'CLAIMS',
-    name: 'Claims',
+    name: 'Claims Management',
     stages: [
       { name: 'Claim Notified', winProbabilityPct: 20, stagnationDaysThreshold: 7 },
       { name: 'Surveyor Assigned', winProbabilityPct: 40, stagnationDaysThreshold: 14 },
@@ -142,6 +143,7 @@ function buildRenewalDeal(client: Client, pipeline: Pipeline, firstStage: Pipeli
     createdAt: today.toISOString(),
     renewalForClientId: client.id,
     renewalExpiry: expiry,
+    policyExpiry: expiry,
     client: client.name,
     product: client.productCode || client.class || 'Insurance renewal',
     value,
@@ -152,7 +154,23 @@ function buildRenewalDeal(client: Client, pipeline: Pipeline, firstStage: Pipeli
     ownerId: client.ownerId,
     closeDate: expiry,
     insurer: client.insurer || 'Not assigned',
+    nextActivityAt: expiry ? new Date(`${expiry}T00:00:00`).toISOString() : undefined,
+    nextActivityTitle: 'Review renewal requirements',
   };
+}
+
+function subtractDays(date: string, days: number): string {
+  const result = new Date(`${date}T00:00:00`);
+  result.setDate(result.getDate() - days);
+  return result.toISOString().slice(0, 10);
+}
+
+function nextActivityBadge(date?: string) {
+  if (!date) return { label: 'No next activity', tone: 'hot' as const };
+  const days = Math.ceil((Date.parse(date) - Date.now()) / 86400000);
+  if (days < 0) return { label: 'Activity overdue', tone: 'hot' as const };
+  if (days <= 3) return { label: `Due in ${days}d`, tone: 'warm' as const };
+  return { label: `Due in ${days}d`, tone: 'win' as const };
 }
 
 type HealthState = 'Healthy' | 'At Risk' | 'Rotting';
@@ -230,7 +248,7 @@ function makeId() {
 export default function PipelinesPage() {
   const {
     user, deals, setDeals, clients, pipelines, setPipelines, pipelineStages, setPipelineStages,
-    stageHistory, setStageHistory,
+    stageHistory, setStageHistory, invoices, setInvoices,
   } = useApp();
   const [pipelineId, setPipelineId] = useState(pipelines.find((pipeline) => pipeline.isActive)?.id ?? '');
   const [pipelineModalOpen, setPipelineModalOpen] = useState(false);
@@ -333,6 +351,64 @@ export default function PipelinesPage() {
     disposition?: 'won' | 'lost',
   ) => {
     const now = new Date().toISOString();
+    const movingDeal = deals.find((deal) => deal.id === dealId);
+    const reachesPolicyBound = Boolean(movingDeal && isWonStage(to.name) && !isWonStage(movingDeal.stage));
+    const boundClient = movingDeal && clients.find((client) => client.name.trim().toLowerCase() === movingDeal.client.trim().toLowerCase());
+    const renewalPipeline = pipelines.find((pipeline) => pipeline.isActive && isRenewalPipeline(pipeline));
+    const renewalStage = renewalPipeline && pipelineStages
+      .filter((stage) => stage.pipelineId === renewalPipeline.id)
+      .sort((left, right) => left.stageOrder - right.stageOrder)[0];
+    const policyExpiry = movingDeal?.policyExpiry ?? boundClient?.expiry;
+    const renewalDealId = movingDeal ? `renewal-for-${movingDeal.id}` : '';
+
+    if (reachesPolicyBound && movingDeal) {
+      const invoiceId = `invoice-for-${movingDeal.id}`;
+      if (!invoices.some((invoice) => invoice.linkedDealId === movingDeal.id)) {
+        const issueDate = new Date().toISOString().slice(0, 10);
+        const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+        setInvoices([...invoices, {
+          id: invoiceId,
+          number: `INV-${movingDeal.id.slice(-8).toUpperCase()}`,
+          clientId: boundClient?.id ?? '',
+          clientName: movingDeal.client,
+          insurer: movingDeal.insurer,
+          policyNo: movingDeal.id,
+          issueDate,
+          dueDate,
+          status: 'Pending',
+          items: [{ description: `Premium for ${movingDeal.product}`, qty: 1, unitPrice: movingDeal.value, vatRate: 0 }],
+          installments: [{ id: `${invoiceId}-installment`, label: 'Single Payment', due: dueDate, amount: movingDeal.value, paid: false }],
+          currency: movingDeal.currency,
+          linkedDealId: movingDeal.id,
+        }]);
+      }
+      if (renewalPipeline && renewalStage && policyExpiry && !deals.some((deal) => deal.id === renewalDealId)) {
+        const renewalCloseDate = subtractDays(policyExpiry, 90);
+        const renewalValue = boundClient?.premium ?? movingDeal.value;
+        setDeals((current) => [...current, {
+          id: renewalDealId,
+          pipelineId: renewalPipeline.id,
+          createdAt: now,
+          renewalForClientId: boundClient?.id,
+          renewalForDealId: movingDeal.id,
+          renewalExpiry: policyExpiry,
+          policyExpiry,
+          client: movingDeal.client,
+          product: movingDeal.product,
+          value: renewalValue,
+          weighted: Math.round(renewalValue * renewalStage.winProbabilityPct) / 100,
+          currency: movingDeal.currency,
+          ...(movingDeal.exchangeRate ? { exchangeRate: movingDeal.exchangeRate } : {}),
+          stage: renewalStage.name,
+          probability: renewalStage.winProbabilityPct,
+          ownerId: movingDeal.ownerId,
+          closeDate: renewalCloseDate,
+          insurer: movingDeal.insurer,
+          nextActivityAt: renewalCloseDate,
+          nextActivityTitle: 'Start 90-day renewal retention review',
+        }]);
+      }
+    }
     setStageHistory((current) => {
       const history = [...current];
       const openEntryIndex = history.findIndex((entry) => entry.dealId === dealId && entry.exitedAt === null);
@@ -381,6 +457,11 @@ export default function PipelinesPage() {
         ...(to.name.toLowerCase().includes('proposal') || to.name === 'Quote Comparison & Presentation'
           ? { proposalSummary: details }
           : {}),
+        ...(reachesPolicyBound && movingDeal ? {
+          linkedInvoiceId: `invoice-for-${movingDeal.id}`,
+          renewalDealId: policyExpiry && renewalPipeline && renewalStage ? renewalDealId : undefined,
+          policyExpiry,
+        } : {}),
       }
       : deal));
     setMoveModalOpen(false);
@@ -664,6 +745,7 @@ export default function PipelinesPage() {
                     const intent = intentForDeal(deal);
                     const score = dealHealthScore(elapsed, stage.stagnationDaysThreshold, deal.probability);
                     const recentHistory = historyForDeal(deal.id)[0];
+                    const nextActivity = nextActivityBadge(deal.nextActivityAt);
                     return (
                       <article key={deal.id} className={`rounded-xl border bg-ink-800/80 p-3 ${health === 'Rotting' ? 'border-hot/70 shadow-[0_0_0_1px_rgba(255,70,70,0.15)]' : health === 'At Risk' ? 'border-warm/60' : 'border-ink-600'}`}>
                         <div className="flex items-start justify-between gap-2">
@@ -684,6 +766,7 @@ export default function PipelinesPage() {
                           <Badge variant={momentumVariants[momentum]} dot>{momentum}</Badge>
                           <Badge variant={intentVariants[intent]}>{intent}: {intentLabels[intent]}</Badge>
                           <Badge variant={healthVariants[health]}>{health === 'At Risk' ? 'At Risk' : health}</Badge>
+                          <Badge variant={nextActivity.tone} dot><CalendarClock size={11} /> {nextActivity.label}</Badge>
                         </div>
                         <div className="mt-3 flex justify-between text-xs">
                           <span className="text-white">{formatAmount(deal.value, deal.currency)}</span>
