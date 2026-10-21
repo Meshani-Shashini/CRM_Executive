@@ -5,13 +5,14 @@ import {
 import { useApp } from '../store/AppContext';
 import Badge from '../components/ui/Badge';
 import { formatAmount, toMvr } from '../utils/currency';
+import { dashboardHref } from '../utils/navigation';
 
 const tabs = ['Company', 'Leads', 'Deals', 'Staff'] as const;
 type DashboardTab = typeof tabs[number];
 
 export default function DashboardPage() {
   const [tab, setTab] = useState<DashboardTab>('Company');
-  const { deals, leads, clients, activities, viewAsRole } = useApp();
+  const { deals, leads, clients, activities, invoices, payments, viewAsRole } = useApp();
   useEffect(() => {
     setTab(viewAsRole === 'sales' ? 'Leads' : 'Company');
   }, [viewAsRole]);
@@ -68,10 +69,20 @@ export default function DashboardPage() {
       {tab === 'Company' && (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <KpiCard label="Weighted Pipeline" value={formatAmount(weightedPipeline, 'MVR')} detail="Probability-adjusted deal values" icon={TrendingUp} accent="brand" />
-            <KpiCard label="Closed Won" value={formatAmount(wonValue, 'MVR')} detail={`${wonDeals.length} won deals`} icon={CheckCircle2} accent="win" />
-            <KpiCard label="Active Leads" value={`${activeLeads}`} detail={`${leads.length} total leads`} icon={Users} accent="cold" />
-            <KpiCard label="Clients" value={`${clients.length}`} detail="Current client records" icon={AlertTriangle} accent="hot" />
+            <KpiCard href={dashboardHref('deals')} label="Weighted Pipeline" value={formatAmount(weightedPipeline, 'MVR')} detail="Probability-adjusted deal values" icon={TrendingUp} accent="brand" />
+            <KpiCard href={dashboardHref('deals', { filter: 'won' })} label="Closed Won" value={formatAmount(wonValue, 'MVR')} detail={`${wonDeals.length} won deals`} icon={CheckCircle2} accent="win" />
+            <KpiCard href={dashboardHref('leads', { status: 'active' })} label="Active Leads" value={`${activeLeads}`} detail={`${leads.length} total leads`} icon={Users} accent="cold" />
+            <KpiCard href={dashboardHref('clients')} label="Clients" value={`${clients.length}`} detail="Current client records" icon={AlertTriangle} accent="hot" />
+          </div>
+
+          <div className="glass rounded-2xl p-5">
+            <h3 className="text-white font-semibold mb-4">Transaction Totals</h3>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <MetricLink href={dashboardHref('invoices', { status: 'outstanding' })} label="Outstanding invoices" value={`MVR ${invoices.filter((invoice) => invoice.status !== 'Paid').reduce((sum, invoice) => sum + invoice.items.reduce((total, item) => total + item.qty * item.unitPrice * (1 + item.vatRate / 100), 0), 0).toLocaleString()}`} />
+              <MetricLink href={dashboardHref('invoices', { status: 'Overdue' })} label="Overdue invoices" value={`MVR ${invoices.filter((invoice) => invoice.status === 'Overdue').reduce((sum, invoice) => sum + invoice.items.reduce((total, item) => total + item.qty * item.unitPrice * (1 + item.vatRate / 100), 0), 0).toLocaleString()}`} />
+              <MetricLink href={dashboardHref('invoices', { status: 'Paid' })} label="Collected invoices" value={`MVR ${invoices.filter((invoice) => invoice.status === 'Paid').reduce((sum, invoice) => sum + invoice.items.reduce((total, item) => total + item.qty * item.unitPrice * (1 + item.vatRate / 100), 0), 0).toLocaleString()}`} />
+              <MetricLink href={dashboardHref('payments')} label="Payments received" value={`MVR ${payments.reduce((sum, payment) => sum + payment.amount, 0).toLocaleString()}`} />
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -82,7 +93,7 @@ export default function DashboardPage() {
                   {leadClasses.map((item) => (
                     <div key={item.name}>
                       <div className="flex justify-between text-xs mb-1">
-                        <span className="text-white">{item.name}</span>
+                        <a href={dashboardHref('leads', { insuranceClass: item.name })} className="text-white hover:text-brand-300">{item.name}</a>
                         <span className="text-muted">{item.count}</span>
                       </div>
                       <div className="h-2 bg-ink-900 rounded-full overflow-hidden">
@@ -100,7 +111,7 @@ export default function DashboardPage() {
                 <div className="space-y-2">
                   {stages.map((stage) => (
                     <div key={stage.name} className="flex items-center justify-between rounded-lg bg-ink-900/50 px-3 py-2 text-sm">
-                      <span className="text-white">{stage.name}</span>
+                      <a href={dashboardHref('leads', { stage: stage.name })} className="text-white hover:text-brand-300">{stage.name}</a>
                       <Badge variant="brand">{stage.count}</Badge>
                     </div>
                   ))}
@@ -144,10 +155,10 @@ function LeadsDashboard() {
   return (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard label="Total Leads" value={`${leads.length}`} detail="Current records" icon={Users} accent="brand" />
-        <KpiCard label="Active Leads" value={`${activeLeads.length}`} detail="Not completed" icon={TrendingUp} accent="cold" />
-        <KpiCard label="Hot Leads" value={`${hotLeads.length}`} detail="Priority follow-up" icon={AlertTriangle} accent="hot" />
-        <KpiCard label="Quoted" value={`${leads.filter((lead) => lead.funnelStage === 'Quoted').length}`} detail="In quotation stage" icon={CheckCircle2} accent="win" />
+        <KpiCard href={dashboardHref('leads')} label="Total Leads" value={`${leads.length}`} detail="Current records" icon={Users} accent="brand" />
+        <KpiCard href={dashboardHref('leads', { status: 'active' })} label="Active Leads" value={`${activeLeads.length}`} detail="Not completed" icon={TrendingUp} accent="cold" />
+        <KpiCard href={dashboardHref('leads', { temperature: 'HOT' })} label="Hot Leads" value={`${hotLeads.length}`} detail="Priority follow-up" icon={AlertTriangle} accent="hot" />
+        <KpiCard href={dashboardHref('leads', { stage: 'Quoted' })} label="Quoted" value={`${leads.filter((lead) => lead.funnelStage === 'Quoted').length}`} detail="In quotation stage" icon={CheckCircle2} accent="win" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="glass rounded-2xl p-5">
@@ -156,7 +167,7 @@ function LeadsDashboard() {
             {stages.map((stage) => (
               <div key={stage.name}>
                 <div className="flex justify-between text-xs mb-1">
-                  <span className="text-white">{stage.name}</span>
+                      <a href={dashboardHref('leads', { stage: stage.name })} className="text-white hover:text-brand-300">{stage.name}</a>
                   <span className="text-muted">{stage.count}</span>
                 </div>
                 <div className="h-2 bg-ink-900 rounded-full overflow-hidden">
@@ -170,13 +181,13 @@ function LeadsDashboard() {
           <h3 className="text-white font-semibold mb-4">Recent Leads</h3>
           {leads.length === 0 ? <EmptyState /> : <div className="space-y-3">
             {leads.slice(0, 5).map((lead) => (
-              <div key={lead.id} className="flex items-center justify-between gap-3 border-b border-ink-700/60 pb-3 last:border-0 last:pb-0">
+              <a key={lead.id} href={dashboardHref('leads', { id: lead.id })} className="flex items-center justify-between gap-3 border-b border-ink-700/60 pb-3 last:border-0 last:pb-0 hover:bg-ink-800/40 rounded-lg px-2">
                 <div className="min-w-0">
                   <div className="text-sm text-white truncate">{lead.client}</div>
                   <div className="text-[11px] text-muted">{lead.funnelStage} · {lead.lastActivity}</div>
                 </div>
                 <Badge variant={lead.temperature === 'HOT' ? 'hot' : lead.temperature === 'WARM' ? 'warm' : 'cold'}>{lead.temperature}</Badge>
-              </div>
+              </a>
             ))}
           </div>}
         </div>
@@ -203,10 +214,10 @@ function DealsDashboard() {
   return (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard label="Pipeline Value" value={formatAmount(totalValue, 'MVR')} detail="Current deals" icon={TrendingUp} accent="brand" />
-        <KpiCard label="Weighted Pipeline" value={formatAmount(weightedValue, 'MVR')} detail="Probability adjusted" icon={Target} accent="cold" />
-        <KpiCard label="Deals" value={`${deals.length}`} detail="Across all stages" icon={Users} accent="win" />
-        <KpiCard label="Average Probability" value={`${averageProbability}%`} detail="Win probability" icon={CheckCircle2} accent="hot" />
+        <KpiCard href={dashboardHref('deals')} label="Pipeline Value" value={formatAmount(totalValue, 'MVR')} detail="Current deals" icon={TrendingUp} accent="brand" />
+        <KpiCard href={dashboardHref('deals')} label="Weighted Pipeline" value={formatAmount(weightedValue, 'MVR')} detail="Probability adjusted" icon={Target} accent="cold" />
+        <KpiCard href={dashboardHref('deals')} label="Deals" value={`${deals.length}`} detail="Across all stages" icon={Users} accent="win" />
+        <KpiCard href={dashboardHref('deals')} label="Average Probability" value={`${averageProbability}%`} detail="Win probability" icon={CheckCircle2} accent="hot" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="glass rounded-2xl p-5">
@@ -215,7 +226,7 @@ function DealsDashboard() {
             {stages.map((stage) => (
               <div key={stage.name}>
                 <div className="flex justify-between text-xs mb-1">
-                  <span className="text-white">{stage.name} <span className="text-muted">({stage.count})</span></span>
+                      <a href={dashboardHref('deals', { stage: stage.name })} className="text-white hover:text-brand-300">{stage.name} <span className="text-muted">({stage.count})</span></a>
                   <span className="text-muted">{formatAmount(stage.value, 'MVR')}</span>
                 </div>
                 <div className="h-2 bg-ink-900 rounded-full overflow-hidden">
@@ -229,7 +240,7 @@ function DealsDashboard() {
           <h3 className="text-white font-semibold mb-4">Deals</h3>
           {deals.length === 0 ? <EmptyState /> : <div className="space-y-3">
             {deals.map((deal) => (
-              <div key={deal.id} className="flex items-center justify-between gap-3 border-b border-ink-700/60 pb-3 last:border-0 last:pb-0">
+              <a key={deal.id} href={dashboardHref('deals', { id: deal.id })} className="flex items-center justify-between gap-3 border-b border-ink-700/60 pb-3 last:border-0 last:pb-0 hover:bg-ink-800/40 rounded-lg px-2">
                 <div className="min-w-0">
                   <div className="text-sm text-white truncate">{deal.client}</div>
                   <div className="text-[11px] text-muted truncate">{deal.product} · {deal.stage}</div>
@@ -239,7 +250,7 @@ function DealsDashboard() {
                   {deal.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(toMvr(deal.value, deal.currency, deal.exchangeRate), 'MVR')}</div>}
                   <div className="text-[11px] text-muted">{deal.probability}% probability</div>
                 </div>
-              </div>
+              </a>
             ))}
           </div>}
         </div>
@@ -259,10 +270,10 @@ function StaffDashboard() {
   return (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard label="Team Members" value={`${users.length}`} detail="Current tenant users" icon={Users} accent="brand" />
-        <KpiCard label="Sales Staff" value={`${salesUsers.length}`} detail="Managing pipeline" icon={TrendingUp} accent="cold" />
-        <KpiCard label="Assigned Leads" value={`${totalAssignedLeads}`} detail="Sales team total" icon={Target} accent="win" />
-        <KpiCard label="Weighted Pipeline" value={formatAmount(salesPipeline, 'MVR')} detail="Sales team total" icon={CheckCircle2} accent="hot" />
+        <KpiCard href={dashboardHref('settings')} label="Team Members" value={`${users.length}`} detail="Current tenant users" icon={Users} accent="brand" />
+        <KpiCard href={dashboardHref('leads')} label="Sales Staff" value={`${salesUsers.length}`} detail="Managing pipeline" icon={TrendingUp} accent="cold" />
+        <KpiCard href={dashboardHref('leads')} label="Assigned Leads" value={`${totalAssignedLeads}`} detail="Sales team total" icon={Target} accent="win" />
+        <KpiCard href={dashboardHref('deals')} label="Weighted Pipeline" value={formatAmount(salesPipeline, 'MVR')} detail="Sales team total" icon={CheckCircle2} accent="hot" />
       </div>
       <div className="glass rounded-2xl overflow-hidden">
         <div className="p-5 border-b border-ink-700/60">
@@ -296,8 +307,9 @@ function StaffDashboard() {
 }
 
 function KpiCard({
-  label, value, detail, icon: Icon, accent,
+  href, label, value, detail, icon: Icon, accent,
 }: {
+  href?: string;
   label: string;
   value: string;
   detail: string;
@@ -310,8 +322,8 @@ function KpiCard({
     cold: 'text-cold bg-cold/10 border-cold/30',
     hot: 'text-hot bg-hot/10 border-hot/30',
   };
-  return (
-    <div className="glass rounded-2xl p-4 hover:border-ink-500 transition group">
+  const content = (
+    <>
       <div className="flex items-start justify-between">
         <div className="text-xs text-muted uppercase tracking-wider">{label}</div>
         <div className={`w-8 h-8 rounded-lg border flex items-center justify-center ${colorMap[accent]}`}>
@@ -320,8 +332,16 @@ function KpiCard({
       </div>
       <div className="mt-2 text-2xl font-bold text-white">{value}</div>
       <div className="mt-1 text-xs text-muted">{detail}</div>
-    </div>
+    </>
   );
+  return href ? <a href={href} className="glass rounded-2xl p-4 hover:border-ink-500 transition group block">{content}</a> : <div className="glass rounded-2xl p-4 hover:border-ink-500 transition group">{content}</div>;
+}
+
+function MetricLink({ href, label, value }: { href: string; label: string; value: string }) {
+  return <a href={href} className="rounded-xl border border-ink-700 bg-ink-900/40 p-3 hover:border-brand-400/50 hover:bg-ink-800/60 transition">
+    <div className="text-[11px] uppercase tracking-wider text-muted">{label}</div>
+    <div className="mt-1 text-sm font-semibold text-white">{value}</div>
+  </a>;
 }
 
 function EmptyState() {

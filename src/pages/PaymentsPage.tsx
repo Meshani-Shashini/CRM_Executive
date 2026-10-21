@@ -1,15 +1,27 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useApp } from '../store/AppContext';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { Plus, CreditCard, Download, TrendingUp, X } from 'lucide-react';
 import type { Payment } from '../types';
 import { downloadCsv } from '../utils/downloadCsv';
+import { hashParams } from '../utils/navigation';
 
 export default function PaymentsPage() {
   const { payments, setPayments, invoices, setInvoices } = useApp();
-  const [tab, setTab] = useState<'all' | 'Premium' | 'Commission' | 'Fee'>('all');
+  const [tab, setTab] = useState<'all' | 'Premium' | 'Commission' | 'Fee'>(() => {
+    const type = hashParams().get('type');
+    return type === 'Premium' || type === 'Commission' || type === 'Fee' ? type : 'all';
+  });
   const [createOpen, setCreateOpen] = useState(false);
+  useEffect(() => {
+    const applyHashFilter = () => {
+      const type = hashParams().get('type');
+      setTab(type === 'Premium' || type === 'Commission' || type === 'Fee' ? type : 'all');
+    };
+    window.addEventListener('hashchange', applyHashFilter);
+    return () => window.removeEventListener('hashchange', applyHashFilter);
+  }, []);
   const filtered = tab === 'all' ? payments : payments.filter((p) => p.type === tab);
   const total = payments.reduce((s, p) => s + p.amount, 0);
   const commissionTotal = payments.filter((p) => p.type === 'Commission').reduce((s, p) => s + p.amount, 0);

@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { PRODUCT_CODES } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
@@ -6,6 +6,7 @@ import { useApp } from '../store/AppContext';
 import { Columns3, Filter, List, Plus, X, Pencil } from 'lucide-react';
 import type { Client, Lead } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
+import { hashParams } from '../utils/navigation';
 
 type Visibility = Lead['visibility'];
 
@@ -31,8 +32,12 @@ export default function LeadsPage() {
   const [visibility, setVisibility] = useState<Visibility | ''>('');
   const [formError, setFormError] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
-  const [temperatureFilter, setTemperatureFilter] = useState('');
-  const [stageFilter, setStageFilter] = useState('');
+  const [temperatureFilter, setTemperatureFilter] = useState(() => hashParams().get('temperature') ?? '');
+  const [stageFilter, setStageFilter] = useState(() => hashParams().get('stage') ?? '');
+  const [ownerFilter, setOwnerFilter] = useState(() => hashParams().get('owner') ?? '');
+  const [leadIdFilter, setLeadIdFilter] = useState(() => hashParams().get('id') ?? '');
+  const [statusFilter, setStatusFilter] = useState(() => hashParams().get('status') ?? '');
+  const [insuranceClassFilter, setInsuranceClassFilter] = useState(() => hashParams().get('insuranceClass') ?? '');
   const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
   const selectedPipeline = activePipelines.find((pipeline) => pipeline.id === selectedPipelineId);
   const stages = useMemo(() => pipelineStages
@@ -56,11 +61,28 @@ export default function LeadsPage() {
   const boardStages = pipelineStages
     .filter((stage) => stage.pipelineId === boardPipeline?.id)
     .sort((left, right) => left.stageOrder - right.stageOrder);
+  useEffect(() => {
+    const applyHashFilters = () => {
+      const params = hashParams();
+      setTemperatureFilter(params.get('temperature') ?? '');
+      setStageFilter(params.get('stage') ?? '');
+      setOwnerFilter(params.get('owner') ?? '');
+      setLeadIdFilter(params.get('id') ?? '');
+      setStatusFilter(params.get('status') ?? '');
+      setInsuranceClassFilter(params.get('insuranceClass') ?? '');
+    };
+    window.addEventListener('hashchange', applyHashFilters);
+    return () => window.removeEventListener('hashchange', applyHashFilters);
+  }, []);
   const visibleLeads = leads.filter((lead) =>
     (!boardPipeline || lead.pipelineId === boardPipeline.id ||
       (!lead.pipelineId && boardPipeline.id === activePipelines[0]?.id)) &&
     (!temperatureFilter || lead.temperature === temperatureFilter) &&
-    (!stageFilter || lead.funnelStage === stageFilter)
+    (!stageFilter || lead.funnelStage === stageFilter) &&
+    (!ownerFilter || lead.ownerId === ownerFilter) &&
+    (!leadIdFilter || lead.id === leadIdFilter) &&
+    (!insuranceClassFilter || lead.insuranceClass === insuranceClassFilter) &&
+    (!statusFilter || (statusFilter === 'active' ? lead.status !== 'COMPLETED' : lead.status === statusFilter))
   );
 
   const resetLeadForm = () => {

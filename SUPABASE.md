@@ -45,6 +45,20 @@ The browser uses Supabase Auth and the public anon key. CRM records are stored i
 7. For a **local-only demo**, the ignored `.env.local` may set `VITE_AUTH_BYPASS=true`, `VITE_DEMO_ADMIN_USERNAME=admin`, and `VITE_DEMO_ADMIN_PASSWORD` to a temporary password. This bypass is enabled only by Vite's development mode, skips remote persistence, and disables sign-up. `VITE_*` values are included in browser code, so use only disposable demo credentials and never enable this for a production build. In demo mode, Supabase URL/key configuration may be omitted.
 8. Start the frontend with `npm run dev`. Without the local demo settings, normal Supabase authentication is used.
 
+## Seed sample Leads
+
+The reusable `initializeSampleLeads` helper in `src/lib/sampleLeads.ts` creates eight realistic Maldives insurance-brokerage Leads across MVR and USD, then merges them into the authenticated tenant through `sync_tenant_records`. It preserves non-sample Leads and is safe to run repeatedly because the sample IDs are stable.
+
+Call it from an authenticated development-only action or the browser console after importing the helper. Pass the IDs of real System Admin or Sales profiles from the current tenant:
+
+```ts
+import { initializeSampleLeads } from './src/lib/sampleLeads';
+
+await initializeSampleLeads(['sales-profile-uuid', 'admin-profile-uuid']);
+```
+
+The helper does not create user profiles or client records; the supplied owner IDs must already exist, and the signed-in user must have permission to update Leads.
+
 ## Data and access behavior
 
 The app has no seeded sample clients, leads, deals, invoices, payments, or activities. After the pipeline migrations, Commercial Brokerage uses exactly six stages: Fact-Finding & Risk Survey (20%), Market Placement / Outender (40%), Quote Comparison & Presentation (60%), Underwriter Negotiation (80%), Policy Bound / won (100%), and Lost / Declined (0%). Won deals are confirmed at the bound stage; Lost/Declined requires a reason, and outcomes are stored explicitly for reporting. Administrators can also create multiple business-line pipelines from the available Commercial Property & Marine, Retail & Personal Lines, Annual Renewals, and Claims templates. Active client policies with an expiry date from today through three calendar months ahead are automatically added to an active Annual Renewals pipeline, once per client/expiry; successful renewals remain there as Won and prompt staff to proceed with invoicing and active sales follow-up. Records are loaded from Supabase after sign-in and changes are saved through the role-checked RPC. Client Portal access is keyed to `user_profiles.client_record_id`; the migration backfills that association only when a login email has exactly one matching client record. Clients can only read that linked client, invoice, payment, and activity records, and can update only their linked contact information through `update_own_client_contact`. Administrators can edit or delete client records and update user display name, job title, or role (not authentication email). Sales and Accountants can read tenant records; writes are restricted to their permitted record collections. Only System Admins can change global settings or pipeline configuration.

@@ -156,25 +156,63 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (AUTH_BYPASS) return;
     let cancelled = false;
-    const restoreSession = async () => {
+    const syncSession = async (session: { user: { id: string } } | null) => {
+      if (!session) {
+        if (!cancelled) {
+          setUser(GUEST_USER);
+          setDataReady(false);
+          setAuthLoading(false);
+        }
+        return;
+      }
       try {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) throw error;
-        if (data.session) {
-          const profile = await loadProfile(data.session.user.id);
-          if (!cancelled) setUser(profile);
+        const profile = await loadProfile(session.user.id);
+        if (!cancelled) {
+          setUser(profile);
+          setAuthError(null);
         }
       } catch (error) {
         if (!cancelled) {
-          console.error('Could not restore the Supabase session.', error);
+          console.error('Could not synchronize the Supabase session.', error);
           setAuthError(error instanceof Error ? error.message : 'Supabase authentication is unavailable.');
         }
       } finally {
         if (!cancelled) setAuthLoading(false);
       }
     };
+
+    const restoreSession = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        await syncSession(data.session);
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Could not restore the Supabase session.', error);
+          setAuthError(error instanceof Error ? error.message : 'Supabase authentication is unavailable.');
+          setAuthLoading(false);
+        }
+      }
+    };
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setUser(GUEST_USER);
+        setDataReady(false);
+        setAuthError(null);
+        setAuthLoading(false);
+        return;
+      }
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+        void Promise.resolve().then(() => syncSession(session));
+      }
+    });
+
     void restoreSession();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      authListener.subscription.unsubscribe();
+    };
   }, [loadProfile]);
 
   const signIn = useCallback(async (email: string, password: string) => {

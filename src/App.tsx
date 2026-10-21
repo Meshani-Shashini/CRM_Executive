@@ -46,7 +46,7 @@ const accessMap: Record<NavKey, Role[]> = {
 };
 
 function pageFromHash(hash: string): NavKey | null {
-  const candidate = hash.replace(/^#\/?/, '');
+  const candidate = hash.replace(/^#\/?/, '').split('?')[0];
   return Object.prototype.hasOwnProperty.call(accessMap, candidate)
     ? candidate as NavKey
     : null;

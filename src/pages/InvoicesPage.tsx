@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { BANK_DETAILS } from '../data/catalogs';
 import { useApp } from '../store/AppContext';
 import Badge from '../components/ui/Badge';
@@ -6,6 +6,7 @@ import Modal from '../components/ui/Modal';
 import { Download, Eye, Plus, Printer, X } from 'lucide-react';
 import type { Invoice } from '../types';
 import { downloadCsv } from '../utils/downloadCsv';
+import { hashParams } from '../utils/navigation';
 
 const statusVariant: Record<string, 'win' | 'warm' | 'hot' | 'cold' | 'muted'> = {
   Paid: 'win', Partial: 'warm', Pending: 'cold', Overdue: 'hot', Archived: 'muted',
@@ -13,11 +14,27 @@ const statusVariant: Record<string, 'win' | 'warm' | 'hot' | 'cold' | 'muted'> =
 
 export default function InvoicesPage() {
   const { taxRates, invoices, setInvoices, clients, company } = useApp();
-  const [tab, setTab] = useState<'all' | 'Pending' | 'Paid' | 'Overdue' | 'Archived'>('all');
+  const [tab, setTab] = useState<'all' | 'outstanding' | 'Pending' | 'Paid' | 'Overdue' | 'Archived'>(() => {
+    const status = hashParams().get('status');
+    return status === 'outstanding' || status === 'Pending' || status === 'Paid' || status === 'Overdue' || status === 'Archived' ? status : 'all';
+  });
   const [selected, setSelected] = useState<Invoice | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
 
-  const filtered = tab === 'all' ? invoices : invoices.filter((i) => i.status === tab);
+  useEffect(() => {
+    const applyHashFilter = () => {
+      const status = hashParams().get('status');
+      setTab(status === 'outstanding' || status === 'Pending' || status === 'Paid' || status === 'Overdue' || status === 'Archived' ? status : 'all');
+    };
+    window.addEventListener('hashchange', applyHashFilter);
+    return () => window.removeEventListener('hashchange', applyHashFilter);
+  }, []);
+
+  const filtered = tab === 'all'
+    ? invoices
+    : tab === 'outstanding'
+      ? invoices.filter((i) => i.status !== 'Paid')
+      : invoices.filter((i) => i.status === tab);
 
   const computeTotals = (inv: Invoice) => {
     const subtotal = inv.items.reduce((s, it) => s + it.unitPrice * it.qty, 0);
@@ -61,7 +78,7 @@ export default function InvoicesPage() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-1 bg-ink-800/60 border border-ink-600 rounded-lg p-1">
-          {(['all', 'Pending', 'Paid', 'Overdue', 'Archived'] as const).map((t) => (
+          {(['all', 'outstanding', 'Pending', 'Paid', 'Overdue', 'Archived'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -69,7 +86,7 @@ export default function InvoicesPage() {
                 tab === t ? 'bg-brand-500 text-white' : 'text-muted hover:text-white'
               }`}
             >
-              {t === 'all' ? 'All' : t}
+                {t === 'all' ? 'All' : t === 'outstanding' ? 'Outstanding' : t}
             </button>
           ))}
         </div>

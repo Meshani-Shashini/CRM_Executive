@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { INSURERS, PRODUCT_CODES } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
@@ -6,6 +6,7 @@ import { useApp } from '../store/AppContext';
 import { Plus, Filter, X } from 'lucide-react';
 import type { Deal } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
+import { hashParams } from '../utils/navigation';
 
 const stageColors: Record<string, 'cold' | 'warm' | 'win' | 'hot'> = {
   'Lead Identified': 'cold',
@@ -24,8 +25,29 @@ export default function DealsPage() {
   const [exchangeRate, setExchangeRate] = useState('');
   const [createError, setCreateError] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
-  const [stageFilter, setStageFilter] = useState('');
-  const visibleDeals = stageFilter ? deals.filter((deal) => deal.stage === stageFilter) : deals;
+  const [stageFilter, setStageFilter] = useState(() => hashParams().get('stage') ?? '');
+  const [dealFilter, setDealFilter] = useState(() => hashParams().get('filter') ?? '');
+  const [dealIdFilter, setDealIdFilter] = useState(() => hashParams().get('id') ?? '');
+  useEffect(() => {
+    const applyHashFilters = () => {
+      const params = hashParams();
+      setStageFilter(params.get('stage') ?? '');
+      setDealFilter(params.get('filter') ?? '');
+      setDealIdFilter(params.get('id') ?? '');
+    };
+    window.addEventListener('hashchange', applyHashFilters);
+    return () => window.removeEventListener('hashchange', applyHashFilters);
+  }, []);
+  const visibleDeals = deals.filter((deal) => {
+    if (stageFilter && deal.stage !== stageFilter) return false;
+    if (dealIdFilter && deal.id !== dealIdFilter) return false;
+    if (dealFilter === 'won') {
+      if (deal.disposition) return deal.disposition === 'won';
+      const stage = deal.stage.trim().toLowerCase();
+      return stage.includes('won') || stage.includes('bound') || stage.includes('renewed') || stage === 'policy issued';
+    }
+    return true;
+  });
   const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
   const availableStages = pipelineStages
     .filter((stage) => stage.pipelineId === createPipelineId)
