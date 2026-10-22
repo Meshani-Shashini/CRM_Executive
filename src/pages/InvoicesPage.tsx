@@ -8,6 +8,7 @@ import type { Invoice } from '../types';
 import { downloadCsv } from '../utils/downloadCsv';
 import { hashParams } from '../utils/navigation';
 import { formatDate } from '../utils/date';
+import DateInput from '../components/ui/DateInput';
 
 const statusVariant: Record<string, 'win' | 'warm' | 'hot' | 'cold' | 'muted'> = {
   Paid: 'win', Partial: 'warm', Pending: 'cold', Overdue: 'hot', Archived: 'muted',
@@ -240,8 +241,8 @@ export default function InvoicesPage() {
           <Field label="Client"><select className="input" name="clientId" required>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></Field>
           <Field label="Description"><input className="input" name="description" required /></Field>
           <Field label="Amount (MVR)"><input className="input" type="number" name="amount" min="0.01" step="0.01" required /></Field>
-          <Field label="Issue date"><input className="input" type="date" name="issueDate" defaultValue={new Date().toISOString().slice(0, 10)} required /></Field>
-          <Field label="Due date"><input className="input" type="date" name="dueDate" required /></Field>
+          <Field label="Issue date"><DateInput name="issueDate" defaultValue={new Date().toISOString().slice(0, 10)} required aria-label="Issue date" /></Field>
+          <Field label="Due date"><DateInput name="dueDate" required aria-label="Due date" /></Field>
         </form>
       </Modal>
     </div>

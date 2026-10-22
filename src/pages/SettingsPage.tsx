@@ -1,19 +1,20 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 import { useApp } from '../store/AppContext';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import {
   Settings as SettingsIcon, Percent, Mail, Users as UsersIcon, ShieldAlert,
-  Save, Plus, Pencil, Trash2, Check, Lock,
+  Save, Plus, Pencil, Trash2, Check, Lock, Package,
 } from 'lucide-react';
-import type { TaxRate, Role, User } from '../types';
+import type { TaxRate, Role, User, ProductCode, Pipeline } from '../types';
+import { PRODUCT_CODES } from '../data/catalogs';
 
-type Tab = 'general' | 'tax' | 'email' | 'users';
+type Tab = 'general' | 'tax' | 'products' | 'email' | 'users';
 
 export default function SettingsPage() {
   const {
     user, hasAccess, taxRates, setTaxRates, users, createUser, updateUserProfile,
-    company, setCompany, emailTemplates, setEmailTemplates,
+    company, setCompany, emailTemplates, setEmailTemplates, products, setProducts, pipelines,
   } = useApp();
   const [tab, setTab] = useState<Tab>('tax');
   const [editing, setEditing] = useState<TaxRate | null>(null);
@@ -50,6 +51,7 @@ export default function SettingsPage() {
   const tabs: { key: Tab; label: string; icon: typeof SettingsIcon }[] = [
     { key: 'general', label: 'General', icon: SettingsIcon },
     { key: 'tax', label: 'VAT / GST Config', icon: Percent },
+    { key: 'products', label: 'Item / Product Management', icon: Package },
     { key: 'email', label: 'Email Templates', icon: Mail },
     { key: 'users', label: 'Users & Roles', icon: UsersIcon },
   ];
@@ -193,6 +195,10 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {tab === 'products' && (
+        <ProductManagement products={products} setProducts={setProducts} pipelines={pipelines} onNotice={setNotice} />
+      )}
+
       {tab === 'email' && (
         <div className="glass rounded-2xl p-5">
           <h3 className="text-white font-semibold mb-4">Email Templates</h3>
@@ -302,6 +308,120 @@ function Labeled({ label, value, onChange }: { label: string; value: string; onC
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="block"><div className="text-xs text-muted mb-1.5">{label}</div>{children}</label>;
+}
+
+function ProductManagement({
+  products, setProducts, pipelines, onNotice,
+}: {
+  products: ProductCode[];
+  setProducts: Dispatch<SetStateAction<ProductCode[]>>;
+  pipelines: Pipeline[];
+  onNotice: (message: string) => void;
+}) {
+  const [editing, setEditing] = useState<ProductCode | null>(null);
+  const [form, setForm] = useState<ProductCode | null>(null);
+  const [error, setError] = useState('');
+  const builtInCodes = new Set(PRODUCT_CODES.map((product) => product.code));
+  const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
+
+  const startAdd = () => {
+    setEditing(null);
+    setError('');
+    setForm({
+      code: '', name: '', description: '', category: 'Miscellaneous', classType: 'CUSTOM',
+      defaultPipelineCode: activePipelines[0]?.code ?? '', standardBrokerageRatePct: 0,
+      isStatutoryMandatory: false,
+    });
+  };
+
+  const startEdit = (product: ProductCode) => {
+    setEditing(product);
+    setError('');
+    setForm({ ...product, description: product.description || product.name });
+  };
+
+  const save = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!form) return;
+    const product = {
+      ...form,
+      id: form.id || form.code.trim().toUpperCase() || crypto.randomUUID(),
+      code: form.code.trim().toUpperCase(),
+      name: form.name.trim(),
+      description: form.description.trim() || form.name.trim(),
+      classType: form.classType.trim(),
+      standardBrokerageRatePct: Number(form.standardBrokerageRatePct),
+    };
+    const duplicate = products.some((item) => item.code === product.code && item.code !== editing?.code);
+    if (!product.code || !product.name || !product.classType || !product.defaultPipelineCode || duplicate || !Number.isFinite(product.standardBrokerageRatePct) || product.standardBrokerageRatePct < 0 || product.standardBrokerageRatePct > 100) {
+      setError('Enter a unique product code, name, class, pipeline, and a brokerage rate from 0 to 100.');
+      return;
+    }
+    setProducts((current) => editing
+      ? current.map((item) => item.code === editing.code ? product : item)
+      : [...current, product]);
+    onNotice(`${product.name} ${editing ? 'updated' : 'added'} and synced to the catalog.`);
+    setForm(null);
+    setEditing(null);
+  };
+
+  const remove = (product: ProductCode) => {
+    if (builtInCodes.has(product.code)) return;
+    if (!window.confirm(`Delete the custom product ${product.name}?`)) return;
+    setProducts((current) => current.filter((item) => item.code !== product.code));
+    onNotice(`${product.name} deleted from the catalog.`);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="glass rounded-2xl p-5">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <h3 className="text-white font-semibold">Item / Product Management</h3>
+            <p className="text-xs text-muted mt-0.5">Manage the 49 NM CODES products and custom insurance items used by Lead and Deal forms.</p>
+          </div>
+          <button className="btn-primary !py-1.5" onClick={startAdd}><Plus size={14} /> Add Product</button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[900px]">
+            <thead className="text-[11px] uppercase tracking-wider text-muted border-b border-ink-600">
+              <tr><th className="text-left px-3 py-2">Class</th><th className="text-left px-3 py-2">Product Code</th><th className="text-left px-3 py-2">Description</th><th className="text-right px-3 py-2">Brokerage %</th><th className="text-left px-3 py-2">Mandatory</th><th className="text-left px-3 py-2">Default Pipeline</th><th className="px-3 py-2" /></tr>
+            </thead>
+            <tbody>
+              {products.map((product) => (
+                <tr key={product.code} className="border-b border-ink-700/60">
+                  <td className="px-3 py-2 text-muted">{product.classType}</td>
+                  <td className="px-3 py-2 text-white font-medium">{product.code}</td>
+                  <td className="px-3 py-2 text-muted">{product.description || product.name}</td>
+                  <td className="px-3 py-2 text-right text-brand-300">{product.standardBrokerageRatePct}%</td>
+                  <td className="px-3 py-2"><Badge variant={product.isStatutoryMandatory ? 'hot' : 'muted'}>{product.isStatutoryMandatory ? 'Yes' : 'No'}</Badge></td>
+                  <td className="px-3 py-2 text-muted">{pipelines.find((pipeline) => pipeline.code === product.defaultPipelineCode)?.name ?? product.defaultPipelineCode}</td>
+                  <td className="px-3 py-2"><div className="flex justify-end gap-1"><button className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white" onClick={() => startEdit(product)} aria-label={`Edit ${product.name}`}><Pencil size={14} /></button><button className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-hot disabled:opacity-30" onClick={() => remove(product)} disabled={builtInCodes.has(product.code)} aria-label={`Delete ${product.name}`} title={builtInCodes.has(product.code) ? 'Seeded NM CODES products cannot be deleted' : 'Delete custom product'}><Trash2 size={14} /></button></div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {form && (
+        <div className="glass rounded-2xl p-5">
+          <div className="flex items-center justify-between mb-4"><h3 className="text-white font-semibold">{editing ? 'Edit Product' : 'Add Product'}</h3><button className="btn-ghost !px-2" onClick={() => setForm(null)}>Cancel</button></div>
+          <form onSubmit={save} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Product Code *"><input className="input" value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })} required /></Field>
+            <Field label="Name *"><input className="input" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></Field>
+            <Field label="Description *"><input className="input" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} required /></Field>
+            <Field label="Industry Class *"><input className="input" value={form.classType} onChange={(event) => setForm({ ...form, classType: event.target.value })} required /></Field>
+            <Field label="Category"><input className="input" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} /></Field>
+            <Field label="Standard Brokerage Rate (%) *"><input className="input" type="number" min="0" max="100" step="0.01" value={form.standardBrokerageRatePct} onChange={(event) => setForm({ ...form, standardBrokerageRatePct: Number(event.target.value) })} required /></Field>
+            <Field label="Default Pipeline *"><select className="input" value={form.defaultPipelineCode} onChange={(event) => setForm({ ...form, defaultPipelineCode: event.target.value })} required><option value="">Select pipeline</option>{activePipelines.map((pipeline) => <option key={pipeline.code} value={pipeline.code}>{pipeline.name}</option>)}</select></Field>
+            <label className="flex items-center gap-2 text-sm text-white self-end"><input type="checkbox" checked={form.isStatutoryMandatory} onChange={(event) => setForm({ ...form, isStatutoryMandatory: event.target.checked })} className="accent-brand-500" /> Statutory mandatory</label>
+            {error && <p role="alert" className="sm:col-span-2 text-sm text-hot">{error}</p>}
+            <div className="sm:col-span-2"><button className="btn-primary" type="submit"><Check size={14} /> Save Product</button></div>
+          </form>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function TaxModal({

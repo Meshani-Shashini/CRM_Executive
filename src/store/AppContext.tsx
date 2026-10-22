@@ -4,9 +4,9 @@ import {
 } from 'react';
 import type {
   Activity, Client, Deal, Invoice, Lead, Payment, Pipeline, PipelineStage,
-  Role, StageHistoryAudit, TaxRate, User,
+  Role, StageHistoryAudit, TaxRate, User, ProductCode,
 } from '../types';
-import { COMPANY } from '../data/catalogs';
+import { COMPANY, PRODUCT_CODES } from '../data/catalogs';
 import { createDefaultCustomerLookups, mergeCustomerLookups, type CustomerLookups } from '../data/customerLookups';
 import { supabase, TENANT_ID } from '../lib/supabase';
 import {
@@ -34,6 +34,8 @@ interface AppState {
   setClients: Dispatch<SetStateAction<Client[]>>;
   customerLookups: CustomerLookups;
   setCustomerLookups: Dispatch<SetStateAction<CustomerLookups>>;
+  products: ProductCode[];
+  setProducts: Dispatch<SetStateAction<ProductCode[]>>;
   activities: Activity[];
   setActivities: (items: Activity[]) => void;
   deals: Deal[];
@@ -114,12 +116,33 @@ function appUser(profile: ProfileRecord): User {
   };
 }
 
+function recordId(value: Record<string, unknown>, fallback?: string): string {
+  for (const candidate of [value.id, value.code, value.policyCode, value.policy_code, value.record_id, fallback]) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return '';
+}
+
+function sanitizeRecords(items: unknown[]): Record<string, unknown>[] {
+  return items.flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const value = item as Record<string, unknown>;
+    const id = recordId(value);
+    return id ? [{ ...value, id }] : [];
+  });
+}
+
 function asArray<T>(records: TenantRecord[], resource: string): T[] {
-  return records.filter((record) => record.resource === resource).map((record) => record.data as T);
+  return records
+    .filter((record) => record.resource === resource)
+    .flatMap((record) => {
+      const value = { ...record.data, id: recordId(record.data, record.record_id) };
+      return value.id ? [value as T] : [];
+    });
 }
 
 function writeArray(resource: string, items: unknown[]) {
-  return supabase.rpc('sync_tenant_records', { p_resource: resource, p_records: items });
+  return supabase.rpc('sync_tenant_records', { p_resource: resource, p_records: sanitizeRecords(items) });
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -131,6 +154,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [customerLookups, setCustomerLookups] = useState<CustomerLookups>(createDefaultCustomerLookups);
+  const [products, setProducts] = useState<ProductCode[]>(() => PRODUCT_CODES.map((product) => ({ ...product, id: product.code })));
   const [activities, setActivities] = useState<Activity[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -281,6 +305,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLeads([]);
     setClients([]);
     setCustomerLookups(createDefaultCustomerLookups());
+    setProducts(PRODUCT_CODES.map((product) => ({ ...product, id: product.code })));
     setActivities([]);
     setDeals([]);
     setInvoices([]);
@@ -329,6 +354,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setClients(asArray<Client>(records, 'clients'));
         const customerLookupsRecord = records.find((record) => record.resource === 'customer-lookups');
         setCustomerLookups(mergeCustomerLookups(customerLookupsRecord?.data.options));
+        const savedProducts = asArray<ProductCode>(records, 'products');
+        setProducts(savedProducts.length > 0 ? savedProducts : PRODUCT_CODES.map((product) => ({ ...product, id: product.code })));
         setActivities(asArray<Activity>(records, 'activities'));
         setDeals(asArray<Deal>(records, 'deals'));
         setInvoices(asArray<Invoice>(records, 'invoices'));
@@ -363,6 +390,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       leads,
       clients,
       'customer-lookups': [{ id: 'customer-lookups', options: customerLookups }],
+      products,
       activities,
       deals,
       invoices,
@@ -399,7 +427,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [
     dataReady, user.id, user.role, taxRates, leads, clients, activities, deals,
-    invoices, payments, pipelines, pipelineStages, stageHistory, company, emailTemplates, customerLookups,
+    invoices, payments, pipelines, pipelineStages, stageHistory, company, emailTemplates, customerLookups, products,
   ]);
 
   useEffect(() => {
@@ -465,14 +493,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({
     user, authLoading, authError, viewAsRole, setViewAsRole,
     signIn, register, signOut, initializeSampleLeads, hasAccess,
-    taxRates, setTaxRates, leads, setLeads, clients, setClients, customerLookups, setCustomerLookups,
+    taxRates, setTaxRates, leads, setLeads, clients, setClients, customerLookups, setCustomerLookups, products, setProducts,
     activities, setActivities,
     deals, setDeals, invoices, setInvoices, payments, setPayments, users, setUsers,
     createUser, updateUserProfile, company, setCompany, emailTemplates, setEmailTemplates, persistenceError,
     pipelines, setPipelines, pipelineStages, setPipelineStages, stageHistory, setStageHistory,
   }), [
     user, authLoading, authError, viewAsRole, setViewAsRole, signIn, register, signOut, initializeSampleLeads, hasAccess,
-    taxRates, leads, clients, customerLookups, activities, deals, invoices, payments, users,
+    taxRates, leads, clients, customerLookups, products, activities, deals, invoices, payments, users,
     createUser, updateUserProfile, company, emailTemplates, persistenceError, pipelines, pipelineStages, stageHistory,
   ]);
 

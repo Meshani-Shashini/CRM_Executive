@@ -7,6 +7,7 @@ import type { Payment } from '../types';
 import { downloadCsv } from '../utils/downloadCsv';
 import { hashParams } from '../utils/navigation';
 import { formatDate } from '../utils/date';
+import DateInput from '../components/ui/DateInput';
 
 export default function PaymentsPage() {
   const { payments, setPayments, invoices, setInvoices } = useApp();
@@ -137,7 +138,7 @@ export default function PaymentsPage() {
           <Field label="Amount (MVR)"><input className="input" type="number" name="amount" min="0.01" step="0.01" required /></Field>
           <Field label="Payment type"><select className="input" name="type"><option>Premium</option><option>Commission</option><option>Fee</option></select></Field>
           <Field label="Method"><select className="input" name="method"><option>Bank Transfer</option><option>Cash</option><option>Card</option></select></Field>
-          <Field label="Date"><input className="input" type="date" name="date" defaultValue={new Date().toISOString().slice(0, 10)} required /></Field>
+          <Field label="Date"><DateInput name="date" defaultValue={new Date().toISOString().slice(0, 10)} required aria-label="Payment date" /></Field>
         </form>
       </Modal>
     </div>

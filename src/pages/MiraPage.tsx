@@ -4,6 +4,7 @@ import { downloadCsv } from '../utils/downloadCsv';
 import { useApp } from '../store/AppContext';
 import type { MiraRow } from '../types';
 import { formatDate } from '../utils/date';
+import DateInput from '../components/ui/DateInput';
 
 export default function MiraPage() {
   const { company } = useApp();
@@ -52,11 +53,11 @@ export default function MiraPage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
           <div>
             <label htmlFor="mira-from" className="text-xs text-muted flex items-center gap-1.5 mb-1.5"><Calendar size={12} /> Period From</label>
-            <input id="mira-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="input" />
+            <DateInput id="mira-from" value={from} onIsoChange={setFrom} aria-label="MIRA report from date" />
           </div>
           <div>
             <label htmlFor="mira-to" className="text-xs text-muted flex items-center gap-1.5 mb-1.5"><Calendar size={12} /> Period To</label>
-            <input id="mira-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} className="input" />
+            <DateInput id="mira-to" value={to} onIsoChange={setTo} aria-label="MIRA report to date" />
           </div>
           <div className="flex items-end">
             <button className="btn-ghost w-full print:hidden" onClick={() => setAppliedRange({ from, to })}><Filter size={14} /> Apply Filter</button>

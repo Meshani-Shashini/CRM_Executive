@@ -215,8 +215,10 @@ export async function initializeSampleLeads(ownerIds: string[], today = new Date
   const sampleIdSet = new Set<string>(SAMPLE_LEAD_IDS);
   const existing = (data ?? [])
     .map((record) => record.data as unknown as Lead)
-    .filter((record) => !sampleIdSet.has(record.id));
-  const merged = [...existing, ...samples];
+    .filter((record): record is Lead => Boolean(record && typeof record.id === 'string' && record.id.trim() && !sampleIdSet.has(record.id)));
+  const merged = [...existing, ...samples]
+    .filter((record): record is Lead => Boolean(record && typeof record.id === 'string' && record.id.trim()))
+    .map((record) => ({ ...record, id: record.id.trim() }));
   const { error: writeError } = await supabase.rpc('sync_tenant_records', {
     p_resource: 'leads',
     p_records: merged,

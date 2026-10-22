@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { PRODUCT_CODES } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
@@ -7,7 +6,10 @@ import { Columns3, Filter, List, Plus, X, Pencil } from 'lucide-react';
 import type { Client, Lead, LeadFunnelStage } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
-import { formatDate } from '../utils/date';
+import { formatDate, normalizeDateInput } from '../utils/date';
+import DateInput from '../components/ui/DateInput';
+import ProductSelect from '../components/ui/ProductSelect';
+import { calculateBrokerageCommission } from '../utils/insurance';
 
 const PRE_PIPELINE_STAGES: LeadFunnelStage[] = [
   'L0: Capture',
@@ -19,9 +21,11 @@ const PRE_PIPELINE_STAGES: LeadFunnelStage[] = [
 export default function LeadsPage() {
   const {
     leads, setLeads, clients, setClients, user, users, pipelines, pipelineStages,
-    customerLookups, setCustomerLookups,
+    customerLookups, setCustomerLookups, products,
   } = useApp();
+  const PRODUCT_CODES = products;
   const [selectedPipelineId, setSelectedPipelineId] = useState('');
+  const [selectedStageId, setSelectedStageId] = useState('');
   const [view, setView] = useState<'kanban' | 'table'>('kanban');
   const [newLeadOpen, setNewLeadOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
@@ -68,12 +72,20 @@ export default function LeadsPage() {
     .filter((stage) => stage.pipelineId === boardPipeline?.id)
     .sort((left, right) => left.stageOrder - right.stageOrder);
   useEffect(() => {
-    const product = PRODUCT_CODES.find((item) => item.code === productCode);
+    const product = products.find((item) => item.code === productCode);
     const routedPipeline = activePipelines.find((pipeline) => pipeline.code === product?.defaultPipelineCode);
     if (routedPipeline && (!selectedPipelineId || selectedPipelineId !== routedPipeline.id)) {
       setSelectedPipelineId(routedPipeline.id);
     }
-  }, [activePipelines, productCode, selectedPipelineId]);
+  }, [activePipelines, productCode, products, selectedPipelineId]);
+  useEffect(() => {
+    const firstStage = stages[0];
+    if (!firstStage) {
+      setSelectedStageId('');
+    } else if (!stages.some((stage) => stage.id === selectedStageId)) {
+      setSelectedStageId(firstStage.id);
+    }
+  }, [selectedStageId, stages]);
   useEffect(() => {
     const applyHashFilters = () => {
       const params = hashParams();
@@ -116,6 +128,7 @@ export default function LeadsPage() {
     setExchangeRate('');
     setFormError('');
     setSelectedPipelineId('');
+    setSelectedStageId('');
     setNewOrganizationOpen(false);
   };
 
@@ -181,7 +194,7 @@ export default function LeadsPage() {
     if (user.role !== 'admin' && user.role !== 'sales') return;
     const data = new FormData(event.currentTarget);
     const title = leadTitle.trim();
-    const product = PRODUCT_CODES.find((item) => item.code === productCode);
+    const product = products.find((item) => item.code === productCode);
     const selectedPersonName = personName.trim();
     const person = users.find((candidate) =>
       candidate.role === 'sales' && candidate.name.trim().toLowerCase() === selectedPersonName.toLowerCase(),
@@ -191,9 +204,9 @@ export default function LeadsPage() {
       : staffOptions.find((candidate) => candidate.id === ownerId);
     const amount = Number(data.get('value'));
     const rate = leadCurrency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
-    const selectedStage = stages[0];
+    const selectedStage = stages.find((stage) => stage.id === selectedStageId) ?? stages[0];
     const isQualified = leadFunnelStage === 'L3: Qualified Opportunity';
-    const expectedCloseDate = closeDate;
+    const expectedCloseDate = normalizeDateInput(closeDate);
 
     if (!selectedOrganization) {
       setFormError('Choose an existing organization or create it first.');
@@ -202,7 +215,7 @@ export default function LeadsPage() {
     if (!title || !expectedCloseDate || !selectedPersonName || !owner || !product || (isQualified && (!selectedPipeline || !selectedStage))) {
       setFormError(isQualified
         ? 'Qualified opportunities must be routed to an active pipeline with a stage.'
-        : 'Enter a title and expected close date, a sales person, choose an owner and product, and complete required fields.');
+        : 'Enter a valid expected close date in DD-MMM-YYYY format, a title, a sales person, choose an owner and product, and complete required fields.');
       return;
     }
     if (!leadCurrency || !Number.isFinite(amount) || amount < 0 ||
@@ -222,6 +235,8 @@ export default function LeadsPage() {
       title,
       value: amount,
       valueMvr,
+      brokerageRatePct: product.standardBrokerageRatePct,
+      brokerageCommission: calculateBrokerageCommission(amount, product),
       currency: leadCurrency,
       exchangeRate: rate,
       ...(isQualified && selectedPipeline ? { pipelineId: selectedPipeline.id } : {}),
@@ -346,7 +361,7 @@ export default function LeadsPage() {
                   <td className="px-4 py-3 text-muted">{lead.person ?? lead.contact}</td>
                   <td className="px-4 py-3 text-muted">{staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId}</td>
                   <td className="px-4 py-3 text-muted">{PRODUCT_CODES.find((product) => product.code === lead.productCode)?.name ?? lead.insuranceClass}</td>
-                  <td className="px-4 py-3 text-right text-white">{formatAmount(lead.value ?? lead.premium, lead.currency ?? 'MVR')}{lead.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(lead.valueMvr ?? lead.premium, 'MVR')}</div>}</td>
+                  <td className="px-4 py-3 text-right text-white"><div>{formatAmount(lead.value ?? lead.premium, lead.currency ?? 'MVR')}</div>{lead.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(lead.valueMvr ?? lead.premium, 'MVR')}</div>}<div className="text-[11px] text-brand-300">Brokerage budget: {formatAmount(lead.brokerageCommission ?? calculateBrokerageCommission(lead.value ?? lead.premium, PRODUCT_CODES.find((product) => product.code === lead.productCode)), lead.currency ?? 'MVR')} ({lead.brokerageRatePct ?? PRODUCT_CODES.find((product) => product.code === lead.productCode)?.standardBrokerageRatePct ?? 0}%)</div></td>
                   <td className="px-4 py-3 text-muted">{formatDate(lead.closeDate ?? lead.renewalDate)}</td>
                   {(user.role === 'admin' || user.role === 'sales') && (
                     <td className="px-4 py-3 text-right">
@@ -398,7 +413,7 @@ export default function LeadsPage() {
         size="lg"
         footer={<><button type="button" className="btn-ghost" onClick={() => { setNewLeadOpen(false); resetLeadForm(); }}><X size={14} /> Cancel</button><button type="submit" form="new-lead-form" className="btn-primary"><Plus size={14} /> {editingLead ? 'Update Lead' : 'Save Lead'}</button></>}
       >
-        <form id="new-lead-form" onSubmit={createLead} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <form id="new-lead-form" onSubmit={createLead} noValidate className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Sales Person">
             <input
               className="input"
@@ -435,6 +450,15 @@ export default function LeadsPage() {
             {organizationQuery.trim() && !selectedOrganization && <p className="mt-1 text-xs text-warm">This organization is new. Create it to continue.</p>}
           </Field>
           <Field label="Title *"><input className="input" name="title" maxLength={200} required value={leadTitle} onChange={(event) => setLeadTitle(event.target.value)} /></Field>
+          <Field label="Type of Insurance Product *">
+            <ProductSelect
+              pipelines={pipelines}
+              name="productCode"
+              value={productCode}
+              required
+              onChange={(product) => setProductCode(product?.code ?? '')}
+            />
+          </Field>
           <Field label="Pre-pipeline stage">
             <select className="input" value={leadFunnelStage} onChange={(event) => setLeadFunnelStage(event.target.value as LeadFunnelStage)}>
               {PRE_PIPELINE_STAGES.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
@@ -444,6 +468,12 @@ export default function LeadsPage() {
             <select className="input" value={selectedPipelineId} onChange={(event) => setSelectedPipelineId(event.target.value)}>
               <option value="">{leadFunnelStage === 'L3: Qualified Opportunity' ? 'Select pipeline to route' : 'Not routed yet'}</option>
               {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Stage">
+            <select className="input" value={selectedStageId} required={leadFunnelStage === 'L3: Qualified Opportunity'} onChange={(event) => setSelectedStageId(event.target.value)}>
+              <option value="">Select stage</option>
+              {stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}
             </select>
           </Field>
           <Field label="Lead Value Currency">
@@ -456,9 +486,10 @@ export default function LeadsPage() {
               <option value="">Select currency</option><option value="USD">USD</option><option value="MVR">MVR</option>
             </select>
           </Field>
-          <Field label={`Lead Value${leadCurrency ? ` (${leadCurrency})` : ''}`}>
+          <Field label={`Total Insured Value${leadCurrency ? ` (${leadCurrency})` : ''}`}>
             <input className="input" name="value" type="number" min="0" step="0.01" required value={leadValue} onChange={(event) => setLeadValue(event.target.value)} />
           </Field>
+          {productCode && Number(leadValue) >= 0 && PRODUCT_CODES.find((product) => product.code === productCode) && <p className="self-end text-sm text-brand-300">Tentative Brokerage: {formatAmount(calculateBrokerageCommission(Number(leadValue), PRODUCT_CODES.find((product) => product.code === productCode)), leadCurrency || 'MVR')} ({PRODUCT_CODES.find((product) => product.code === productCode)?.standardBrokerageRatePct ?? 0}%)</p>}
           {leadCurrency === 'USD' && (
             <>
               <Field label="Exchange rate (MVR per USD)">
@@ -467,16 +498,6 @@ export default function LeadsPage() {
               {Number(leadValue) > 0 && Number(exchangeRate) > 0 && <p className="self-end text-sm text-muted">MVR equivalent: {formatAmount(toMvr(Number(leadValue), 'USD', Number(exchangeRate)), 'MVR')}</p>}
             </>
           )}
-          <Field label="Type of Insurance Product">
-            <select className="input" name="productCode" required value={productCode} onChange={(event) => setProductCode(event.target.value)}>
-              <option value="">Select product class</option>
-              {['Bonds', 'Engineering', 'Fire', 'Marine', 'Miscellaneous', 'Health'].map((category) => (
-                <optgroup key={category} label={category}>
-                  {PRODUCT_CODES.filter((product) => product.category === category).map((product) => <option key={product.code} value={product.code}>{product.name}</option>)}
-                </optgroup>
-              ))}
-            </select>
-          </Field>
           <Field label="Owner">
             {user.role === 'sales' ? (
               <input className="input" value={user.name} readOnly aria-readonly="true" />
@@ -488,7 +509,7 @@ export default function LeadsPage() {
             )}
           </Field>
           <Field label="Expected Close Date">
-            <input className="input" name="closeDate" type="date" required value={closeDate} onChange={(event) => setCloseDate(event.target.value)} />
+            <DateInput name="closeDate" required value={closeDate} onIsoChange={setCloseDate} aria-label="Expected close date" />
           </Field>
           {formError && <p role="alert" className="sm:col-span-2 text-sm text-hot">{formError}</p>}
           {selectedPipelineId && stages.length === 0 && <p role="alert" className="sm:col-span-2 text-sm text-hot">This pipeline has no stages. Add a stage in Pipelines before saving leads.</p>}

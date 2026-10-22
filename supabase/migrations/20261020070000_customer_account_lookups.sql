@@ -9,7 +9,7 @@ DECLARE
   allowed_resources TEXT[] := ARRAY[
     'leads', 'clients', 'customer-lookups', 'activities', 'deals', 'invoices', 'payments',
     'tax-rates', 'pipelines', 'pipeline-stages', 'stage-history',
-    'company', 'email-templates'
+    'company', 'email-templates', 'products', 'policy-types'
   ];
   allowed BOOLEAN;
 BEGIN

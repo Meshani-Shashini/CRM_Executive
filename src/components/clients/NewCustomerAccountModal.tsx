@@ -10,6 +10,7 @@ import {
 import type { Client, InsuredEntityDetails } from '../../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../../utils/currency';
 import { formatDate } from '../../utils/date';
+import DateInput from '../ui/DateInput';
 
 const TARGET_LINES = [
   'Marine Hull',
@@ -388,7 +389,7 @@ export default function NewCustomerAccountModal({ onClose, onCreated }: NewCusto
                 {['Call', 'Meeting', 'Email', 'Site Visit', 'Document Collection', 'Needs Analysis'].map((type) => <option key={type}>{type}</option>)}
               </select>
             </Field>
-            <Field label="Due Date *"><input className="input" name="actionDueDate" type="date" required /></Field>
+            <Field label="Due Date *"><DateInput name="actionDueDate" required aria-label="Mandatory next action due date" /></Field>
             <Field label="Assigned To *">
               <select className="input" name="actionAssignedTo" required defaultValue="">
                 <option value="">Select assignee</option>

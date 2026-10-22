@@ -57,7 +57,7 @@ export const PRODUCT_CODES: ProductCode[] = [
   { code: 'PN', name: 'Professional Indemnity Insurance', category: 'Miscellaneous', classType: 'CASUALTY_LIABILITY', defaultPipelineCode: 'CASUALTY_LIABILITY', standardBrokerageRatePct: 20, isStatutoryMandatory: false },
   { code: 'SI', name: 'Suwa Sampatha International', category: 'Health', classType: 'EMPLOYEE_BENEFITS', defaultPipelineCode: 'EMPLOYEE_BENEFITS', standardBrokerageRatePct: 10, isStatutoryMandatory: false },
   { code: 'TL', name: 'Public Liability', category: 'Miscellaneous', classType: 'CASUALTY_LIABILITY', defaultPipelineCode: 'CASUALTY_LIABILITY', standardBrokerageRatePct: 15, isStatutoryMandatory: false },
-];
+].map((product) => ({ ...product, description: product.name }));
 
 export const FUNNELS = [
   { id: 'f1', name: 'Broker Sales Funnel', stages: ['Lead Identified', 'Contact Made', 'Key Person Identified', 'Quoted', 'Internal Slip'] },

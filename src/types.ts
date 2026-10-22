@@ -25,6 +25,8 @@ export interface Lead {
   title?: string;
   value?: number;
   valueMvr?: number;
+  brokerageRatePct?: number;
+  brokerageCommission?: number;
   currency?: 'MVR' | 'USD';
   exchangeRate?: number;
   pipelineId?: string;
@@ -129,8 +131,10 @@ export interface Insurer {
 }
 
 export interface ProductCode {
+  id?: string;
   code: string;
   name: string;
+  description: string;
   category: string;
   classType: string;
   defaultPipelineCode: string;
@@ -206,8 +210,11 @@ export interface Deal {
   linkedInvoiceId?: string;
   client: string;
   product: string;
+  productCode?: string;
   value: number;
   weighted: number;
+  brokerageRatePct?: number;
+  brokerageCommission?: number;
   currency: 'MVR' | 'USD';
   exchangeRate?: number;
   stage: string;

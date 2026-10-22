@@ -12,6 +12,7 @@ import {
 import type { Activity, Client } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { formatDate } from '../utils/date';
+import DateInput from '../components/ui/DateInput';
 
 const activityIcon = {
   call: Phone, meeting: Calendar, email: Mail, upload: Upload, note: MessageSquare, quote: FileText,
@@ -418,7 +419,7 @@ export default function ClientsPage() {
                     <Field label="Insurer"><input className="input" name="insurer" defaultValue={editingClient.insurer} /></Field>
                     <Field label="Sum insured"><input className="input" name="sumInsured" type="number" min="0" step="0.01" defaultValue={editingClient.sumInsured} /></Field>
                     <Field label="Premium"><input className="input" name="premium" type="number" min="0" step="0.01" defaultValue={editingClient.premium} /></Field>
-                    <Field label="Expiry"><input className="input" name="expiry" type="date" defaultValue={editingClient.expiry} /></Field>
+                    <Field label="Expiry"><DateInput name="expiry" defaultValue={editingClient.expiry} aria-label="Policy expiry date" /></Field>
                     <Field label="Tags (comma-separated)"><input className="input" name="tags" defaultValue={editingClient.tags.join(', ')} /></Field>
                     <Field label="Account status"><select className="input" name="accountStatus" defaultValue={editingClient.accountStatus ?? 'active'}><option value="active">Active</option><option value="draft">Draft</option></select></Field>
                     {editingClient.insuredEntity && <>
@@ -445,7 +446,7 @@ export default function ClientsPage() {
                       <Field label="Estimated brokerage (%)"><input className="input" name="estimatedBrokeragePct" type="number" min="0" max="100" step="0.01" defaultValue={editingClient.insuredEntity.estimatedBrokeragePct} /></Field>
                       <Field label="Target lines (comma-separated)"><input className="input" name="targetLines" defaultValue={editingClient.insuredEntity.targetLines.join(', ')} /></Field>
                       <Field label="Next action type"><input className="input" name="nextActionType" defaultValue={editingClient.insuredEntity.nextAction.type} /></Field>
-                      <Field label="Next action due date"><input className="input" name="nextActionDueDate" type="date" defaultValue={editingClient.insuredEntity.nextAction.dueDate} /></Field>
+                    <Field label="Next action due date"><DateInput name="nextActionDueDate" defaultValue={editingClient.insuredEntity.nextAction.dueDate} aria-label="Next action due date" /></Field>
                       <Field label="Next action assigned to"><input className="input" name="nextActionAssignedTo" defaultValue={editingClient.insuredEntity.nextAction.assignedTo} /></Field>
                       <Field label="Next action notes"><textarea className="input min-h-20" name="nextActionNotes" defaultValue={editingClient.insuredEntity.nextAction.notes} /></Field>
                     </>}

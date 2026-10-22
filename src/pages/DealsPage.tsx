@@ -1,13 +1,17 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { INSURERS, PRODUCT_CODES } from '../data/catalogs';
+import { INSURERS } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
 import { Plus, Filter, X } from 'lucide-react';
-import type { Deal } from '../types';
+import type { Deal, ProductCode } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
 import { formatDate } from '../utils/date';
+import DateInput from '../components/ui/DateInput';
+import ProductSelect from '../components/ui/ProductSelect';
+import { calculateBrokerageCommission } from '../utils/insurance';
+import { normalizeDateInput } from '../utils/date';
 
 const stageColors: Record<string, 'cold' | 'warm' | 'win' | 'hot'> = {
   'Lead Identified': 'cold',
@@ -18,9 +22,12 @@ const stageColors: Record<string, 'cold' | 'warm' | 'win' | 'hot'> = {
 };
 
 export default function DealsPage() {
-  const { deals, setDeals, clients, user, pipelines, pipelineStages } = useApp();
+  const { deals, setDeals, clients, user, pipelines, pipelineStages, products } = useApp();
+  const PRODUCT_CODES = products;
   const [createOpen, setCreateOpen] = useState(false);
   const [createPipelineId, setCreatePipelineId] = useState('');
+  const [selectedProduct, setSelectedProduct] = useState<ProductCode>();
+  const [selectedStageId, setSelectedStageId] = useState('');
   const [dealCurrency, setDealCurrency] = useState<Currency | ''>('');
   const [dealAmount, setDealAmount] = useState('');
   const [exchangeRate, setExchangeRate] = useState('');
@@ -53,11 +60,26 @@ export default function DealsPage() {
   const availableStages = pipelineStages
     .filter((stage) => stage.pipelineId === createPipelineId)
     .sort((a, b) => a.stageOrder - b.stageOrder);
+  useEffect(() => {
+    if (!selectedProduct) return;
+    const routedPipeline = activePipelines.find((pipeline) => pipeline.code === selectedProduct.defaultPipelineCode);
+    if (routedPipeline) setCreatePipelineId(routedPipeline.id);
+  }, [activePipelines, selectedProduct]);
+  useEffect(() => {
+    const firstStage = availableStages[0];
+    if (!firstStage) {
+      setSelectedStageId('');
+    } else if (!availableStages.some((stage) => stage.id === selectedStageId)) {
+      setSelectedStageId(firstStage.id);
+    }
+  }, [availableStages, selectedStageId]);
   const totalValue = deals.reduce((sum, deal) => sum + toMvr(deal.value, deal.currency, deal.exchangeRate), 0);
   const totalWeighted = deals.reduce((sum, deal) => sum + toMvr(deal.weighted, deal.currency, deal.exchangeRate), 0);
 
   const openCreate = () => {
     setCreatePipelineId('');
+    setSelectedProduct(undefined);
+    setSelectedStageId('');
     setDealCurrency('');
     setDealAmount('');
     setExchangeRate('');
@@ -70,10 +92,20 @@ export default function DealsPage() {
     const data = new FormData(event.currentTarget);
     const value = Number(data.get('value'));
     const probability = Number(data.get('probability'));
+    const closeDate = String(data.get('closeDate') ?? '');
     const currency = String(data.get('currency')) as Currency;
     const rate = currency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
+    if (!selectedProduct || !createPipelineId || !selectedStageId) {
+      setCreateError('Select an insurance product so its pipeline and first stage can be assigned.');
+      return;
+    }
     if (currency === 'USD' && (!Number.isFinite(rate) || !rate || rate <= 0)) {
       setCreateError('Enter a valid positive exchange rate.');
+      return;
+    }
+    const normalizedCloseDate = normalizeDateInput(closeDate);
+    if (!normalizedCloseDate) {
+      setCreateError('Enter a valid expected close date in DD-MMM-YYYY format.');
       return;
     }
     const deal: Deal = {
@@ -81,15 +113,18 @@ export default function DealsPage() {
       pipelineId: String(data.get('pipelineId')),
       createdAt: new Date().toISOString(),
       client: String(data.get('client')),
-      product: String(data.get('product')),
+      product: selectedProduct.name,
+      productCode: selectedProduct.code,
       value,
       weighted: Math.round(value * probability) / 100,
+      brokerageRatePct: selectedProduct.standardBrokerageRatePct,
+      brokerageCommission: calculateBrokerageCommission(value, selectedProduct),
       currency,
       ...(rate ? { exchangeRate: rate } : {}),
-      stage: String(data.get('stage')),
+      stage: availableStages.find((stage) => stage.id === selectedStageId)?.name ?? '',
       probability,
       ownerId: user.id,
-      closeDate: String(data.get('closeDate')),
+      closeDate: normalizedCloseDate,
       insurer: String(data.get('insurer')),
       intentTier: String(data.get('intentTier')) as Deal['intentTier'],
       nextActivityAt: String(data.get('nextActivityAt') ?? '') || undefined,
@@ -150,6 +185,7 @@ export default function DealsPage() {
                 <td className="px-4 py-3 text-right text-white">
                   <div>{formatAmount(d.value, d.currency)}</div>
                   {d.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(toMvr(d.value, d.currency, d.exchangeRate), 'MVR')}</div>}
+                  <div className="text-[11px] text-brand-300">Brokerage budget: {formatAmount(d.brokerageCommission ?? calculateBrokerageCommission(d.value, PRODUCT_CODES.find((product) => product.code === d.productCode || product.name === d.product)), d.currency)} ({d.brokerageRatePct ?? PRODUCT_CODES.find((product) => product.code === d.productCode || product.name === d.product)?.standardBrokerageRatePct ?? 0}%)</div>
                 </td>
                 <td className="px-4 py-3 text-right text-brand-400 font-medium">
                   <div>{formatAmount(d.weighted, d.currency)}</div>
@@ -177,14 +213,15 @@ export default function DealsPage() {
         subtitle="Add a sales opportunity to the pipeline."
         footer={<><button type="button" className="btn-ghost" onClick={() => setCreateOpen(false)}><X size={14} /> Cancel</button><button type="submit" form="new-deal-form" className="btn-primary"><Plus size={14} /> Create Deal</button></>}
       >
-        <form id="new-deal-form" onSubmit={createDeal} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <form id="new-deal-form" onSubmit={createDeal} noValidate className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Type of Insurance Product *"><ProductSelect pipelines={pipelines} name="productCode" required value={selectedProduct?.code ?? ''} onChange={setSelectedProduct} /></Field>
           <Field label="Pipeline"><select className="input" name="pipelineId" required value={createPipelineId} onChange={(event) => setCreatePipelineId(event.target.value)}><option value="">Select pipeline</option>{activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}</select></Field>
           <Field label="Client"><select className="input" name="client" required defaultValue=""><option value="">Select client</option>{clients.map((client) => <option key={client.id}>{client.name}</option>)}</select></Field>
-          <Field label="Product"><select className="input" name="product" required defaultValue=""><option value="">Select product</option>{PRODUCT_CODES.map((product) => <option key={product.code}>{product.name}</option>)}</select></Field>
           <Field label="Insurer"><select className="input" name="insurer" required defaultValue=""><option value="">Select insurer</option>{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
-          <Field label="Stage"><select className="input" name="stage" required defaultValue=""><option value="">Select stage</option>{availableStages.map((stage) => <option key={stage.id}>{stage.name}</option>)}</select></Field>
+          <Field label="Stage"><select className="input" name="stage" required value={selectedStageId} onChange={(event) => setSelectedStageId(event.target.value)}><option value="">Select stage</option>{availableStages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select></Field>
           <Field label="Currency"><select className="input" name="currency" required value={dealCurrency} onChange={(event) => { const currency = event.target.value as Currency | ''; setDealCurrency(currency); setDealAmount(''); setExchangeRate(currency === 'USD' ? String(DEFAULT_USD_TO_MVR_RATE) : ''); }}><option value="">Select currency</option><option value="MVR">MVR</option><option value="USD">USD</option></select></Field>
-          <Field label={`Deal Value${dealCurrency ? ` (${dealCurrency})` : ''}`}><input className="input" name="value" type="number" min="0" step="0.01" required value={dealAmount} onChange={(event) => setDealAmount(event.target.value)} /></Field>
+          <Field label={`Total Insured Value${dealCurrency ? ` (${dealCurrency})` : ''}`}><input className="input" name="value" type="number" min="0" step="0.01" required value={dealAmount} onChange={(event) => setDealAmount(event.target.value)} /></Field>
+          {selectedProduct && Number(dealAmount) >= 0 && <p className="self-end text-sm text-brand-300">Tentative brokerage/profit budget: {formatAmount(calculateBrokerageCommission(Number(dealAmount), selectedProduct), dealCurrency || 'MVR')} ({selectedProduct.standardBrokerageRatePct}%)</p>}
           {dealCurrency === 'USD' && <Field label="Exchange rate (1 USD = MVR)"><input className="input" name="exchangeRate" type="number" min="0.000001" step="any" required value={exchangeRate} onChange={(event) => { setExchangeRate(event.target.value); setCreateError(''); }} /></Field>}
           {dealCurrency === 'USD' && Number(dealAmount) > 0 && Number(exchangeRate) > 0 && <p className="sm:col-span-2 text-sm text-muted">Equivalent: {formatAmount(toMvr(Number(dealAmount), 'USD', Number(exchangeRate)), 'MVR')}</p>}
           {createError && <p role="alert" className="sm:col-span-2 text-sm text-hot">{createError}</p>}
@@ -196,8 +233,8 @@ export default function DealsPage() {
               <option value="P3">P3 · Nurture</option>
             </select>
           </Field>
-          <Field label="Expected Close"><input className="input" name="closeDate" type="date" required /></Field>
-          <Field label="Next activity date"><input className="input" name="nextActivityAt" type="date" /></Field>
+          <Field label="Expected Close"><DateInput name="closeDate" required aria-label="Expected close date" /></Field>
+          <Field label="Next activity date"><DateInput name="nextActivityAt" aria-label="Next activity date" /></Field>
           <Field label="Next activity"><input className="input" name="nextActivityTitle" placeholder="e.g. Call client for documents" maxLength={120} /></Field>
         </form>
       </Modal>
