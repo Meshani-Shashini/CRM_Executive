@@ -156,6 +156,18 @@ export default function NewCustomerAccountModal({ onClose, onCreated }: NewCusto
       setFormError('Choose a target premium currency and enter a positive USD/MVR rate when applicable.');
       return;
     }
+    if (!isDraft && (!legalEntityName || !primaryName || !email || !phone)) {
+      setFormError('Complete the legal organization name, primary contact name, contact email, and contact phone before activating the customer.');
+      return;
+    }
+    if (!isDraft && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setFormError('Enter a valid primary contact email address.');
+      return;
+    }
+    if (!isDraft && !/^[+()\d\s-]{7,}$/.test(phone)) {
+      setFormError('Enter a valid primary contact phone number.');
+      return;
+    }
     if (!isDraft && (!actionType || !dueDate || !assignedTo || !actionNotes)) {
       setFormError('Complete every Mandatory Next Action field before saving the customer.');
       return;
@@ -314,10 +326,10 @@ export default function NewCustomerAccountModal({ onClose, onCreated }: NewCusto
           </Section>
 
           <Section title="Primary Stakeholder / Risk Manager">
-            <Field label="Full Name"><input className="input" name="stakeholderName" /></Field>
+            <Field label="Full Name *"><input className="input" name="stakeholderName" required /></Field>
             <Field label="Designation"><input className="input" name="stakeholderDesignation" /></Field>
-            <Field label="Email"><input className="input" name="stakeholderEmail" type="email" /></Field>
-            <Field label="WhatsApp / Mobile"><input className="input" name="stakeholderPhone" type="tel" /></Field>
+            <Field label="Email *"><input className="input" name="stakeholderEmail" type="email" required /></Field>
+            <Field label="WhatsApp / Mobile *"><input className="input" name="stakeholderPhone" type="tel" required /></Field>
             <Field label="Identification Type">
               <select className="input" name="identificationType" defaultValue="">
                 <option value="">Select identification type</option>

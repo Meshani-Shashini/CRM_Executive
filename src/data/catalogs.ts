@@ -7,6 +7,60 @@ export const INSURERS: Insurer[] = [
   { id: 'ins4', name: 'Ceylinco Insurance', shortName: 'Ceylinco', commissionRate: 13, address: '' },
 ];
 
+type ProductMatrixMetadata = Pick<ProductCode, 'salesCycleVelocity' | 'riskLevel' | 'keyUnderwritingIntakeArtifacts'>;
+
+const PRODUCT_MATRIX_METADATA: Record<string, ProductMatrixMetadata> = {
+  AB: { salesCycleVelocity: '3–7 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Contract award letter, bank guarantee facility' },
+  BB: { salesCycleVelocity: '3–7 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Tender invitation, bid terms, bank guarantee facility' },
+  CB: { salesCycleVelocity: '7–14 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Executed contract, performance security wording, bank guarantee facility' },
+  CM: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Asset schedule, replacement values, maintenance records, risk survey' },
+  CP: { salesCycleVelocity: '7–14 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Equipment schedule, invoices, security and asset controls' },
+  CR: { salesCycleVelocity: '14–30 Days', riskLevel: 'Very High', keyUnderwritingIntakeArtifacts: 'Cyber questionnaire, IT controls, incident history, business continuity plan' },
+  FZ: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Contract award letter, Bill of Quantities (BOQ), plant schedule' },
+  IR: { salesCycleVelocity: '30–60 Days', riskLevel: 'Very High', keyUnderwritingIntakeArtifacts: 'Statement of values, asset register, engineering survey, loss history' },
+  LM: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Machinery schedule, gross profit values, production details, loss history' },
+  NC: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Contract award letter, Bill of Quantities (BOQ), project programme' },
+  NE: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Contract award letter, Bill of Quantities (BOQ), erection schedule' },
+  NM: { salesCycleVelocity: '7–14 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Machinery schedule, replacement values, maintenance records, breakdown history' },
+  CF: { salesCycleVelocity: '7–14 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Asset schedule, replacement values, fire protection details, risk survey' },
+  DF: { salesCycleVelocity: '3–7 Days', riskLevel: 'Low', keyUnderwritingIntakeArtifacts: 'Property details, contents schedule, security and occupancy information' },
+  FIR: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Statement of values, fire survey, business interruption values, loss history' },
+  FY: { salesCycleVelocity: '14–30 Days', riskLevel: 'Very High', keyUnderwritingIntakeArtifacts: 'Location schedule, security profile, political risk questionnaire, loss history' },
+  HC: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Property and contents schedule, occupancy details, fire survey, business income values' },
+  LP: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Gross profit worksheet, indemnity period, financial statements, loss history' },
+  PR: { salesCycleVelocity: '7–14 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Asset schedule, replacement values, security details, risk survey' },
+  EC: { salesCycleVelocity: '3–7 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Export invoice, certificate details, cargo description and route' },
+  EP: { salesCycleVelocity: '7–14 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Export declaration, invoice, packing list, transit route and terms' },
+  IC: { salesCycleVelocity: '3–7 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Import invoice, certificate details, cargo description and route' },
+  IP: { salesCycleVelocity: '7–14 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Import declaration, invoice, packing list, transit route and terms' },
+  LC: { salesCycleVelocity: '3–7 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Land transit details, invoice, cargo description and route' },
+  LT: { salesCycleVelocity: '3–7 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Transit route, invoice, cargo description and conveyance details' },
+  OP: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Annual turnover, shipment schedule, cargo profile, routes and loss history' },
+  RJ: { salesCycleVelocity: '7–14 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Cargo description, rejection terms, survey requirements and transit documents' },
+  SH: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Vessel particulars, valuation, class certificate, survey and loss history' },
+  ZZ: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Marine risk questionnaire, cargo/vessel schedule, route and loss history' },
+  AL: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Airport operations profile, passenger/flight data, contracts and claims history' },
+  AP: { salesCycleVelocity: '3–7 Days', riskLevel: 'Low', keyUnderwritingIntakeArtifacts: 'Proposal form, age and occupation schedule, prior claims history' },
+  BL: { salesCycleVelocity: '14–30 Days', riskLevel: 'Very High', keyUnderwritingIntakeArtifacts: 'Financial statements, banking controls, audit reports and claims history' },
+  CG: { salesCycleVelocity: '7–14 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Employee schedule, duties, internal controls and fidelity history' },
+  CT: { salesCycleVelocity: '3–7 Days', riskLevel: 'Low', keyUnderwritingIntakeArtifacts: 'Traveller details, itinerary, age and destination information' },
+  DL: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Professional credentials, practice profile, patient volume and claims history' },
+  DO: { salesCycleVelocity: '14–30 Days', riskLevel: 'Very High', keyUnderwritingIntakeArtifacts: 'Corporate profile, financial statements, governance details and claims history' },
+  EL: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Employee census, payroll, job duties, workplace controls and claims history' },
+  FL: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Freight operations profile, contracts, turnover, routes and claims history' },
+  GL: { salesCycleVelocity: '7–14 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Glass schedule, premises details, measurements and replacement values' },
+  GT: { salesCycleVelocity: '7–14 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Cargo schedule, invoices, transit routes and conveyance details' },
+  HB: { salesCycleVelocity: '7–14 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Contents schedule, property security details, valuation and loss history' },
+  HE: { salesCycleVelocity: '14–30 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Employee census, benefits schedule, claims/utilisation history and network details' },
+  HR: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Vessel particulars, valuation, class certificate, survey and loss history' },
+  MR: { salesCycleVelocity: '7–14 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Asset schedule, replacement values, security details and risk survey' },
+  MT: { salesCycleVelocity: '7–14 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Cash handling profile, transit routes, security controls and loss history' },
+  PL: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Business profile, product/service details, turnover and claims history' },
+  PN: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Professional credentials, services profile, revenue split and claims history' },
+  SI: { salesCycleVelocity: '14–30 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Employee census, benefits schedule, claims/utilisation history and network details' },
+  TL: { salesCycleVelocity: '7–14 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Business profile, premises/operations details, contracts and claims history' },
+};
+
 export const PRODUCT_CODES: ProductCode[] = [
   { code: 'AB', name: 'Advance Bond', category: 'Bonds', classType: 'SPECIALTY_FINANCIAL', defaultPipelineCode: 'FINANCIAL_SPECIALTY', standardBrokerageRatePct: 10, isStatutoryMandatory: false },
   { code: 'BB', name: 'Bid Bond', category: 'Bonds', classType: 'SPECIALTY_FINANCIAL', defaultPipelineCode: 'FINANCIAL_SPECIALTY', standardBrokerageRatePct: 10, isStatutoryMandatory: false },
@@ -57,7 +111,16 @@ export const PRODUCT_CODES: ProductCode[] = [
   { code: 'PN', name: 'Professional Indemnity Insurance', category: 'Miscellaneous', classType: 'CASUALTY_LIABILITY', defaultPipelineCode: 'CASUALTY_LIABILITY', standardBrokerageRatePct: 20, isStatutoryMandatory: false },
   { code: 'SI', name: 'Suwa Sampatha International', category: 'Health', classType: 'EMPLOYEE_BENEFITS', defaultPipelineCode: 'EMPLOYEE_BENEFITS', standardBrokerageRatePct: 10, isStatutoryMandatory: false },
   { code: 'TL', name: 'Public Liability', category: 'Miscellaneous', classType: 'CASUALTY_LIABILITY', defaultPipelineCode: 'CASUALTY_LIABILITY', standardBrokerageRatePct: 15, isStatutoryMandatory: false },
-].map((product) => ({ ...product, description: product.name }));
+].map((product) => ({
+  ...product,
+  description: product.name,
+  id: product.code,
+  ...(PRODUCT_MATRIX_METADATA[product.code] ?? {
+    salesCycleVelocity: '14–30 Days',
+    riskLevel: 'Medium' as const,
+    keyUnderwritingIntakeArtifacts: 'Completed proposal form, asset/risk schedule and prior claims history',
+  }),
+}));
 
 export const FUNNELS = [
   { id: 'f1', name: 'Broker Sales Funnel', stages: ['Lead Identified', 'Contact Made', 'Key Person Identified', 'Quoted', 'Internal Slip'] },

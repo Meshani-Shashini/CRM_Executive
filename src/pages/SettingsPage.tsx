@@ -6,7 +6,7 @@ import {
   Settings as SettingsIcon, Percent, Mail, Users as UsersIcon, ShieldAlert,
   Save, Plus, Pencil, Trash2, Check, Lock, Package,
 } from 'lucide-react';
-import type { TaxRate, Role, User, ProductCode, Pipeline } from '../types';
+import type { TaxRate, Role, User, ProductCode, Pipeline, Lead, Deal } from '../types';
 import { PRODUCT_CODES } from '../data/catalogs';
 
 type Tab = 'general' | 'tax' | 'products' | 'email' | 'users';
@@ -14,7 +14,7 @@ type Tab = 'general' | 'tax' | 'products' | 'email' | 'users';
 export default function SettingsPage() {
   const {
     user, hasAccess, taxRates, setTaxRates, users, createUser, updateUserProfile,
-    company, setCompany, emailTemplates, setEmailTemplates, products, setProducts, pipelines,
+    company, setCompany, emailTemplates, setEmailTemplates, products, setProducts, pipelines, leads, deals,
   } = useApp();
   const [tab, setTab] = useState<Tab>('tax');
   const [editing, setEditing] = useState<TaxRate | null>(null);
@@ -196,7 +196,7 @@ export default function SettingsPage() {
       )}
 
       {tab === 'products' && (
-        <ProductManagement products={products} setProducts={setProducts} pipelines={pipelines} onNotice={setNotice} />
+        <ProductManagement products={products} setProducts={setProducts} pipelines={pipelines} leads={leads} deals={deals} onNotice={setNotice} />
       )}
 
       {tab === 'email' && (
@@ -311,11 +311,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function ProductManagement({
-  products, setProducts, pipelines, onNotice,
+  products, setProducts, pipelines, leads, deals, onNotice,
 }: {
   products: ProductCode[];
   setProducts: Dispatch<SetStateAction<ProductCode[]>>;
   pipelines: Pipeline[];
+  leads: Lead[];
+  deals: Deal[];
   onNotice: (message: string) => void;
 }) {
   const [editing, setEditing] = useState<ProductCode | null>(null);
@@ -330,14 +332,21 @@ function ProductManagement({
     setForm({
       code: '', name: '', description: '', category: 'Miscellaneous', classType: 'CUSTOM',
       defaultPipelineCode: activePipelines[0]?.code ?? '', standardBrokerageRatePct: 0,
-      isStatutoryMandatory: false,
+      isStatutoryMandatory: false, salesCycleVelocity: '14–30 Days', riskLevel: 'Medium',
+      keyUnderwritingIntakeArtifacts: 'Completed proposal form, asset/risk schedule and prior claims history',
     });
   };
 
   const startEdit = (product: ProductCode) => {
     setEditing(product);
     setError('');
-    setForm({ ...product, description: product.description || product.name });
+    setForm({
+      ...product,
+      description: product.description || product.name,
+      salesCycleVelocity: product.salesCycleVelocity || '14–30 Days',
+      riskLevel: product.riskLevel || 'Medium',
+      keyUnderwritingIntakeArtifacts: product.keyUnderwritingIntakeArtifacts || 'Completed proposal form, asset/risk schedule and prior claims history',
+    });
   };
 
   const save = (event: FormEvent<HTMLFormElement>) => {
@@ -351,6 +360,9 @@ function ProductManagement({
       description: form.description.trim() || form.name.trim(),
       classType: form.classType.trim(),
       standardBrokerageRatePct: Number(form.standardBrokerageRatePct),
+      salesCycleVelocity: form.salesCycleVelocity?.trim() || '14–30 Days',
+      riskLevel: form.riskLevel || 'Medium',
+      keyUnderwritingIntakeArtifacts: form.keyUnderwritingIntakeArtifacts?.trim() || 'Completed proposal form, asset/risk schedule and prior claims history',
     };
     const duplicate = products.some((item) => item.code === product.code && item.code !== editing?.code);
     if (!product.code || !product.name || !product.classType || !product.defaultPipelineCode || duplicate || !Number.isFinite(product.standardBrokerageRatePct) || product.standardBrokerageRatePct < 0 || product.standardBrokerageRatePct > 100) {
@@ -365,11 +377,39 @@ function ProductManagement({
     setEditing(null);
   };
 
-  const remove = (product: ProductCode) => {
-    if (builtInCodes.has(product.code)) return;
-    if (!window.confirm(`Delete the custom product ${product.name}?`)) return;
+  const handleDeleteProduct = (product: ProductCode) => {
+    const confirmed = window.confirm(`Are you sure you want to delete ${product.name || 'this product'}?`);
+    if (!confirmed) return;
+    if (!product.code.trim()) {
+      onNotice('Unable to delete this product because it has no product code.');
+      return;
+    }
+    if (builtInCodes.has(product.code)) {
+      onNotice(`${product.name} is a seeded NM CODES product and cannot be deleted.`);
+      return;
+    }
+    const linkedLeads = leads.filter((lead) => lead.productCode === product.code && lead.status !== 'COMPLETED');
+    const linkedDeals = deals.filter((deal) => {
+      const matchesProduct = deal.productCode === product.code || (!deal.productCode && deal.product === product.name);
+      const stage = deal.stage.trim().toLowerCase();
+      const isClosed = deal.disposition === 'won' || deal.disposition === 'lost'
+        || /won|bound|renewed|policy issued|lost|declined/.test(stage);
+      return matchesProduct && !isClosed;
+    });
+    if (linkedLeads.length > 0 || linkedDeals.length > 0) {
+      const linkedTypes = [
+        linkedLeads.length > 0 ? `${linkedLeads.length} active lead${linkedLeads.length === 1 ? '' : 's'}` : '',
+        linkedDeals.length > 0 ? `${linkedDeals.length} active deal${linkedDeals.length === 1 ? '' : 's'}` : '',
+      ].filter(Boolean).join(' and ');
+      onNotice(`Cannot delete ${product.name}: it is linked to ${linkedTypes}. Reassign or close those records first.`);
+      return;
+    }
+    if (!products.some((item) => item.code === product.code)) {
+      onNotice(`${product.name} could not be deleted because it is no longer in the catalog.`);
+      return;
+    }
     setProducts((current) => current.filter((item) => item.code !== product.code));
-    onNotice(`${product.name} deleted from the catalog.`);
+    onNotice(`${product.name} deleted from the catalog and queued for Supabase sync.`);
   };
 
   return (
@@ -380,12 +420,12 @@ function ProductManagement({
             <h3 className="text-white font-semibold">Item / Product Management</h3>
             <p className="text-xs text-muted mt-0.5">Manage the 49 NM CODES products and custom insurance items used by Lead and Deal forms.</p>
           </div>
-          <button className="btn-primary !py-1.5" onClick={startAdd}><Plus size={14} /> Add Product</button>
+          <button type="button" className="btn-primary !py-1.5" onClick={startAdd}><Plus size={14} /> Add Product</button>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[900px]">
+          <table className="w-full text-sm min-w-[1500px]">
             <thead className="text-[11px] uppercase tracking-wider text-muted border-b border-ink-600">
-              <tr><th className="text-left px-3 py-2">Class</th><th className="text-left px-3 py-2">Product Code</th><th className="text-left px-3 py-2">Description</th><th className="text-right px-3 py-2">Brokerage %</th><th className="text-left px-3 py-2">Mandatory</th><th className="text-left px-3 py-2">Default Pipeline</th><th className="px-3 py-2" /></tr>
+              <tr><th className="text-left px-3 py-2">Class</th><th className="text-left px-3 py-2">Product Code</th><th className="text-left px-3 py-2">Description</th><th className="text-right px-3 py-2">Brokerage %</th><th className="text-left px-3 py-2">Mandatory</th><th className="text-left px-3 py-2">Target CRM Pipeline</th><th className="text-left px-3 py-2">Sales Cycle / Velocity</th><th className="text-left px-3 py-2">Risk Level</th><th className="text-left px-3 py-2 min-w-[360px]">Key Underwriting Intake Artifacts</th><th className="px-3 py-2" /></tr>
             </thead>
             <tbody>
               {products.map((product) => (
@@ -396,30 +436,32 @@ function ProductManagement({
                   <td className="px-3 py-2 text-right text-brand-300">{product.standardBrokerageRatePct}%</td>
                   <td className="px-3 py-2"><Badge variant={product.isStatutoryMandatory ? 'hot' : 'muted'}>{product.isStatutoryMandatory ? 'Yes' : 'No'}</Badge></td>
                   <td className="px-3 py-2 text-muted">{pipelines.find((pipeline) => pipeline.code === product.defaultPipelineCode)?.name ?? product.defaultPipelineCode}</td>
-                  <td className="px-3 py-2"><div className="flex justify-end gap-1"><button className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white" onClick={() => startEdit(product)} aria-label={`Edit ${product.name}`}><Pencil size={14} /></button><button className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-hot disabled:opacity-30" onClick={() => remove(product)} disabled={builtInCodes.has(product.code)} aria-label={`Delete ${product.name}`} title={builtInCodes.has(product.code) ? 'Seeded NM CODES products cannot be deleted' : 'Delete custom product'}><Trash2 size={14} /></button></div></td>
+                  <td className="px-3 py-2 text-muted">{product.salesCycleVelocity ?? '14–30 Days'}</td>
+                  <td className="px-3 py-2"><Badge variant={product.riskLevel === 'Very High' || product.riskLevel === 'High' ? 'hot' : product.riskLevel === 'Low' ? 'cold' : 'muted'}>{product.riskLevel ?? 'Medium'}</Badge></td>
+                  <td className="px-3 py-2 text-muted whitespace-normal">{product.keyUnderwritingIntakeArtifacts ?? 'Completed proposal form, asset/risk schedule and prior claims history'}</td>
+                  <td className="px-3 py-2"><div className="flex justify-end gap-1"><button type="button" className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white" onClick={() => startEdit(product)} aria-label={`Edit ${product.name}`}><Pencil size={14} /></button><button type="button" className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-hot" onClick={() => handleDeleteProduct(product)} aria-label={`Delete ${product.name}`} title={builtInCodes.has(product.code) ? 'Seeded NM CODES products cannot be deleted' : 'Delete custom product'}><Trash2 size={14} /></button></div></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
-      {form && (
-        <div className="glass rounded-2xl p-5">
-          <div className="flex items-center justify-between mb-4"><h3 className="text-white font-semibold">{editing ? 'Edit Product' : 'Add Product'}</h3><button className="btn-ghost !px-2" onClick={() => setForm(null)}>Cancel</button></div>
-          <form onSubmit={save} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <Modal open={Boolean(form)} onClose={() => { setForm(null); setEditing(null); setError(''); }} title={editing ? 'Edit Product' : 'Add Product'} subtitle="Update the master product classification matrix." size="lg" footer={<><button type="button" className="btn-ghost" onClick={() => { setForm(null); setEditing(null); setError(''); }}>Cancel</button><button type="submit" form="product-form" className="btn-primary"><Check size={14} /> Save Product</button></>}>
+        {form && <form id="product-form" onSubmit={save} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Product Code *"><input className="input" value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })} required /></Field>
             <Field label="Name *"><input className="input" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></Field>
             <Field label="Description *"><input className="input" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} required /></Field>
             <Field label="Industry Class *"><input className="input" value={form.classType} onChange={(event) => setForm({ ...form, classType: event.target.value })} required /></Field>
             <Field label="Category"><input className="input" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} /></Field>
             <Field label="Standard Brokerage Rate (%) *"><input className="input" type="number" min="0" max="100" step="0.01" value={form.standardBrokerageRatePct} onChange={(event) => setForm({ ...form, standardBrokerageRatePct: Number(event.target.value) })} required /></Field>
-            <Field label="Default Pipeline *"><select className="input" value={form.defaultPipelineCode} onChange={(event) => setForm({ ...form, defaultPipelineCode: event.target.value })} required><option value="">Select pipeline</option>{activePipelines.map((pipeline) => <option key={pipeline.code} value={pipeline.code}>{pipeline.name}</option>)}</select></Field>
+            <Field label="Target CRM Pipeline *"><select className="input" value={form.defaultPipelineCode} onChange={(event) => setForm({ ...form, defaultPipelineCode: event.target.value })} required><option value="">Select pipeline</option>{activePipelines.map((pipeline) => <option key={pipeline.code} value={pipeline.code}>{pipeline.name}</option>)}</select></Field>
+            <Field label="Sales Cycle / Velocity *"><input className="input" value={form.salesCycleVelocity ?? ''} onChange={(event) => setForm({ ...form, salesCycleVelocity: event.target.value })} placeholder="e.g. 3–7 Days" required /></Field>
+            <Field label="Risk Level *"><select className="input" value={form.riskLevel ?? 'Medium'} onChange={(event) => setForm({ ...form, riskLevel: event.target.value as ProductCode['riskLevel'] })} required><option>Low</option><option>Medium</option><option>High</option><option>Very High</option></select></Field>
+            <Field label="Key Underwriting Intake Artifacts *"><textarea className="input min-h-[88px] sm:col-span-2" value={form.keyUnderwritingIntakeArtifacts ?? ''} onChange={(event) => setForm({ ...form, keyUnderwritingIntakeArtifacts: event.target.value })} required /></Field>
             <label className="flex items-center gap-2 text-sm text-white self-end"><input type="checkbox" checked={form.isStatutoryMandatory} onChange={(event) => setForm({ ...form, isStatutoryMandatory: event.target.checked })} className="accent-brand-500" /> Statutory mandatory</label>
             {error && <p role="alert" className="sm:col-span-2 text-sm text-hot">{error}</p>}
-            <div className="sm:col-span-2"><button className="btn-primary" type="submit"><Check size={14} /> Save Product</button></div>
-          </form>
-        </div>
-      )}
+          </form>}
+      </Modal>
     </div>
   );
 }

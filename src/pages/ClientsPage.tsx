@@ -19,7 +19,7 @@ const activityIcon = {
 };
 
 export default function ClientsPage() {
-  const { clients, setClients, activities, setActivities, user, users } = useApp();
+  const { clients, setClients, leads, deals, invoices, activities, setActivities, user, users } = useApp();
   const [selectedId, setSelectedId] = useState('');
   const [portalClientId, setPortalClientId] = useState(user.clientId ?? '');
   const [query, setQuery] = useState('');
@@ -47,6 +47,13 @@ export default function ClientsPage() {
 
   const deleteClient = (client: Client) => {
     if (user.role !== 'admin') return;
+    const linkedLeads = leads.filter((lead) => lead.clientId === client.id || lead.client.trim().toLowerCase() === client.name.trim().toLowerCase());
+    const linkedDeals = deals.filter((deal) => deal.clientId === client.id || deal.client.trim().toLowerCase() === client.name.trim().toLowerCase());
+    const linkedInvoices = invoices.filter((invoice) => invoice.clientId === client.id);
+    if (linkedLeads.length || linkedDeals.length || linkedInvoices.length) {
+      window.alert(`Cannot delete "${client.name}" because it has ${linkedLeads.length + linkedDeals.length + linkedInvoices.length} associated record(s). Reassign or delete the linked Leads, Deals, and Invoices first.`);
+      return;
+    }
     if (!window.confirm(`Delete client "${client.name}"? This cannot be undone.`)) return;
     setClients((current) => current.filter((item) => item.id !== client.id));
     if (selected?.id === client.id) {
@@ -408,7 +415,7 @@ export default function ClientsPage() {
                 <form id="edit-client-form" onSubmit={saveClientProfile} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {!isPortalEdit && <Field label="Legal name"><input className="input" name="name" required defaultValue={editingClient.insuredEntity?.legalEntityName || editingClient.name} /></Field>}
                   {!isPortalEdit && <Field label="TIN"><input className="input" name="tin" defaultValue={editingClient.tin} /></Field>}
-                  <Field label="Phone"><input className="input" name="phone" type="tel" defaultValue={editingClient.phone} /></Field>
+                  <Field label="Phone *"><input className="input" name="phone" type="tel" required defaultValue={editingClient.phone} /></Field>
                   <Field label="Email"><input className="input" name="email" type="email" required defaultValue={editingClient.email} /></Field>
                   <Field label="Contact person"><input className="input" name="contactPerson" defaultValue={editingClient.contactPerson || editingClient.insuredEntity?.primaryStakeholder.fullName || ''} /></Field>
                   <Field label="Address"><textarea className="input min-h-20" name="address" defaultValue={editingClient.address} /></Field>

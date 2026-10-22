@@ -20,7 +20,7 @@ const PRE_PIPELINE_STAGES: LeadFunnelStage[] = [
 
 export default function LeadsPage() {
   const {
-    leads, setLeads, clients, setClients, user, users, pipelines, pipelineStages,
+    leads, setLeads, deals, clients, setClients, user, users, pipelines, pipelineStages,
     customerLookups, setCustomerLookups, products,
   } = useApp();
   const PRODUCT_CODES = products;
@@ -31,8 +31,17 @@ export default function LeadsPage() {
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [newOrganizationOpen, setNewOrganizationOpen] = useState(false);
   const [organizationQuery, setOrganizationQuery] = useState('');
+  const [organizationContactName, setOrganizationContactName] = useState('');
+  const [organizationContactEmail, setOrganizationContactEmail] = useState('');
+  const [organizationContactPhone, setOrganizationContactPhone] = useState('');
   const [personName, setPersonName] = useState('');
+  const [primaryContactName, setPrimaryContactName] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
   const [leadTitle, setLeadTitle] = useState('');
+  const [titleManuallyEdited, setTitleManuallyEdited] = useState(false);
+  const [leadSource, setLeadSource] = useState('');
+  const [leadNotes, setLeadNotes] = useState('');
   const [productCode, setProductCode] = useState('');
   const [closeDate, setCloseDate] = useState('');
   const [ownerId, setOwnerId] = useState('');
@@ -79,6 +88,11 @@ export default function LeadsPage() {
     }
   }, [activePipelines, productCode, products, selectedPipelineId]);
   useEffect(() => {
+    if (editingLead || titleManuallyEdited) return;
+    const product = products.find((item) => item.code === productCode);
+    if (organizationQuery.trim() && product) setLeadTitle(`${organizationQuery.trim()} - ${product.name}`);
+  }, [editingLead, organizationQuery, productCode, products, titleManuallyEdited]);
+  useEffect(() => {
     const firstStage = stages[0];
     if (!firstStage) {
       setSelectedStageId('');
@@ -114,14 +128,34 @@ export default function LeadsPage() {
   );
   const prePipelineLeads = leads.filter((lead) => matchesLeadFilters(lead) && !lead.pipelineId && Boolean(lead.leadFunnelStage));
 
+  const deleteLead = (lead: Lead) => {
+    if (user.role !== 'admin' && user.role !== 'sales') return;
+    const linkedDeal = deals.some((deal) => deal.id === lead.dealId);
+    if (linkedDeal) {
+      window.alert('This Lead cannot be deleted because it has an associated Deal. Reassign or delete the associated Deal first.');
+      return;
+    }
+    if (!window.confirm(`Delete Lead "${lead.title ?? lead.client}"? This cannot be undone.`)) return;
+    setLeads((current) => current.filter((item) => item.id !== lead.id));
+  };
+
   const resetLeadForm = () => {
     setEditingLead(null);
     setOrganizationQuery('');
+    setOrganizationContactName('');
+    setOrganizationContactEmail('');
+    setOrganizationContactPhone('');
     setPersonName('');
+    setPrimaryContactName('');
+    setContactEmail('');
+    setContactPhone('');
     setLeadTitle('');
+    setTitleManuallyEdited(false);
+    setLeadSource('');
+    setLeadNotes('');
     setProductCode('');
     setCloseDate('');
-    setOwnerId('');
+    setOwnerId(user.id);
     setLeadFunnelStage('L0: Capture');
     setLeadCurrency('');
     setLeadValue('');
@@ -143,7 +177,13 @@ export default function LeadsPage() {
     setEditingLead(lead);
     setOrganizationQuery(lead.client);
     setPersonName(lead.person ?? lead.contact);
+    setPrimaryContactName(lead.contact);
+    setContactEmail(lead.contactEmail ?? '');
+    setContactPhone(lead.contactPhone ?? '');
     setLeadTitle(lead.title ?? `${lead.client} lead`);
+    setTitleManuallyEdited(true);
+    setLeadSource(lead.source ?? '');
+    setLeadNotes(lead.notes ?? '');
     setProductCode(lead.productCode);
     setCloseDate(lead.closeDate ?? lead.renewalDate);
     setOwnerId(lead.ownerId);
@@ -159,11 +199,22 @@ export default function LeadsPage() {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const name = String(data.get('name') ?? '').trim();
-    if (!name) return;
+    const contactName = String(data.get('contactName') ?? '').trim();
+    const email = String(data.get('contactEmail') ?? '').trim();
+    const phone = String(data.get('contactPhone') ?? '').trim();
+    if (!name || !contactName || !email || !phone) {
+      setFormError('Complete the organization name, primary contact name, contact email, and contact phone before creating the organization.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^[+()\d\s-]{7,}$/.test(phone)) {
+      setFormError('Enter a valid organization contact email and phone number.');
+      return;
+    }
     const existing = clients.find((client) => client.name.trim().toLowerCase() === name.toLowerCase());
     if (existing) {
       setOrganizationQuery(existing.name);
       setNewOrganizationOpen(false);
+      setFormError('');
       return;
     }
 
@@ -172,8 +223,8 @@ export default function LeadsPage() {
       name,
       tin: '',
       country: '',
-      phone: '',
-      email: '',
+      phone,
+      email,
       address: '',
       sumInsured: 0,
       premium: 0,
@@ -183,10 +234,15 @@ export default function LeadsPage() {
       class: '',
       ownerId: user.id,
       tags: [],
+      contactPerson: contactName,
     };
     setClients((current) => [organization, ...current]);
     setOrganizationQuery(name);
+    setPrimaryContactName(contactName);
+    setContactEmail(email);
+    setContactPhone(phone);
     setNewOrganizationOpen(false);
+    setFormError('');
   };
 
   const createLead = (event: FormEvent<HTMLFormElement>) => {
@@ -196,6 +252,9 @@ export default function LeadsPage() {
     const title = leadTitle.trim();
     const product = products.find((item) => item.code === productCode);
     const selectedPersonName = personName.trim();
+    const primaryContact = primaryContactName.trim();
+    const email = contactEmail.trim();
+    const phone = contactPhone.trim();
     const person = users.find((candidate) =>
       candidate.role === 'sales' && candidate.name.trim().toLowerCase() === selectedPersonName.toLowerCase(),
     );
@@ -205,17 +264,22 @@ export default function LeadsPage() {
     const amount = Number(data.get('value'));
     const rate = leadCurrency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
     const selectedStage = stages.find((stage) => stage.id === selectedStageId) ?? stages[0];
-    const isQualified = leadFunnelStage === 'L3: Qualified Opportunity';
     const expectedCloseDate = normalizeDateInput(closeDate);
 
     if (!selectedOrganization) {
       setFormError('Choose an existing organization or create it first.');
       return;
     }
-    if (!title || !expectedCloseDate || !selectedPersonName || !owner || !product || (isQualified && (!selectedPipeline || !selectedStage))) {
-      setFormError(isQualified
-        ? 'Qualified opportunities must be routed to an active pipeline with a stage.'
-        : 'Enter a valid expected close date in DD-MMM-YYYY format, a title, a sales person, choose an owner and product, and complete required fields.');
+    if (!title || !expectedCloseDate || !selectedPersonName || !primaryContact || !email || !phone || !owner || !product || !selectedPipeline || !selectedStage) {
+      setFormError('Complete Organization, Primary Contact Name, Contact Email, Contact Phone, Lead Title, Insurance Product, Pipeline, Stage, and Expected Close Date before saving.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setFormError('Enter a valid contact email address.');
+      return;
+    }
+    if (!/^[+()\d\s-]{7,}$/.test(phone)) {
+      setFormError('Enter a valid contact phone number.');
       return;
     }
     if (!leadCurrency || !Number.isFinite(amount) || amount < 0 ||
@@ -239,26 +303,28 @@ export default function LeadsPage() {
       brokerageCommission: calculateBrokerageCommission(amount, product),
       currency: leadCurrency,
       exchangeRate: rate,
-      ...(isQualified && selectedPipeline ? { pipelineId: selectedPipeline.id } : {}),
+      pipelineId: selectedPipeline.id,
       closeDate: expectedCloseDate,
       visibility: 'individual',
-      contact: selectedPersonName,
+      contact: primaryContact,
+      contactEmail: email,
+      contactPhone: phone,
+      source: leadSource.trim(),
+      notes: leadNotes.trim(),
       country: selectedOrganization.country,
       insuranceClass: product.category,
       productCode: product.code,
       temperature: editingLead?.temperature ?? 'WARM',
       status: editingLead?.status ?? 'TO-DO',
-      funnelStage: isQualified && selectedStage
-        ? editingLead?.pipelineId === selectedPipeline?.id ? editingLead?.funnelStage ?? selectedStage.name : selectedStage.name
-        : leadFunnelStage,
+      funnelStage: selectedStage.name,
       renewalDate: expectedCloseDate,
       sumInsured: valueMvr,
       premium: valueMvr,
       ownerId: owner.id,
       lastActivity: editingLead?.lastActivity ?? 'Just now',
-      leadFunnelStage,
-      ...(isQualified ? { dealId: editingLead?.dealId ?? `D-${Date.now()}` } : {}),
-      ...(isQualified && selectedPipeline ? { routedAt: editingLead?.routedAt ?? new Date().toISOString() } : {}),
+      leadFunnelStage: 'L3: Qualified Opportunity',
+      ...(editingLead?.dealId ? { dealId: editingLead.dealId } : { dealId: `D-${Date.now()}` }),
+      routedAt: editingLead?.routedAt ?? new Date().toISOString(),
     };
     if (!personOptions.some((name) => name.toLowerCase() === selectedPersonName.toLowerCase())) {
       setCustomerLookups((current) => ({
@@ -318,6 +384,7 @@ export default function LeadsPage() {
                     <article key={lead.id} className="glass-soft rounded-xl p-3">
                       <h3 className="text-sm font-semibold text-white">{lead.title ?? `${lead.client} lead`}</h3>
                       <div className="text-[11px] text-muted mt-1">{lead.client} · Person: {lead.person ?? lead.contact}</div>
+                      <div className="text-[11px] text-muted mt-1">Contact: {lead.contact} · {lead.contactEmail} · {lead.contactPhone}</div>
                       <div className="text-[11px] text-muted mt-1">Owner: {staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId}</div>
                       <div className="flex flex-wrap gap-1 mt-2">
                         <Badge variant="brand">{PRODUCT_CODES.find((product) => product.code === lead.productCode)?.name ?? lead.productCode}</Badge>
@@ -327,10 +394,9 @@ export default function LeadsPage() {
                         {lead.currency === 'USD' && <span>{formatAmount(lead.valueMvr ?? lead.premium, 'MVR')}</span>}
                       </div>
                       <div className="text-[11px] text-muted mt-1">Expected close {formatDate(lead.closeDate ?? lead.renewalDate)}</div>
+                      {lead.notes && <div className="text-[11px] text-muted mt-1 line-clamp-2">Notes: {lead.notes}</div>}
                       {(user.role === 'admin' || user.role === 'sales') && (
-                        <button type="button" className="btn-ghost mt-2 !py-1.5" onClick={() => openEditLead(lead)}>
-                          <Pencil size={13} /> Edit Lead
-                        </button>
+                        <div className="flex gap-2 mt-2"><button type="button" className="btn-ghost !py-1.5" onClick={() => openEditLead(lead)}><Pencil size={13} /> Edit Lead</button><button type="button" className="btn-ghost !py-1.5 text-hot" onClick={() => deleteLead(lead)}>Delete</button></div>
                       )}
                     </article>
                   ))}
@@ -350,7 +416,7 @@ export default function LeadsPage() {
                 <th className="text-left px-4 py-3 font-medium">Owner</th>
                 <th className="text-left px-4 py-3 font-medium">Product Class</th>
                 <th className="text-right px-4 py-3 font-medium">Lead Value</th>
-                <th className="text-left px-4 py-3 font-medium">Expected Close</th>
+                <th className="text-left px-4 py-3 font-medium">Expected Close / Notes</th>
                 {(user.role === 'admin' || user.role === 'sales') && <th className="text-right px-4 py-3 font-medium">Actions</th>}
               </tr>
             </thead>
@@ -358,16 +424,14 @@ export default function LeadsPage() {
               {visibleLeads.map((lead) => (
                 <tr key={lead.id} className="table-row">
                   <td className="px-4 py-3"><div className="text-white font-medium">{lead.title ?? `${lead.client} lead`}</div><div className="text-[11px] text-muted">{lead.client}</div></td>
-                  <td className="px-4 py-3 text-muted">{lead.person ?? lead.contact}</td>
+                  <td className="px-4 py-3 text-muted"><div>{lead.contact}</div><div className="text-[11px]">{lead.contactEmail} · {lead.contactPhone}</div></td>
                   <td className="px-4 py-3 text-muted">{staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId}</td>
                   <td className="px-4 py-3 text-muted">{PRODUCT_CODES.find((product) => product.code === lead.productCode)?.name ?? lead.insuranceClass}</td>
                   <td className="px-4 py-3 text-right text-white"><div>{formatAmount(lead.value ?? lead.premium, lead.currency ?? 'MVR')}</div>{lead.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(lead.valueMvr ?? lead.premium, 'MVR')}</div>}<div className="text-[11px] text-brand-300">Brokerage budget: {formatAmount(lead.brokerageCommission ?? calculateBrokerageCommission(lead.value ?? lead.premium, PRODUCT_CODES.find((product) => product.code === lead.productCode)), lead.currency ?? 'MVR')} ({lead.brokerageRatePct ?? PRODUCT_CODES.find((product) => product.code === lead.productCode)?.standardBrokerageRatePct ?? 0}%)</div></td>
-                  <td className="px-4 py-3 text-muted">{formatDate(lead.closeDate ?? lead.renewalDate)}</td>
+                  <td className="px-4 py-3 text-muted"><div>{formatDate(lead.closeDate ?? lead.renewalDate)}</div>{lead.notes && <div className="max-w-48 truncate text-[11px]" title={lead.notes}>{lead.notes}</div>}</td>
                   {(user.role === 'admin' || user.role === 'sales') && (
                     <td className="px-4 py-3 text-right">
-                      <button type="button" className="btn-ghost !py-1.5" onClick={() => openEditLead(lead)}>
-                        <Pencil size={13} /> Edit Lead
-                      </button>
+                      <div className="flex justify-end gap-2"><button type="button" className="btn-ghost !py-1.5" onClick={() => openEditLead(lead)}><Pencil size={13} /> Edit Lead</button><button type="button" className="btn-ghost !py-1.5 text-hot" onClick={() => deleteLead(lead)}>Delete</button></div>
                     </td>
                   )}
                 </tr>
@@ -414,6 +478,7 @@ export default function LeadsPage() {
         footer={<><button type="button" className="btn-ghost" onClick={() => { setNewLeadOpen(false); resetLeadForm(); }}><X size={14} /> Cancel</button><button type="submit" form="new-lead-form" className="btn-primary"><Plus size={14} /> {editingLead ? 'Update Lead' : 'Save Lead'}</button></>}
       >
         <form id="new-lead-form" onSubmit={createLead} noValidate className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <SectionHeading title="Basic Information" />
           <Field label="Sales Person">
             <input
               className="input"
@@ -449,7 +514,11 @@ export default function LeadsPage() {
             </datalist>
             {organizationQuery.trim() && !selectedOrganization && <p className="mt-1 text-xs text-warm">This organization is new. Create it to continue.</p>}
           </Field>
-          <Field label="Title *"><input className="input" name="title" maxLength={200} required value={leadTitle} onChange={(event) => setLeadTitle(event.target.value)} /></Field>
+          <Field label="Primary Contact Name *"><input className="input" value={primaryContactName} onChange={(event) => setPrimaryContactName(event.target.value)} required placeholder="Contact full name" /></Field>
+          <Field label="Contact Email *"><input className="input" type="email" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} required placeholder="name@company.com" /></Field>
+          <Field label="Contact Phone *"><input className="input" type="tel" value={contactPhone} onChange={(event) => setContactPhone(event.target.value)} required placeholder="+960 ..." /></Field>
+          <SectionHeading title="Opportunity Details" />
+          <Field label="Title *"><input className="input" name="title" maxLength={200} required value={leadTitle} onChange={(event) => { setTitleManuallyEdited(true); setLeadTitle(event.target.value); }} /></Field>
           <Field label="Type of Insurance Product *">
             <ProductSelect
               pipelines={pipelines}
@@ -459,6 +528,9 @@ export default function LeadsPage() {
               onChange={(product) => setProductCode(product?.code ?? '')}
             />
           </Field>
+          <Field label="Source"><select className="input" value={leadSource} onChange={(event) => setLeadSource(event.target.value)}><option value="">Select source</option><option>Referral</option><option>Website</option><option>Renewal</option><option>Walk-in</option><option>Partner</option></select></Field>
+          <Field label="Remarks / Notes"><textarea className="input min-h-20" value={leadNotes} onChange={(event) => setLeadNotes(event.target.value)} placeholder="Initial scoping, client context, or missing information" /></Field>
+          <SectionHeading title="Pipeline & Progress" />
           <Field label="Pre-pipeline stage">
             <select className="input" value={leadFunnelStage} onChange={(event) => setLeadFunnelStage(event.target.value as LeadFunnelStage)}>
               {PRE_PIPELINE_STAGES.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
@@ -466,16 +538,17 @@ export default function LeadsPage() {
           </Field>
           <Field label="Pipeline">
             <select className="input" value={selectedPipelineId} onChange={(event) => setSelectedPipelineId(event.target.value)}>
-              <option value="">{leadFunnelStage === 'L3: Qualified Opportunity' ? 'Select pipeline to route' : 'Not routed yet'}</option>
+              <option value="">Select pipeline</option>
               {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
             </select>
           </Field>
           <Field label="Stage">
-            <select className="input" value={selectedStageId} required={leadFunnelStage === 'L3: Qualified Opportunity'} onChange={(event) => setSelectedStageId(event.target.value)}>
+            <select className="input" value={selectedStageId} required onChange={(event) => setSelectedStageId(event.target.value)}>
               <option value="">Select stage</option>
               {stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}
             </select>
           </Field>
+          <SectionHeading title="Valuation & Financials" />
           <Field label="Lead Value Currency">
             <select className="input" required value={leadCurrency} onChange={(event) => {
               const currency = event.target.value as Currency | '';
@@ -525,8 +598,13 @@ export default function LeadsPage() {
         layer="overlay"
         footer={<><button type="button" className="btn-ghost" onClick={() => setNewOrganizationOpen(false)}>Cancel</button><button type="submit" form="new-organization-form" className="btn-primary"><Plus size={14} /> Create Organization</button></>}
       >
-        <form id="new-organization-form" onSubmit={createOrganization}>
-          <Field label="Organization name"><input className="input" name="name" defaultValue={organizationQuery} required autoFocus /></Field>
+        <form id="new-organization-form" onSubmit={createOrganization} className="space-y-3">
+          <p className="text-xs text-warm">Complete all organization contact details now so the Lead can be saved without missing information.</p>
+          <Field label="Organization name *"><input className="input" name="name" value={organizationQuery} onChange={(event) => setOrganizationQuery(event.target.value)} required autoFocus /></Field>
+          <Field label="Primary contact name *"><input className="input" name="contactName" value={organizationContactName} onChange={(event) => setOrganizationContactName(event.target.value)} required /></Field>
+          <Field label="Contact email *"><input className="input" type="email" name="contactEmail" value={organizationContactEmail} onChange={(event) => setOrganizationContactEmail(event.target.value)} required /></Field>
+          <Field label="Contact phone *"><input className="input" type="tel" name="contactPhone" value={organizationContactPhone} onChange={(event) => setOrganizationContactPhone(event.target.value)} required /></Field>
+          {formError && <p role="alert" className="text-sm text-hot">{formError}</p>}
         </form>
       </Modal>
 
@@ -542,5 +620,9 @@ export default function LeadsPage() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="block"><div className="text-xs text-muted mb-1.5">{label}</div>{children}</label>;
+}
+
+function SectionHeading({ title }: { title: string }) {
+  return <div className="sm:col-span-2 border-b border-ink-700 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-brand-300">{title}</div>;
 }
 

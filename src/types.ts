@@ -34,6 +34,10 @@ export interface Lead {
   /** Legacy values are retained for backwards-compatible reads; new Leads are always individual. */
   visibility?: 'individual' | 'company' | 'owner_group';
   contact: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  source?: string;
+  notes?: string;
   country: string;
   insuranceClass: string;
   productCode: string;
@@ -140,6 +144,9 @@ export interface ProductCode {
   defaultPipelineCode: string;
   standardBrokerageRatePct: number;
   isStatutoryMandatory: boolean;
+  salesCycleVelocity?: string;
+  riskLevel?: 'Low' | 'Medium' | 'High' | 'Very High';
+  keyUnderwritingIntakeArtifacts?: string;
 }
 
 export interface InvoiceItem {
@@ -209,6 +216,7 @@ export interface Deal {
   policyExpiry?: string;
   linkedInvoiceId?: string;
   client: string;
+  clientId?: string;
   product: string;
   productCode?: string;
   value: number;
@@ -228,6 +236,8 @@ export interface Deal {
   lossReason?: string;
   nextActivityAt?: string;
   nextActivityTitle?: string;
+  source?: string;
+  notes?: string;
 }
 
 export interface Pipeline {

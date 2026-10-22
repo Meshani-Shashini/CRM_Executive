@@ -307,11 +307,17 @@ CREATE TABLE IF NOT EXISTS public.policy_types (
   default_pipeline_code TEXT NOT NULL,
   standard_brokerage_rate_pct NUMERIC(5, 2) NOT NULL CHECK (standard_brokerage_rate_pct BETWEEN 0 AND 100),
   is_statutory_mandatory BOOLEAN NOT NULL DEFAULT FALSE,
+  sales_cycle_velocity TEXT NOT NULL DEFAULT '14–30 Days',
+  risk_level TEXT NOT NULL DEFAULT 'Medium',
+  key_underwriting_intake_artifacts TEXT NOT NULL DEFAULT 'Completed proposal form, asset/risk schedule and prior claims history',
   PRIMARY KEY (tenant_id, policy_code)
 );
 
 ALTER TABLE public.policy_types ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.policy_types ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.policy_types ADD COLUMN IF NOT EXISTS sales_cycle_velocity TEXT NOT NULL DEFAULT '14–30 Days';
+ALTER TABLE public.policy_types ADD COLUMN IF NOT EXISTS risk_level TEXT NOT NULL DEFAULT 'Medium';
+ALTER TABLE public.policy_types ADD COLUMN IF NOT EXISTS key_underwriting_intake_artifacts TEXT NOT NULL DEFAULT 'Completed proposal form, asset/risk schedule and prior claims history';
 DROP POLICY IF EXISTS "Tenant members can read policy types" ON public.policy_types;
 CREATE POLICY "Tenant members can read policy types"
   ON public.policy_types FOR SELECT TO authenticated
@@ -386,6 +392,56 @@ ON CONFLICT (tenant_id, policy_code) DO UPDATE SET
 UPDATE public.policy_types
 SET description = name
 WHERE description IS NULL OR description = '';
+
+-- Populate the final matrix columns for every seeded NM CODES product.
+UPDATE public.policy_types
+SET
+  sales_cycle_velocity = CASE
+    WHEN policy_code IN ('AB', 'BB', 'AP', 'CT', 'DF', 'EC', 'IC', 'LC', 'LT') THEN '3–7 Days'
+    WHEN policy_code IN ('CB', 'CP', 'CF', 'NM', 'PR', 'RJ', 'GT', 'GL', 'HB', 'MR', 'MT', 'TL') THEN '7–14 Days'
+    WHEN policy_code = 'IR' THEN '30–60 Days'
+    ELSE '14–30 Days'
+  END,
+  risk_level = CASE
+    WHEN policy_code IN ('IR', 'CR', 'FY', 'BL', 'DO') THEN 'Very High'
+    WHEN policy_code IN ('AB', 'BB', 'CB', 'CM', 'FZ', 'LM', 'NC', 'NE', 'NM', 'FIR', 'HC', 'LP', 'OP', 'RJ', 'SH', 'ZZ', 'AL', 'DL', 'EL', 'FL', 'HR', 'PL', 'PN') THEN 'High'
+    WHEN policy_code IN ('AP', 'CT', 'DF') THEN 'Low'
+    ELSE 'Medium'
+  END,
+  key_underwriting_intake_artifacts = CASE
+    WHEN policy_code = 'AB' THEN 'Contract award letter, bank guarantee facility'
+    WHEN policy_code = 'BB' THEN 'Tender invitation, bid terms, bank guarantee facility'
+    WHEN policy_code = 'CB' THEN 'Executed contract, performance security wording, bank guarantee facility'
+    WHEN policy_code IN ('FZ', 'NC', 'NE') THEN 'Contract award letter, Bill of Quantities (BOQ), project schedule'
+    WHEN policy_code IN ('CM', 'NM') THEN 'Machinery schedule, replacement values, maintenance records, risk survey'
+    WHEN policy_code = 'CR' THEN 'Cyber questionnaire, IT controls, incident history, business continuity plan'
+    WHEN policy_code IN ('IR', 'FIR') THEN 'Statement of values, engineering/fire survey, business interruption values, loss history'
+    WHEN policy_code IN ('CF', 'PR', 'MR') THEN 'Asset schedule, replacement values, security details and risk survey'
+    WHEN policy_code IN ('DF', 'HB') THEN 'Property/contents schedule, security details and loss history'
+    WHEN policy_code IN ('LM', 'LP') THEN 'Gross profit worksheet, indemnity period, financial statements, loss history'
+    WHEN policy_code IN ('EC', 'IC') THEN 'Import/export invoice, certificate details, cargo description and route'
+    WHEN policy_code IN ('EP', 'IP') THEN 'Import/export declaration, invoice, packing list, transit route and terms'
+    WHEN policy_code IN ('LC', 'LT', 'GT') THEN 'Transit route, invoice, cargo description and conveyance details'
+    WHEN policy_code IN ('OP', 'RJ', 'ZZ') THEN 'Cargo schedule, routes, shipment profile and loss history'
+    WHEN policy_code IN ('SH', 'HR') THEN 'Vessel particulars, valuation, class certificate, survey and loss history'
+    WHEN policy_code = 'AL' THEN 'Airport operations profile, passenger/flight data, contracts and claims history'
+    WHEN policy_code = 'AP' THEN 'Proposal form, age and occupation schedule, prior claims history'
+    WHEN policy_code = 'BL' THEN 'Financial statements, banking controls, audit reports and claims history'
+    WHEN policy_code = 'CG' THEN 'Employee schedule, duties, internal controls and fidelity history'
+    WHEN policy_code = 'CT' THEN 'Traveller details, itinerary, age and destination information'
+    WHEN policy_code = 'DL' THEN 'Professional credentials, practice profile, patient volume and claims history'
+    WHEN policy_code = 'DO' THEN 'Corporate profile, financial statements, governance details and claims history'
+    WHEN policy_code = 'EL' THEN 'Employee census, payroll, job duties, workplace controls and claims history'
+    WHEN policy_code = 'FL' THEN 'Freight operations profile, contracts, turnover, routes and claims history'
+    WHEN policy_code = 'GL' THEN 'Glass schedule, premises details, measurements and replacement values'
+    WHEN policy_code IN ('HE', 'SI') THEN 'Employee census, benefits schedule, claims/utilisation history and network details'
+    WHEN policy_code = 'PL' THEN 'Business profile, product/service details, turnover and claims history'
+    WHEN policy_code = 'PN' THEN 'Professional credentials, services profile, revenue split and claims history'
+    WHEN policy_code = 'MT' THEN 'Cash handling profile, transit routes, security controls and loss history'
+    WHEN policy_code = 'TL' THEN 'Business profile, premises/operations details, contracts and claims history'
+    ELSE 'Completed proposal form, asset/risk schedule and prior claims history'
+  END
+WHERE tenant_id = '00000000-0000-4000-8000-000000000001';
 
 -- The frontend persists administrator-managed catalog overrides in tenant_records.
 -- Re-declare the synchronizer here so existing deployments accept the products collection.

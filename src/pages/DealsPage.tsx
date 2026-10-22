@@ -3,7 +3,7 @@ import { INSURERS } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
-import { Plus, Filter, X } from 'lucide-react';
+import { Plus, Filter, X, Pencil } from 'lucide-react';
 import type { Deal, ProductCode } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
@@ -25,6 +25,7 @@ export default function DealsPage() {
   const { deals, setDeals, clients, user, pipelines, pipelineStages, products } = useApp();
   const PRODUCT_CODES = products;
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
   const [createPipelineId, setCreatePipelineId] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<ProductCode>();
   const [selectedStageId, setSelectedStageId] = useState('');
@@ -32,6 +33,15 @@ export default function DealsPage() {
   const [dealAmount, setDealAmount] = useState('');
   const [exchangeRate, setExchangeRate] = useState('');
   const [createError, setCreateError] = useState('');
+  const [dealClient, setDealClient] = useState('');
+  const [dealInsurer, setDealInsurer] = useState('');
+  const [dealProbability, setDealProbability] = useState('');
+  const [dealIntent, setDealIntent] = useState<Deal['intentTier']>('P3');
+  const [dealCloseDate, setDealCloseDate] = useState('');
+  const [dealNextActivityAt, setDealNextActivityAt] = useState('');
+  const [dealNextActivityTitle, setDealNextActivityTitle] = useState('');
+  const [dealSource, setDealSource] = useState('');
+  const [dealNotes, setDealNotes] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
   const [stageFilter, setStageFilter] = useState(() => hashParams().get('stage') ?? '');
   const [dealFilter, setDealFilter] = useState(() => hashParams().get('filter') ?? '');
@@ -77,6 +87,7 @@ export default function DealsPage() {
   const totalWeighted = deals.reduce((sum, deal) => sum + toMvr(deal.weighted, deal.currency, deal.exchangeRate), 0);
 
   const openCreate = () => {
+    setEditingDeal(null);
     setCreatePipelineId('');
     setSelectedProduct(undefined);
     setSelectedStageId('');
@@ -84,19 +95,49 @@ export default function DealsPage() {
     setDealAmount('');
     setExchangeRate('');
     setCreateError('');
+    setDealClient('');
+    setDealInsurer('');
+    setDealProbability('');
+    setDealIntent('P3');
+    setDealCloseDate('');
+    setDealNextActivityAt('');
+    setDealNextActivityTitle('');
+    setDealSource('');
+    setDealNotes('');
+    setCreateOpen(true);
+  };
+
+  const openEditDeal = (deal: Deal) => {
+    setEditingDeal(deal);
+    setSelectedProduct(products.find((product) => product.code === deal.productCode || product.name === deal.product));
+    setCreatePipelineId(deal.pipelineId ?? '');
+    setSelectedStageId(pipelineStages.find((stage) => stage.pipelineId === deal.pipelineId && stage.name === deal.stage)?.id ?? '');
+    setDealCurrency(deal.currency);
+    setDealAmount(String(deal.value));
+    setExchangeRate(deal.currency === 'USD' ? String(deal.exchangeRate ?? DEFAULT_USD_TO_MVR_RATE) : '');
+    setDealClient(deal.client);
+    setDealInsurer(deal.insurer);
+    setDealProbability(String(deal.probability));
+    setDealIntent(deal.intentTier ?? 'P3');
+    setDealCloseDate(deal.closeDate);
+    setDealNextActivityAt(deal.nextActivityAt ?? '');
+    setDealNextActivityTitle(deal.nextActivityTitle ?? '');
+    setDealSource(deal.source ?? '');
+    setDealNotes(deal.notes ?? deal.proposalSummary ?? '');
+    setCreateError('');
     setCreateOpen(true);
   };
 
   const createDeal = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    const value = Number(data.get('value'));
-    const probability = Number(data.get('probability'));
-    const closeDate = String(data.get('closeDate') ?? '');
+    const value = Number(dealAmount);
+    const probability = Number(dealProbability);
+    const closeDate = dealCloseDate;
     const currency = String(data.get('currency')) as Currency;
     const rate = currency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
-    if (!selectedProduct || !createPipelineId || !selectedStageId) {
-      setCreateError('Select an insurance product so its pipeline and first stage can be assigned.');
+    if (!dealClient.trim() || !dealInsurer.trim() || !selectedProduct || !createPipelineId || !selectedStageId || !dealCurrency || !dealCloseDate || !dealProbability) {
+      setCreateError('Complete Client, Insurer, Insurance Product, Pipeline, Stage, Currency, Insured Value, Probability, and Expected Close Date.');
       return;
     }
     if (currency === 'USD' && (!Number.isFinite(rate) || !rate || rate <= 0)) {
@@ -109,10 +150,12 @@ export default function DealsPage() {
       return;
     }
     const deal: Deal = {
-      id: `d-${Date.now()}`,
+      ...(editingDeal ?? {}),
+      id: editingDeal?.id ?? `d-${Date.now()}`,
       pipelineId: String(data.get('pipelineId')),
-      createdAt: new Date().toISOString(),
-      client: String(data.get('client')),
+      createdAt: editingDeal?.createdAt ?? new Date().toISOString(),
+      client: dealClient.trim(),
+      clientId: clients.find((client) => client.name === dealClient.trim())?.id,
       product: selectedProduct.name,
       productCode: selectedProduct.code,
       value,
@@ -125,13 +168,17 @@ export default function DealsPage() {
       probability,
       ownerId: user.id,
       closeDate: normalizedCloseDate,
-      insurer: String(data.get('insurer')),
-      intentTier: String(data.get('intentTier')) as Deal['intentTier'],
-      nextActivityAt: String(data.get('nextActivityAt') ?? '') || undefined,
-      nextActivityTitle: String(data.get('nextActivityTitle') ?? '').trim() || undefined,
+      insurer: dealInsurer.trim(),
+      intentTier: dealIntent,
+      source: dealSource.trim(),
+      notes: dealNotes.trim(),
+      proposalSummary: dealNotes.trim(),
+      nextActivityAt: dealNextActivityAt || undefined,
+      nextActivityTitle: dealNextActivityTitle.trim() || undefined,
     };
-    setDeals([deal, ...deals]);
+    setDeals(editingDeal ? deals.map((item) => item.id === editingDeal.id ? deal : item) : [deal, ...deals]);
     setCreateOpen(false);
+    setEditingDeal(null);
   };
 
   return (
@@ -171,6 +218,7 @@ export default function DealsPage() {
               <th className="text-right px-4 py-3 font-medium">Weighted</th>
               <th className="text-left px-4 py-3 font-medium">Prob.</th>
               <th className="text-left px-4 py-3 font-medium">Close Date</th>
+              <th className="text-right px-4 py-3 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -199,7 +247,8 @@ export default function DealsPage() {
                     <span className="text-xs text-muted">{d.probability}%</span>
                   </div>
                 </td>
-                <td className="px-4 py-3 text-muted text-xs">{formatDate(d.closeDate)}</td>
+                <td className="px-4 py-3 text-muted text-xs"><div>{formatDate(d.closeDate)}</div>{d.notes && <div className="max-w-40 truncate text-[11px]" title={d.notes}>{d.notes}</div>}</td>
+                <td className="px-4 py-3 text-right"><button type="button" className="btn-ghost !py-1.5" onClick={() => openEditDeal(d)}><Pencil size={13} /> Edit</button></td>
               </tr>
             ))}
           </tbody>
@@ -209,15 +258,15 @@ export default function DealsPage() {
       <Modal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        title="Create Deal"
-        subtitle="Add a sales opportunity to the pipeline."
-        footer={<><button type="button" className="btn-ghost" onClick={() => setCreateOpen(false)}><X size={14} /> Cancel</button><button type="submit" form="new-deal-form" className="btn-primary"><Plus size={14} /> Create Deal</button></>}
+        title={editingDeal ? 'Edit Deal' : 'Create Deal'}
+        subtitle={editingDeal ? 'Update the opportunity, financials, pipeline, and client context.' : 'Add a sales opportunity to the pipeline.'}
+        footer={<><button type="button" className="btn-ghost" onClick={() => { setCreateOpen(false); setEditingDeal(null); }}><X size={14} /> Cancel</button><button type="submit" form="new-deal-form" className="btn-primary"><Plus size={14} /> {editingDeal ? 'Update Deal' : 'Create Deal'}</button></>}
       >
         <form id="new-deal-form" onSubmit={createDeal} noValidate className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Type of Insurance Product *"><ProductSelect pipelines={pipelines} name="productCode" required value={selectedProduct?.code ?? ''} onChange={setSelectedProduct} /></Field>
           <Field label="Pipeline"><select className="input" name="pipelineId" required value={createPipelineId} onChange={(event) => setCreatePipelineId(event.target.value)}><option value="">Select pipeline</option>{activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}</select></Field>
-          <Field label="Client"><select className="input" name="client" required defaultValue=""><option value="">Select client</option>{clients.map((client) => <option key={client.id}>{client.name}</option>)}</select></Field>
-          <Field label="Insurer"><select className="input" name="insurer" required defaultValue=""><option value="">Select insurer</option>{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
+          <Field label="Client *"><select className="input" name="client" required value={dealClient} onChange={(event) => setDealClient(event.target.value)}><option value="">Select client</option>{clients.map((client) => <option key={client.id}>{client.name}</option>)}</select></Field>
+          <Field label="Insurer *"><select className="input" name="insurer" required value={dealInsurer} onChange={(event) => setDealInsurer(event.target.value)}><option value="">Select insurer</option>{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
           <Field label="Stage"><select className="input" name="stage" required value={selectedStageId} onChange={(event) => setSelectedStageId(event.target.value)}><option value="">Select stage</option>{availableStages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select></Field>
           <Field label="Currency"><select className="input" name="currency" required value={dealCurrency} onChange={(event) => { const currency = event.target.value as Currency | ''; setDealCurrency(currency); setDealAmount(''); setExchangeRate(currency === 'USD' ? String(DEFAULT_USD_TO_MVR_RATE) : ''); }}><option value="">Select currency</option><option value="MVR">MVR</option><option value="USD">USD</option></select></Field>
           <Field label={`Total Insured Value${dealCurrency ? ` (${dealCurrency})` : ''}`}><input className="input" name="value" type="number" min="0" step="0.01" required value={dealAmount} onChange={(event) => setDealAmount(event.target.value)} /></Field>
@@ -225,17 +274,19 @@ export default function DealsPage() {
           {dealCurrency === 'USD' && <Field label="Exchange rate (1 USD = MVR)"><input className="input" name="exchangeRate" type="number" min="0.000001" step="any" required value={exchangeRate} onChange={(event) => { setExchangeRate(event.target.value); setCreateError(''); }} /></Field>}
           {dealCurrency === 'USD' && Number(dealAmount) > 0 && Number(exchangeRate) > 0 && <p className="sm:col-span-2 text-sm text-muted">Equivalent: {formatAmount(toMvr(Number(dealAmount), 'USD', Number(exchangeRate)), 'MVR')}</p>}
           {createError && <p role="alert" className="sm:col-span-2 text-sm text-hot">{createError}</p>}
-          <Field label="Probability (%)"><input className="input" name="probability" type="number" min="0" max="100" step="0.01" required /></Field>
+          <Field label="Probability (%)"><input className="input" name="probability" type="number" min="0" max="100" step="0.01" required value={dealProbability} onChange={(event) => setDealProbability(event.target.value)} /></Field>
           <Field label="Intent Tier">
-            <select className="input" name="intentTier" required defaultValue="P3">
+            <select className="input" name="intentTier" required value={dealIntent} onChange={(event) => setDealIntent(event.target.value as Deal['intentTier'])}>
               <option value="P1">P1 · Ready to Buy</option>
               <option value="P2">P2 · Evaluating</option>
               <option value="P3">P3 · Nurture</option>
             </select>
           </Field>
-          <Field label="Expected Close"><DateInput name="closeDate" required aria-label="Expected close date" /></Field>
-          <Field label="Next activity date"><DateInput name="nextActivityAt" aria-label="Next activity date" /></Field>
-          <Field label="Next activity"><input className="input" name="nextActivityTitle" placeholder="e.g. Call client for documents" maxLength={120} /></Field>
+          <Field label="Expected Close"><DateInput name="closeDate" required value={dealCloseDate} onIsoChange={setDealCloseDate} aria-label="Expected close date" /></Field>
+          <Field label="Source"><select className="input" value={dealSource} onChange={(event) => setDealSource(event.target.value)}><option value="">Select source</option><option>Referral</option><option>Website</option><option>Renewal</option><option>Partner</option></select></Field>
+          <Field label="Remarks / Notes"><textarea className="input min-h-20" value={dealNotes} onChange={(event) => setDealNotes(event.target.value)} placeholder="Initial scoping, client context, or missing information" /></Field>
+          <Field label="Next activity date"><DateInput name="nextActivityAt" value={dealNextActivityAt} onIsoChange={setDealNextActivityAt} aria-label="Next activity date" /></Field>
+          <Field label="Next activity"><input className="input" name="nextActivityTitle" value={dealNextActivityTitle} onChange={(event) => setDealNextActivityTitle(event.target.value)} placeholder="e.g. Call client for documents" maxLength={120} /></Field>
         </form>
       </Modal>
       <Modal open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Deals" size="sm" footer={<><button className="btn-ghost" onClick={() => setStageFilter('')}>Clear</button><button className="btn-primary" onClick={() => setFilterOpen(false)}>Apply Filter</button></>}>

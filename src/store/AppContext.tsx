@@ -88,6 +88,17 @@ const DEMO_USER: User = {
 const AUTH_BYPASS = import.meta.env.DEV && import.meta.env.VITE_AUTH_BYPASS === 'true';
 const DEMO_ADMIN_USERNAME = import.meta.env.VITE_DEMO_ADMIN_USERNAME;
 const DEMO_ADMIN_PASSWORD = import.meta.env.VITE_DEMO_ADMIN_PASSWORD;
+const normalizeProduct = (product: ProductCode): ProductCode => {
+  const catalogProduct = PRODUCT_CODES.find((item) => item.code === product.code);
+  return {
+    ...catalogProduct,
+    ...product,
+    id: product.id || product.code,
+    salesCycleVelocity: product.salesCycleVelocity || catalogProduct?.salesCycleVelocity || '14–30 Days',
+    riskLevel: product.riskLevel || catalogProduct?.riskLevel || 'Medium',
+    keyUnderwritingIntakeArtifacts: product.keyUnderwritingIntakeArtifacts || catalogProduct?.keyUnderwritingIntakeArtifacts || 'Completed proposal form, asset/risk schedule and prior claims history',
+  };
+};
 const DEFAULT_EMAIL_TEMPLATES = Object.fromEntries([
   'Renewal Reminder (30/60/90)', 'Quotation Sent', 'Invoice Issued', 'Payment Receipt', 'Payment Overdue',
 ].map((name) => [name, '']));
@@ -355,7 +366,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const customerLookupsRecord = records.find((record) => record.resource === 'customer-lookups');
         setCustomerLookups(mergeCustomerLookups(customerLookupsRecord?.data.options));
         const savedProducts = asArray<ProductCode>(records, 'products');
-        setProducts(savedProducts.length > 0 ? savedProducts : PRODUCT_CODES.map((product) => ({ ...product, id: product.code })));
+        setProducts(savedProducts.length > 0 ? savedProducts.map(normalizeProduct) : PRODUCT_CODES.map((product) => ({ ...product, id: product.code })));
         setActivities(asArray<Activity>(records, 'activities'));
         setDeals(asArray<Deal>(records, 'deals'));
         setInvoices(asArray<Invoice>(records, 'invoices'));
