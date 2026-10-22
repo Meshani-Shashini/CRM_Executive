@@ -6,6 +6,7 @@ import { useApp } from '../store/AppContext';
 import Badge from '../components/ui/Badge';
 import { formatAmount, toMvr } from '../utils/currency';
 import { dashboardHref } from '../utils/navigation';
+import { formatDate } from '../utils/date';
 
 const tabs = ['Company', 'Leads', 'Deals', 'Staff'] as const;
 type DashboardTab = typeof tabs[number];
@@ -129,7 +130,7 @@ export default function DashboardPage() {
                     <div className="w-2 h-2 rounded-full bg-brand-400 mt-1.5 shrink-0" />
                     <div className="min-w-0">
                       <div className="text-sm text-white">{activity.title}</div>
-                      <div className="text-[11px] text-muted">{activity.type} · {activity.date}</div>
+                      <div className="text-[11px] text-muted">{activity.type} · {formatDate(activity.date)}</div>
                     </div>
                   </div>
                 ))}

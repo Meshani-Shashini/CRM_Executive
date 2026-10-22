@@ -2,6 +2,7 @@ import { useState } from 'react';
 import Badge from '../components/ui/Badge';
 import { ChevronLeft, ChevronRight, RefreshCcw, Bell, Calendar as CalIcon, Users } from 'lucide-react';
 import type { CalendarEvent } from '../types';
+import { formatDate } from '../utils/date';
 
 const typeMeta: Record<CalendarEvent['type'], { color: string; icon: typeof CalIcon }> = {
   renewal: { color: 'bg-hot', icon: RefreshCcw },
@@ -21,7 +22,7 @@ export default function CalendarPage() {
   const month = cursor.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
   const daysIn = new Date(year, month + 1, 0).getDate();
-  const monthName = cursor.toLocaleString('en-GB', { month: 'long', year: 'numeric' });
+  const monthName = formatDate(cursor);
 
   const eventsByDay: Record<number, CalendarEvent[]> = {};
   events.forEach((e) => {
@@ -96,7 +97,7 @@ export default function CalendarPage() {
                 <div className="flex-1 min-w-0">
                   <div className="text-sm text-white truncate">{e.title}</div>
                   <div className="text-[11px] text-muted mt-0.5">
-                    {new Date(e.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    {formatDate(e.date)}
                     {e.days > 0 && <Badge variant="warm"> {e.days}-day trigger</Badge>}
                   </div>
                 </div>

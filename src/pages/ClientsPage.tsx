@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import type { Activity, Client } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
+import { formatDate } from '../utils/date';
 
 const activityIcon = {
   call: Phone, meeting: Calendar, email: Mail, upload: Upload, note: MessageSquare, quote: FileText,
@@ -342,7 +343,7 @@ export default function ClientsPage() {
                 <Metric
                   label="Expiry"
                   value={selected.expiry
-                    ? new Date(selected.expiry).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                    ? formatDate(selected.expiry)
                     : '—'}
                 />
                 <Metric label="Insurer" value={selected.insurer} />
@@ -369,7 +370,7 @@ export default function ClientsPage() {
                     <div className="bg-ink-900/40 rounded-lg p-3">
                       <div className="flex items-center justify-between">
                         <div className="text-sm font-medium text-white">{a.title}</div>
-                        <div className="text-[10px] text-muted">{a.date}</div>
+                        <div className="text-[10px] text-muted">{formatDate(a.date)}</div>
                       </div>
                       <div className="text-xs text-muted mt-1">{a.description}</div>
                     </div>

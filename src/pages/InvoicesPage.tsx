@@ -7,6 +7,7 @@ import { Download, Eye, Plus, Printer, X } from 'lucide-react';
 import type { Invoice } from '../types';
 import { downloadCsv } from '../utils/downloadCsv';
 import { hashParams } from '../utils/navigation';
+import { formatDate } from '../utils/date';
 
 const statusVariant: Record<string, 'win' | 'warm' | 'hot' | 'cold' | 'muted'> = {
   Paid: 'win', Partial: 'warm', Pending: 'cold', Overdue: 'hot', Archived: 'muted',
@@ -123,7 +124,7 @@ export default function InvoicesPage() {
                   <td className="px-4 py-3 text-white">{inv.clientName}</td>
                   <td className="px-4 py-3 text-muted">{inv.insurer}</td>
                   <td className="px-4 py-3 text-muted font-mono text-xs">{inv.policyNo}</td>
-                  <td className="px-4 py-3 text-muted text-xs">{new Date(inv.issueDate).toLocaleDateString('en-GB')}</td>
+                  <td className="px-4 py-3 text-muted text-xs">{formatDate(inv.issueDate)}</td>
                   <td className="px-4 py-3"><Badge variant={statusVariant[inv.status]} dot>{inv.status}</Badge></td>
                   <td className="px-4 py-3 text-right text-white font-medium">{inv.currency} {t.total.toLocaleString()}</td>
                   <td className="px-4 py-3">
@@ -204,7 +205,7 @@ export default function InvoicesPage() {
                       <div key={inst.id} className="flex items-center justify-between bg-ink-900/50 rounded-lg p-2.5 border border-ink-600">
                         <div>
                           <div className="text-sm text-white">{inst.label}</div>
-                          <div className="text-[11px] text-muted">Due {new Date(inst.due).toLocaleDateString('en-GB')}</div>
+                          <div className="text-[11px] text-muted">Due {formatDate(inst.due)}</div>
                         </div>
                         <div className="text-right">
                           <div className="text-sm text-white font-medium">MVR {inst.amount.toLocaleString()}</div>

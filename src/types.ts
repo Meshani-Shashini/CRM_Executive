@@ -132,6 +132,10 @@ export interface ProductCode {
   code: string;
   name: string;
   category: string;
+  classType: string;
+  defaultPipelineCode: string;
+  standardBrokerageRatePct: number;
+  isStatutoryMandatory: boolean;
 }
 
 export interface InvoiceItem {

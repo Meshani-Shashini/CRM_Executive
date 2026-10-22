@@ -6,6 +6,7 @@ import { Plus, CreditCard, Download, TrendingUp, X } from 'lucide-react';
 import type { Payment } from '../types';
 import { downloadCsv } from '../utils/downloadCsv';
 import { hashParams } from '../utils/navigation';
+import { formatDate } from '../utils/date';
 
 export default function PaymentsPage() {
   const { payments, setPayments, invoices, setInvoices } = useApp();
@@ -119,7 +120,7 @@ export default function PaymentsPage() {
                 <td className="px-4 py-3 text-white">{p.clientName}</td>
                 <td className="px-4 py-3"><Badge variant={p.type === 'Commission' ? 'win' : 'brand'}>{p.type}</Badge></td>
                 <td className="px-4 py-3 text-muted">{p.method}</td>
-                <td className="px-4 py-3 text-muted text-xs">{new Date(p.date).toLocaleDateString('en-GB')}</td>
+                <td className="px-4 py-3 text-muted text-xs">{formatDate(p.date)}</td>
                 <td className="px-4 py-3 text-right text-white font-medium">MVR {p.amount.toLocaleString()}</td>
                 <td className="px-4 py-3"><Badge variant={p.status === 'Completed' ? 'win' : 'warm'} dot>{p.status}</Badge></td>
                 <td className="px-4 py-3 text-right">

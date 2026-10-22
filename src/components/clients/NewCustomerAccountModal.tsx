@@ -9,6 +9,7 @@ import {
 } from '../../data/customerLookups';
 import type { Client, InsuredEntityDetails } from '../../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../../utils/currency';
+import { formatDate } from '../../utils/date';
 
 const TARGET_LINES = [
   'Marine Hull',
@@ -139,7 +140,7 @@ export default function NewCustomerAccountModal({ onClose, onCreated }: NewCusto
       : currency === 'USD' && rate
         ? toMvr(amount, 'USD', rate)
         : 0;
-    const name = legalEntityName || tradeName || `Draft Customer ${new Date().toLocaleDateString('en-CA')}`;
+    const name = legalEntityName || tradeName || `Draft Customer ${formatDate(new Date())}`;
     const targetLines = data.getAll('targetLines').map(String);
     const companyTin = String(data.get('miraTin') ?? '').trim();
     const phone = String(data.get('stakeholderPhone') ?? '').trim();

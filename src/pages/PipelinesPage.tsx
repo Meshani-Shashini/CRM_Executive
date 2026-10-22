@@ -6,6 +6,7 @@ import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
 import type { Client, Deal, Pipeline, PipelineStage, StageHistoryAudit } from '../types';
 import { formatAmount, toMvr } from '../utils/currency';
+import { formatDate } from '../utils/date';
 
 const LOSS_REASONS = [
   'Price / premium',
@@ -761,7 +762,7 @@ export default function PipelinesPage() {
                           </div>
                         </div>
                         <div className="mt-1 text-xs text-muted">{deal.product} · {deal.insurer}</div>
-                        {deal.renewalExpiry && <div className="mt-1 text-[11px] text-warm">Renewal due {new Date(`${deal.renewalExpiry}T00:00:00`).toLocaleDateString('en-US')}</div>}
+                        {deal.renewalExpiry && <div className="mt-1 text-[11px] text-warm">Renewal due {formatDate(deal.renewalExpiry)}</div>}
                         <div className="mt-2 flex flex-wrap gap-1.5">
                           <Badge variant={momentumVariants[momentum]} dot>{momentum}</Badge>
                           <Badge variant={intentVariants[intent]}>{intent}: {intentLabels[intent]}</Badge>

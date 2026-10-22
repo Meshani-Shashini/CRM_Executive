@@ -7,6 +7,7 @@ import { Columns3, Filter, List, Plus, X, Pencil } from 'lucide-react';
 import type { Client, Lead, LeadFunnelStage } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
+import { formatDate } from '../utils/date';
 
 const PRE_PIPELINE_STAGES: LeadFunnelStage[] = [
   'L0: Capture',
@@ -66,6 +67,13 @@ export default function LeadsPage() {
   const boardStages = pipelineStages
     .filter((stage) => stage.pipelineId === boardPipeline?.id)
     .sort((left, right) => left.stageOrder - right.stageOrder);
+  useEffect(() => {
+    const product = PRODUCT_CODES.find((item) => item.code === productCode);
+    const routedPipeline = activePipelines.find((pipeline) => pipeline.code === product?.defaultPipelineCode);
+    if (routedPipeline && (!selectedPipelineId || selectedPipelineId !== routedPipeline.id)) {
+      setSelectedPipelineId(routedPipeline.id);
+    }
+  }, [activePipelines, productCode, selectedPipelineId]);
   useEffect(() => {
     const applyHashFilters = () => {
       const params = hashParams();
@@ -303,7 +311,7 @@ export default function LeadsPage() {
                         <span>{formatAmount(lead.value ?? lead.premium, lead.currency ?? 'MVR')}</span>
                         {lead.currency === 'USD' && <span>{formatAmount(lead.valueMvr ?? lead.premium, 'MVR')}</span>}
                       </div>
-                      <div className="text-[11px] text-muted mt-1">Expected close {new Date(`${lead.closeDate ?? lead.renewalDate}T00:00:00`).toLocaleDateString('en-US')}</div>
+                      <div className="text-[11px] text-muted mt-1">Expected close {formatDate(lead.closeDate ?? lead.renewalDate)}</div>
                       {(user.role === 'admin' || user.role === 'sales') && (
                         <button type="button" className="btn-ghost mt-2 !py-1.5" onClick={() => openEditLead(lead)}>
                           <Pencil size={13} /> Edit Lead
@@ -339,7 +347,7 @@ export default function LeadsPage() {
                   <td className="px-4 py-3 text-muted">{staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId}</td>
                   <td className="px-4 py-3 text-muted">{PRODUCT_CODES.find((product) => product.code === lead.productCode)?.name ?? lead.insuranceClass}</td>
                   <td className="px-4 py-3 text-right text-white">{formatAmount(lead.value ?? lead.premium, lead.currency ?? 'MVR')}{lead.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(lead.valueMvr ?? lead.premium, 'MVR')}</div>}</td>
-                  <td className="px-4 py-3 text-muted">{new Date(`${lead.closeDate ?? lead.renewalDate}T00:00:00`).toLocaleDateString('en-US')}</td>
+                  <td className="px-4 py-3 text-muted">{formatDate(lead.closeDate ?? lead.renewalDate)}</td>
                   {(user.role === 'admin' || user.role === 'sales') && (
                     <td className="px-4 py-3 text-right">
                       <button type="button" className="btn-ghost !py-1.5" onClick={() => openEditLead(lead)}>
@@ -462,7 +470,7 @@ export default function LeadsPage() {
           <Field label="Type of Insurance Product">
             <select className="input" name="productCode" required value={productCode} onChange={(event) => setProductCode(event.target.value)}>
               <option value="">Select product class</option>
-              {['Bonds', 'Engineering', 'Fire', 'Marine', 'Miscellaneous'].map((category) => (
+              {['Bonds', 'Engineering', 'Fire', 'Marine', 'Miscellaneous', 'Health'].map((category) => (
                 <optgroup key={category} label={category}>
                   {PRODUCT_CODES.filter((product) => product.category === category).map((product) => <option key={product.code} value={product.code}>{product.name}</option>)}
                 </optgroup>

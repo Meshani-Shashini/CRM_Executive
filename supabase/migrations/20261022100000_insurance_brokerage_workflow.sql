@@ -7,13 +7,15 @@ DECLARE
   stage_id TEXT;
   stage_index INTEGER;
 BEGIN
-  -- Keep the four workflow pipelines canonical while preserving existing records.
+  -- Keep the six product workflow pipelines canonical while preserving existing records.
   FOR pipeline IN
     SELECT value FROM jsonb_array_elements('[
-      {"code":"COMMERCIAL","name":"Commercial Lines"},
-      {"code":"SME-RETAIL","name":"SME/Retail Fast-Track"},
-      {"code":"RENEWALS","name":"Annual Policy Renewals"},
-      {"code":"CLAIMS","name":"Claims Management"}
+      {"code":"COMMERCIAL_ENG","name":"Commercial Property & Engineering"},
+      {"code":"MARINE_CARGO","name":"Marine Hull & Cargo Logistics"},
+      {"code":"FINANCIAL_SPECIALTY","name":"Financial Surety & Specialty Risks"},
+      {"code":"CASUALTY_LIABILITY","name":"Casualty & Liabilities"},
+      {"code":"EMPLOYEE_BENEFITS","name":"Employee Benefits & Health"},
+      {"code":"SME_VELOCITY","name":"SME & Velocity Packages"}
     ]'::JSONB)
   LOOP
     SELECT COALESCE(data ->> 'id', record_id)
@@ -21,8 +23,7 @@ BEGIN
     FROM public.tenant_records
     WHERE tenant_id = tenant
       AND resource = 'pipelines'
-      AND (data ->> 'code' = pipeline ->> 'code'
-        OR (pipeline ->> 'code' = 'SME-RETAIL' AND data ->> 'code' = 'RETAIL'))
+      AND data ->> 'code' = pipeline ->> 'code'
     ORDER BY (data ->> 'isActive')::BOOLEAN DESC NULLS LAST
     LIMIT 1;
 
@@ -52,7 +53,7 @@ BEGIN
       SELECT value, ordinality::INTEGER
       FROM jsonb_array_elements(
         CASE pipeline ->> 'code'
-          WHEN 'COMMERCIAL' THEN '[
+          WHEN 'COMMERCIAL_ENG' THEN '[
             {"name":"Fact-Finding & Risk Survey","probability":20,"threshold":30},
             {"name":"Market Placement / Outender","probability":40,"threshold":30},
             {"name":"Quote Comparison & Presentation","probability":60,"threshold":14},
@@ -60,25 +61,40 @@ BEGIN
             {"name":"Policy Bound / Won","probability":100,"threshold":0},
             {"name":"Lost / Declined","probability":0,"threshold":0}
           ]'
-          WHEN 'SME-RETAIL' THEN '[
+          WHEN 'MARINE_CARGO' THEN '[
+            {"name":"Vessel / Voyage Audit","probability":20,"threshold":14},
+            {"name":"Slip Submission","probability":40,"threshold":14},
+            {"name":"Carrier Review","probability":60,"threshold":14},
+            {"name":"Cover Note Issued","probability":100,"threshold":0},
+            {"name":"Lost / Declined","probability":0,"threshold":0}
+          ]'
+          WHEN 'FINANCIAL_SPECIALTY' THEN '[
+            {"name":"Financial & AML Audit","probability":20,"threshold":30},
+            {"name":"Capacity Check","probability":40,"threshold":21},
+            {"name":"Underwriter Structuring","probability":60,"threshold":21},
+            {"name":"Bound","probability":100,"threshold":0},
+            {"name":"Lost / Declined","probability":0,"threshold":0}
+          ]'
+          WHEN 'CASUALTY_LIABILITY' THEN '[
+            {"name":"Payroll / Fee Census","probability":20,"threshold":14},
+            {"name":"Carrier Terms","probability":40,"threshold":14},
+            {"name":"Proposal Presentation","probability":60,"threshold":14},
+            {"name":"Placed","probability":100,"threshold":0},
+            {"name":"Lost / Declined","probability":0,"threshold":0}
+          ]'
+          WHEN 'EMPLOYEE_BENEFITS' THEN '[
+            {"name":"Census Ingestion","probability":20,"threshold":7},
+            {"name":"TPA / Network Selection","probability":40,"threshold":7},
+            {"name":"Pricing Tier Presentation","probability":60,"threshold":7},
+            {"name":"Enrollment Hand-off","probability":100,"threshold":0},
+            {"name":"Lost / Declined","probability":0,"threshold":0}
+          ]'
+          WHEN 'SME_VELOCITY' THEN '[
             {"name":"Inbound Lead","probability":20,"threshold":2},
             {"name":"Automated Quote Issued","probability":45,"threshold":2},
             {"name":"Payment Collection","probability":75,"threshold":7},
-            {"name":"Policy Issued","probability":100,"threshold":0}
-          ]'
-          WHEN 'RENEWALS' THEN '[
-            {"name":"Renewal Audit (90d out)","probability":20,"threshold":14},
-            {"name":"Expiring Loss Run Review","probability":40,"threshold":14},
-            {"name":"Market Re-tender","probability":60,"threshold":30},
-            {"name":"Client Renewal Sign-off","probability":80,"threshold":14},
-            {"name":"Renewed","probability":100,"threshold":0}
-          ]'
-          ELSE '[
-            {"name":"Claim Notified","probability":20,"threshold":7},
-            {"name":"Surveyor Assigned","probability":40,"threshold":14},
-            {"name":"Adjuster Assessment","probability":60,"threshold":30},
-            {"name":"Underwriter Settlement","probability":80,"threshold":30},
-            {"name":"Cheque Dispatched","probability":100,"threshold":0}
+            {"name":"Policy Issued","probability":100,"threshold":0},
+            {"name":"Lost / Declined","probability":0,"threshold":0}
           ]'
         END::JSONB
       ) WITH ORDINALITY
@@ -122,7 +138,10 @@ BEGIN
   SET data = jsonb_set(data, '{isActive}', 'false'::JSONB, TRUE)
   WHERE tenant_id = tenant
     AND resource = 'pipelines'
-    AND COALESCE(data ->> 'code', '') NOT IN ('COMMERCIAL', 'SME-RETAIL', 'RENEWALS', 'CLAIMS');
+    AND COALESCE(data ->> 'code', '') NOT IN (
+      'COMMERCIAL_ENG', 'MARINE_CARGO', 'FINANCIAL_SPECIALTY',
+      'CASUALTY_LIABILITY', 'EMPLOYEE_BENEFITS', 'SME_VELOCITY'
+    );
 END;
 $$;
 
@@ -277,3 +296,85 @@ DROP TRIGGER IF EXISTS tenant_records_policy_bound_side_effects ON public.tenant
 CREATE TRIGGER tenant_records_policy_bound_side_effects
 AFTER INSERT OR UPDATE OF data ON public.tenant_records
 FOR EACH ROW EXECUTE FUNCTION public.create_policy_bound_side_effects();
+
+-- Master policy-type catalog for all products classified from NM CODES.xlsx.
+CREATE TABLE IF NOT EXISTS public.policy_types (
+  tenant_id UUID NOT NULL,
+  class_type TEXT NOT NULL,
+  policy_code TEXT NOT NULL,
+  name TEXT NOT NULL,
+  default_pipeline_code TEXT NOT NULL,
+  standard_brokerage_rate_pct NUMERIC(5, 2) NOT NULL CHECK (standard_brokerage_rate_pct BETWEEN 0 AND 100),
+  is_statutory_mandatory BOOLEAN NOT NULL DEFAULT FALSE,
+  PRIMARY KEY (tenant_id, policy_code)
+);
+
+ALTER TABLE public.policy_types ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Tenant members can read policy types" ON public.policy_types;
+CREATE POLICY "Tenant members can read policy types"
+  ON public.policy_types FOR SELECT TO authenticated
+  USING (tenant_id = (
+    SELECT tenant_id FROM public.user_profiles WHERE id = auth.uid()
+  ));
+GRANT SELECT ON public.policy_types TO authenticated;
+
+INSERT INTO public.policy_types (
+  tenant_id, class_type, policy_code, name, default_pipeline_code,
+  standard_brokerage_rate_pct, is_statutory_mandatory
+)
+VALUES
+  ('00000000-0000-4000-8000-000000000001', 'SPECIALTY_FINANCIAL', 'AB', 'Advance Bond', 'FINANCIAL_SPECIALTY', 10.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'SPECIALTY_FINANCIAL', 'BB', 'Bid Bond', 'FINANCIAL_SPECIALTY', 10.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'SPECIALTY_FINANCIAL', 'CB', 'Performance Bond', 'FINANCIAL_SPECIALTY', 12.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'CM', 'Comprehensive Machinery', 'COMMERCIAL_ENG', 12.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'CP', 'Electronic Equipment', 'SME_VELOCITY', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'SPECIALTY_FINANCIAL', 'CR', 'Computer Crime', 'FINANCIAL_SPECIALTY', 17.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'FZ', 'Contractor''s Plant & Machinery', 'COMMERCIAL_ENG', 12.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'IR', 'Industrial All Risks (Engineering)', 'COMMERCIAL_ENG', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'LM', 'Machinery Con Loss', 'COMMERCIAL_ENG', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'NC', 'Contractors All Risks', 'COMMERCIAL_ENG', 12.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'NE', 'Erection All Risks', 'COMMERCIAL_ENG', 12.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'NM', 'Machinery Breakdown', 'COMMERCIAL_ENG', 12.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'CF', 'Commercial Fire', 'COMMERCIAL_ENG', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'DF', 'Dwelling Fire', 'SME_VELOCITY', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'FIR', 'Industrial All Risks (Fire)', 'COMMERCIAL_ENG', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'SPECIALTY_FINANCIAL', 'FY', 'Terrorism and Sabotage', 'FINANCIAL_SPECIALTY', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'HC', 'Hotel Combine', 'COMMERCIAL_ENG', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'LP', 'Consequential Loss', 'COMMERCIAL_ENG', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'PR', 'Property All Risk', 'COMMERCIAL_ENG', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'MARINE_AVIATION', 'EC', 'Export Certificate', 'MARINE_CARGO', 10.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'MARINE_AVIATION', 'EP', 'Export Policy', 'MARINE_CARGO', 12.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'MARINE_AVIATION', 'IC', 'Import Certificate', 'MARINE_CARGO', 10.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'MARINE_AVIATION', 'IP', 'Import Policy', 'MARINE_CARGO', 12.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'MARINE_AVIATION', 'LC', 'Land Cover', 'MARINE_CARGO', 10.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'MARINE_AVIATION', 'LT', 'Land Transit', 'MARINE_CARGO', 10.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'MARINE_AVIATION', 'OP', 'Open Policy', 'MARINE_CARGO', 12.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'MARINE_AVIATION', 'RJ', 'Rejection Cover', 'MARINE_CARGO', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'MARINE_AVIATION', 'SH', 'Hull Policy', 'MARINE_CARGO', 12.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'MARINE_AVIATION', 'ZZ', 'Special Marine Policy', 'MARINE_CARGO', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'SPECIALTY_FINANCIAL', 'AL', 'Airport Owners & Operators Liability', 'FINANCIAL_SPECIALTY', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'RETAIL_PERSONAL', 'AP', 'Personal Accident', 'SME_VELOCITY', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'SPECIALTY_FINANCIAL', 'BL', 'Bankers Indemnity', 'FINANCIAL_SPECIALTY', 17.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'CASUALTY_LIABILITY', 'CG', 'Fidelity Guarantee', 'CASUALTY_LIABILITY', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'RETAIL_PERSONAL', 'CT', 'Travelclasics', 'SME_VELOCITY', 20.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'CASUALTY_LIABILITY', 'DL', 'Doctors Liability', 'CASUALTY_LIABILITY', 20.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'SPECIALTY_FINANCIAL', 'DO', 'Directors & Officers Liability', 'FINANCIAL_SPECIALTY', 20.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'CASUALTY_LIABILITY', 'EL', 'Workmen''s Compensation', 'CASUALTY_LIABILITY', 12.50, TRUE),
+  ('00000000-0000-4000-8000-000000000001', 'CASUALTY_LIABILITY', 'FL', 'Freight Forwarders Liability', 'CASUALTY_LIABILITY', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'GL', 'Plate Glass Insurance', 'SME_VELOCITY', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'MARINE_AVIATION', 'GT', 'Goods in Transit', 'MARINE_CARGO', 12.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'HB', 'Burglary & Housebreaking', 'SME_VELOCITY', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'EMPLOYEE_BENEFITS', 'HE', 'Surgical and Hospital Expenses', 'EMPLOYEE_BENEFITS', 10.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'MARINE_AVIATION', 'HR', 'Hull All Risk', 'MARINE_CARGO', 12.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'MR', 'All Risks', 'SME_VELOCITY', 15.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'PROPERTY', 'MT', 'Money in Transit', 'COMMERCIAL_ENG', 12.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'CASUALTY_LIABILITY', 'PL', 'Product Liability', 'CASUALTY_LIABILITY', 17.50, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'CASUALTY_LIABILITY', 'PN', 'Professional Indemnity Insurance', 'CASUALTY_LIABILITY', 20.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'EMPLOYEE_BENEFITS', 'SI', 'Suwa Sampatha International', 'EMPLOYEE_BENEFITS', 10.00, FALSE),
+  ('00000000-0000-4000-8000-000000000001', 'CASUALTY_LIABILITY', 'TL', 'Public Liability', 'CASUALTY_LIABILITY', 15.00, FALSE)
+ON CONFLICT (tenant_id, policy_code) DO UPDATE SET
+  class_type = EXCLUDED.class_type,
+  name = EXCLUDED.name,
+  default_pipeline_code = EXCLUDED.default_pipeline_code,
+  standard_brokerage_rate_pct = EXCLUDED.standard_brokerage_rate_pct,
+  is_statutory_mandatory = EXCLUDED.is_statutory_mandatory;

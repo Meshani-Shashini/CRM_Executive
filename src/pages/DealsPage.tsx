@@ -7,6 +7,7 @@ import { Plus, Filter, X } from 'lucide-react';
 import type { Deal } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
+import { formatDate } from '../utils/date';
 
 const stageColors: Record<string, 'cold' | 'warm' | 'win' | 'hot'> = {
   'Lead Identified': 'cold',
@@ -162,7 +163,7 @@ export default function DealsPage() {
                     <span className="text-xs text-muted">{d.probability}%</span>
                   </div>
                 </td>
-                <td className="px-4 py-3 text-muted text-xs">{new Date(d.closeDate).toLocaleDateString('en-GB')}</td>
+                <td className="px-4 py-3 text-muted text-xs">{formatDate(d.closeDate)}</td>
               </tr>
             ))}
           </tbody>

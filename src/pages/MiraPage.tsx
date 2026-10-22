@@ -3,6 +3,7 @@ import { Download, FileCheck2, Calendar, Filter, Printer } from 'lucide-react';
 import { downloadCsv } from '../utils/downloadCsv';
 import { useApp } from '../store/AppContext';
 import type { MiraRow } from '../types';
+import { formatDate } from '../utils/date';
 
 export default function MiraPage() {
   const { company } = useApp();
@@ -91,7 +92,7 @@ export default function MiraPage() {
               {rows.map((r, i) => (
                 <tr key={r.id} className="table-row">
                   <td className="px-4 py-3 text-muted">{i + 1}</td>
-                  <td className="px-4 py-3 text-muted text-xs">{new Date(r.date).toLocaleDateString('en-GB')}</td>
+                  <td className="px-4 py-3 text-muted text-xs">{formatDate(r.date)}</td>
                   <td className="px-4 py-3 text-white">{r.insured}</td>
                   <td className="px-4 py-3 text-muted">{r.insurer}</td>
                   <td className="px-4 py-3 text-right text-white">{r.sumInsured.toLocaleString()}</td>
