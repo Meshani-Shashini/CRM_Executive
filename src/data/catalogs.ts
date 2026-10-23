@@ -113,6 +113,7 @@ export const PRODUCT_CODES: ProductCode[] = [
   { code: 'TL', name: 'Public Liability', category: 'Miscellaneous', classType: 'CASUALTY_LIABILITY', defaultPipelineCode: 'CASUALTY_LIABILITY', standardBrokerageRatePct: 15, isStatutoryMandatory: false },
 ].map((product) => ({
   ...product,
+  defaultPipelineCode: 'COMMERCIAL',
   description: product.name,
   id: product.code,
   ...(PRODUCT_MATRIX_METADATA[product.code] ?? {

@@ -1,29 +1,20 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { INSURERS } from '../data/catalogs';
-import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
-import { Plus, Filter, X, Pencil } from 'lucide-react';
+import { Plus, Filter, X } from 'lucide-react';
 import type { Deal, ProductCode } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
-import { formatDate } from '../utils/date';
 import DateInput from '../components/ui/DateInput';
 import ProductSelect from '../components/ui/ProductSelect';
 import { calculateBrokerageCommission } from '../utils/insurance';
 import { normalizeDateInput } from '../utils/date';
-
-const stageColors: Record<string, 'cold' | 'warm' | 'win' | 'hot'> = {
-  'Lead Identified': 'cold',
-  'Contact Made': 'cold',
-  'Key Person Identified': 'warm',
-  Quoted: 'warm',
-  'Internal Slip': 'hot',
-};
+import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
+import DealWorkspace from './DealWorkspace';
 
 export default function DealsPage() {
   const { deals, setDeals, clients, user, pipelines, pipelineStages, products } = useApp();
-  const PRODUCT_CODES = products;
   const [createOpen, setCreateOpen] = useState(false);
   const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
   const [createPipelineId, setCreatePipelineId] = useState('');
@@ -71,11 +62,6 @@ export default function DealsPage() {
     .filter((stage) => stage.pipelineId === createPipelineId)
     .sort((a, b) => a.stageOrder - b.stageOrder);
   useEffect(() => {
-    if (!selectedProduct) return;
-    const routedPipeline = activePipelines.find((pipeline) => pipeline.code === selectedProduct.defaultPipelineCode);
-    if (routedPipeline) setCreatePipelineId(routedPipeline.id);
-  }, [activePipelines, selectedProduct]);
-  useEffect(() => {
     const firstStage = availableStages[0];
     if (!firstStage) {
       setSelectedStageId('');
@@ -83,9 +69,6 @@ export default function DealsPage() {
       setSelectedStageId(firstStage.id);
     }
   }, [availableStages, selectedStageId]);
-  const totalValue = deals.reduce((sum, deal) => sum + toMvr(deal.value, deal.currency, deal.exchangeRate), 0);
-  const totalWeighted = deals.reduce((sum, deal) => sum + toMvr(deal.weighted, deal.currency, deal.exchangeRate), 0);
-
   const openCreate = () => {
     setEditingDeal(null);
     setCreatePipelineId('');
@@ -132,16 +115,34 @@ export default function DealsPage() {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const value = Number(dealAmount);
-    const probability = Number(dealProbability);
     const closeDate = dealCloseDate;
     const currency = String(data.get('currency')) as Currency;
     const rate = currency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
+    const dealPhone = String(data.get('contactPhone') ?? '').trim();
+    const dealWhatsapp = String(data.get('whatsapp') ?? '').trim();
+    const dealTelegram = String(data.get('telegram') ?? '').trim();
+    const selectedStage = availableStages.find((stage) => stage.id === selectedStageId);
+    const probability = selectedStage?.winProbabilityPct ?? Number(dealProbability);
     if (!dealClient.trim() || !dealInsurer.trim() || !selectedProduct || !createPipelineId || !selectedStageId || !dealCurrency || !dealCloseDate || !dealProbability) {
       setCreateError('Complete Client, Insurer, Insurance Product, Pipeline, Stage, Currency, Insured Value, Probability, and Expected Close Date.');
       return;
     }
     if (currency === 'USD' && (!Number.isFinite(rate) || !rate || rate <= 0)) {
       setCreateError('Enter a valid positive exchange rate.');
+      return;
+    }
+    if (selectedStage && requiresCommunicationChannels(selectedStage.name)
+      && !hasCompleteCommunicationChannels({ contactPhone: dealPhone, whatsapp: dealWhatsapp, telegram: dealTelegram })) {
+      setCreateError('Enter a valid phone, WhatsApp number, and Telegram username or number before quotation or tender.');
+      return;
+    }
+    if (editingDeal && selectedStage && selectedStage.name !== editingDeal.stage) {
+      setCreateError('Move deal stages from the workspace stepper so compliance checks, audit history, and binding actions are applied.');
+      return;
+    }
+    if (!editingDeal && selectedStage
+      && /(lost|declined|bound|won|renewed|immediate cover|policy issued)/i.test(selectedStage.name)) {
+      setCreateError('New deals must start in an open placement stage. Use the workspace to close or bind a deal.');
       return;
     }
     const normalizedCloseDate = normalizeDateInput(closeDate);
@@ -169,6 +170,11 @@ export default function DealsPage() {
       ownerId: user.id,
       closeDate: normalizedCloseDate,
       insurer: dealInsurer.trim(),
+      contactName: String(data.get('contactName') ?? '').trim(),
+      contactEmail: String(data.get('contactEmail') ?? '').trim(),
+      contactPhone: dealPhone,
+      whatsapp: dealWhatsapp,
+      telegram: dealTelegram,
       intentTier: dealIntent,
       source: dealSource.trim(),
       notes: dealNotes.trim(),
@@ -182,78 +188,16 @@ export default function DealsPage() {
   };
 
   return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="glass rounded-2xl p-4">
-          <div className="text-xs text-muted uppercase tracking-wider">Total Pipeline</div>
-          <div className="text-2xl font-bold text-white mt-1">MVR {totalValue.toLocaleString()}</div>
-        </div>
-        <div className="glass rounded-2xl p-4">
-          <div className="text-xs text-muted uppercase tracking-wider">Weighted</div>
-          <div className="text-2xl font-bold text-brand-400 mt-1">MVR {totalWeighted.toLocaleString()}</div>
-        </div>
-        <div className="glass rounded-2xl p-4">
-          <div className="text-xs text-muted uppercase tracking-wider">Open Deals</div>
-          <div className="text-2xl font-bold text-white mt-1">{deals.length}</div>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><h1 className="text-xl font-semibold text-white">Insurance placement workspace</h1><p className="mt-1 text-xs text-muted">Single-screen deal lifecycle, pipeline, compliance and binding desk.</p></div>
+        <div className="flex items-center gap-3">
+          <div className="hidden text-right sm:block"><div className="text-[10px] uppercase text-muted">Open deals</div><div className="text-sm font-semibold text-white">{deals.length}</div></div>
+          <button type="button" className="btn-ghost !py-1.5" onClick={() => setFilterOpen(true)}><Filter size={14} /> Filter</button>
+          <button type="button" className="btn-primary !py-1.5" onClick={openCreate} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding deals' : undefined}><Plus size={14} /> New Deal</button>
         </div>
       </div>
-
-      <div className="flex items-center justify-between">
-        <h2 className="text-white font-semibold">Sales Pipeline</h2>
-        <div className="flex gap-2">
-            <button className="btn-ghost !py-1.5" onClick={() => setFilterOpen(true)}><Filter size={14} /> Filter</button>
-            <button className="btn-primary !py-1.5" onClick={openCreate} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding deals' : undefined}><Plus size={14} /> New Deal</button>
-        </div>
-      </div>
-
-      <div className="glass rounded-2xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-ink-900/60 text-muted text-[11px] uppercase tracking-wider">
-            <tr>
-              <th className="text-left px-4 py-3 font-medium">Client</th>
-              <th className="text-left px-4 py-3 font-medium">Product</th>
-              <th className="text-left px-4 py-3 font-medium">Insurer</th>
-              <th className="text-left px-4 py-3 font-medium">Stage</th>
-              <th className="text-right px-4 py-3 font-medium">Value</th>
-              <th className="text-right px-4 py-3 font-medium">Weighted</th>
-              <th className="text-left px-4 py-3 font-medium">Prob.</th>
-              <th className="text-left px-4 py-3 font-medium">Close Date</th>
-              <th className="text-right px-4 py-3 font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleDeals.map((d) => (
-              <tr key={d.id} className="table-row">
-                <td className="px-4 py-3 text-white font-medium">{d.client}</td>
-                <td className="px-4 py-3 text-muted">{d.product}</td>
-                <td className="px-4 py-3 text-muted">{d.insurer}</td>
-                <td className="px-4 py-3">
-                  <Badge variant={stageColors[d.stage] ?? 'muted'} dot>{d.stage}</Badge>
-                </td>
-                <td className="px-4 py-3 text-right text-white">
-                  <div>{formatAmount(d.value, d.currency)}</div>
-                  {d.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(toMvr(d.value, d.currency, d.exchangeRate), 'MVR')}</div>}
-                  <div className="text-[11px] text-brand-300">Brokerage budget: {formatAmount(d.brokerageCommission ?? calculateBrokerageCommission(d.value, PRODUCT_CODES.find((product) => product.code === d.productCode || product.name === d.product)), d.currency)} ({d.brokerageRatePct ?? PRODUCT_CODES.find((product) => product.code === d.productCode || product.name === d.product)?.standardBrokerageRatePct ?? 0}%)</div>
-                </td>
-                <td className="px-4 py-3 text-right text-brand-400 font-medium">
-                  <div>{formatAmount(d.weighted, d.currency)}</div>
-                  {d.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(toMvr(d.weighted, d.currency, d.exchangeRate), 'MVR')}</div>}
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-16 h-1.5 bg-ink-900 rounded-full overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-brand-500 to-brand-400" style={{ width: `${d.probability}%` }} />
-                    </div>
-                    <span className="text-xs text-muted">{d.probability}%</span>
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-muted text-xs"><div>{formatDate(d.closeDate)}</div>{d.notes && <div className="max-w-40 truncate text-[11px]" title={d.notes}>{d.notes}</div>}</td>
-                <td className="px-4 py-3 text-right"><button type="button" className="btn-ghost !py-1.5" onClick={() => openEditDeal(d)}><Pencil size={13} /> Edit</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DealWorkspace deals={visibleDeals} onCreateDeal={openCreate} onEditDeal={openEditDeal} />
 
       <Modal
         open={createOpen}
@@ -264,9 +208,18 @@ export default function DealsPage() {
       >
         <form id="new-deal-form" onSubmit={createDeal} noValidate className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Type of Insurance Product *"><ProductSelect pipelines={pipelines} name="productCode" required value={selectedProduct?.code ?? ''} onChange={setSelectedProduct} /></Field>
+          {selectedProduct && <div className="sm:col-span-2 rounded-lg border border-ink-600 bg-ink-900/40 p-3 text-xs text-muted">
+            <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium text-white">{selectedProduct.code} · {selectedProduct.name}</span><span>{selectedProduct.riskLevel ?? 'Medium'} risk · {selectedProduct.salesCycleVelocity ?? '14–30 Days'}</span></div>
+            <p className="mt-1"><span className="text-white">Underwriting intake:</span> {selectedProduct.keyUnderwritingIntakeArtifacts}</p>
+          </div>}
           <Field label="Pipeline"><select className="input" name="pipelineId" required value={createPipelineId} onChange={(event) => setCreatePipelineId(event.target.value)}><option value="">Select pipeline</option>{activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}</select></Field>
           <Field label="Client *"><select className="input" name="client" required value={dealClient} onChange={(event) => setDealClient(event.target.value)}><option value="">Select client</option>{clients.map((client) => <option key={client.id}>{client.name}</option>)}</select></Field>
           <Field label="Insurer *"><select className="input" name="insurer" required value={dealInsurer} onChange={(event) => setDealInsurer(event.target.value)}><option value="">Select insurer</option>{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
+          <Field label="Primary contact"><input className="input" name="contactName" defaultValue={editingDeal?.contactName ?? ''} /></Field>
+          <Field label="Contact email"><input className="input" name="contactEmail" type="email" defaultValue={editingDeal?.contactEmail ?? ''} /></Field>
+          <Field label="Phone"><input className="input" name="contactPhone" type="tel" defaultValue={editingDeal?.contactPhone ?? ''} /></Field>
+          <Field label="WhatsApp"><input className="input" name="whatsapp" type="tel" defaultValue={editingDeal?.whatsapp ?? ''} /></Field>
+          <Field label="Telegram"><input className="input" name="telegram" defaultValue={editingDeal?.telegram ?? ''} placeholder="@username or phone" /></Field>
           <Field label="Stage"><select className="input" name="stage" required value={selectedStageId} onChange={(event) => setSelectedStageId(event.target.value)}><option value="">Select stage</option>{availableStages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select></Field>
           <Field label="Currency"><select className="input" name="currency" required value={dealCurrency} onChange={(event) => { const currency = event.target.value as Currency | ''; setDealCurrency(currency); setDealAmount(''); setExchangeRate(currency === 'USD' ? String(DEFAULT_USD_TO_MVR_RATE) : ''); }}><option value="">Select currency</option><option value="MVR">MVR</option><option value="USD">USD</option></select></Field>
           <Field label={`Total Insured Value${dealCurrency ? ` (${dealCurrency})` : ''}`}><input className="input" name="value" type="number" min="0" step="0.01" required value={dealAmount} onChange={(event) => setDealAmount(event.target.value)} /></Field>
@@ -274,7 +227,7 @@ export default function DealsPage() {
           {dealCurrency === 'USD' && <Field label="Exchange rate (1 USD = MVR)"><input className="input" name="exchangeRate" type="number" min="0.000001" step="any" required value={exchangeRate} onChange={(event) => { setExchangeRate(event.target.value); setCreateError(''); }} /></Field>}
           {dealCurrency === 'USD' && Number(dealAmount) > 0 && Number(exchangeRate) > 0 && <p className="sm:col-span-2 text-sm text-muted">Equivalent: {formatAmount(toMvr(Number(dealAmount), 'USD', Number(exchangeRate)), 'MVR')}</p>}
           {createError && <p role="alert" className="sm:col-span-2 text-sm text-hot">{createError}</p>}
-          <Field label="Probability (%)"><input className="input" name="probability" type="number" min="0" max="100" step="0.01" required value={dealProbability} onChange={(event) => setDealProbability(event.target.value)} /></Field>
+          <Field label="Stage win probability"><input className="input" name="probability" type="number" value={availableStages.find((stage) => stage.id === selectedStageId)?.winProbabilityPct ?? dealProbability} readOnly aria-readonly="true" /></Field>
           <Field label="Intent Tier">
             <select className="input" name="intentTier" required value={dealIntent} onChange={(event) => setDealIntent(event.target.value as Deal['intentTier'])}>
               <option value="P1">P1 · Ready to Buy</option>

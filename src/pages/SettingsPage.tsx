@@ -6,7 +6,7 @@ import {
   Settings as SettingsIcon, Percent, Mail, Users as UsersIcon, ShieldAlert,
   Save, Plus, Pencil, Trash2, Check, Lock, Package,
 } from 'lucide-react';
-import type { TaxRate, Role, User, ProductCode, Pipeline, Lead, Deal } from '../types';
+import type { TaxRate, Role, User, ProductCode, Lead, Deal } from '../types';
 import { PRODUCT_CODES } from '../data/catalogs';
 
 type Tab = 'general' | 'tax' | 'products' | 'email' | 'users';
@@ -14,7 +14,7 @@ type Tab = 'general' | 'tax' | 'products' | 'email' | 'users';
 export default function SettingsPage() {
   const {
     user, hasAccess, taxRates, setTaxRates, users, createUser, updateUserProfile,
-    company, setCompany, emailTemplates, setEmailTemplates, products, setProducts, pipelines, leads, deals,
+    company, setCompany, emailTemplates, setEmailTemplates, products, setProducts, leads, deals,
   } = useApp();
   const [tab, setTab] = useState<Tab>('tax');
   const [editing, setEditing] = useState<TaxRate | null>(null);
@@ -196,7 +196,7 @@ export default function SettingsPage() {
       )}
 
       {tab === 'products' && (
-        <ProductManagement products={products} setProducts={setProducts} pipelines={pipelines} leads={leads} deals={deals} onNotice={setNotice} />
+        <ProductManagement products={products} setProducts={setProducts} leads={leads} deals={deals} onNotice={setNotice} />
       )}
 
       {tab === 'email' && (
@@ -311,11 +311,10 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function ProductManagement({
-  products, setProducts, pipelines, leads, deals, onNotice,
+  products, setProducts, leads, deals, onNotice,
 }: {
   products: ProductCode[];
   setProducts: Dispatch<SetStateAction<ProductCode[]>>;
-  pipelines: Pipeline[];
   leads: Lead[];
   deals: Deal[];
   onNotice: (message: string) => void;
@@ -323,15 +322,14 @@ function ProductManagement({
   const [editing, setEditing] = useState<ProductCode | null>(null);
   const [form, setForm] = useState<ProductCode | null>(null);
   const [error, setError] = useState('');
+  const [pendingProductDeletion, setPendingProductDeletion] = useState<ProductCode | null>(null);
   const builtInCodes = new Set(PRODUCT_CODES.map((product) => product.code));
-  const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
-
   const startAdd = () => {
     setEditing(null);
     setError('');
     setForm({
       code: '', name: '', description: '', category: 'Miscellaneous', classType: 'CUSTOM',
-      defaultPipelineCode: activePipelines[0]?.code ?? '', standardBrokerageRatePct: 0,
+      defaultPipelineCode: 'COMMERCIAL', standardBrokerageRatePct: 0,
       isStatutoryMandatory: false, salesCycleVelocity: '14–30 Days', riskLevel: 'Medium',
       keyUnderwritingIntakeArtifacts: 'Completed proposal form, asset/risk schedule and prior claims history',
     });
@@ -363,10 +361,12 @@ function ProductManagement({
       salesCycleVelocity: form.salesCycleVelocity?.trim() || '14–30 Days',
       riskLevel: form.riskLevel || 'Medium',
       keyUnderwritingIntakeArtifacts: form.keyUnderwritingIntakeArtifacts?.trim() || 'Completed proposal form, asset/risk schedule and prior claims history',
+      defaultPipelineCode: 'COMMERCIAL',
     };
-    const duplicate = products.some((item) => item.code === product.code && item.code !== editing?.code);
-    if (!product.code || !product.name || !product.classType || !product.defaultPipelineCode || duplicate || !Number.isFinite(product.standardBrokerageRatePct) || product.standardBrokerageRatePct < 0 || product.standardBrokerageRatePct > 100) {
-      setError('Enter a unique product code, name, class, pipeline, and a brokerage rate from 0 to 100.');
+    const duplicateCode = products.some((item) => item.code.trim().toUpperCase() === product.code && item.code.trim().toUpperCase() !== editing?.code.trim().toUpperCase());
+    const duplicateName = products.some((item) => item.name.trim().toLowerCase() === product.name.toLowerCase() && item.code !== editing?.code);
+    if (!product.code || !product.name || !product.classType || duplicateCode || duplicateName || !Number.isFinite(product.standardBrokerageRatePct) || product.standardBrokerageRatePct < 0 || product.standardBrokerageRatePct > 100) {
+      setError('Enter a unique product code, name, class, and a brokerage rate from 0 to 100.');
       return;
     }
     setProducts((current) => editing
@@ -377,16 +377,12 @@ function ProductManagement({
     setEditing(null);
   };
 
-  const handleDeleteProduct = (product: ProductCode) => {
-    const confirmed = window.confirm(`Are you sure you want to delete ${product.name || 'this product'}?`);
-    if (!confirmed) return;
+  const productDeleteBlockReason = (product: ProductCode) => {
     if (!product.code.trim()) {
-      onNotice('Unable to delete this product because it has no product code.');
-      return;
+      return 'Unable to delete this product because it has no product code.';
     }
     if (builtInCodes.has(product.code)) {
-      onNotice(`${product.name} is a seeded NM CODES product and cannot be deleted.`);
-      return;
+      return `${product.name} is a seeded NM CODES product and cannot be deleted.`;
     }
     const linkedLeads = leads.filter((lead) => lead.productCode === product.code && lead.status !== 'COMPLETED');
     const linkedDeals = deals.filter((deal) => {
@@ -401,15 +397,35 @@ function ProductManagement({
         linkedLeads.length > 0 ? `${linkedLeads.length} active lead${linkedLeads.length === 1 ? '' : 's'}` : '',
         linkedDeals.length > 0 ? `${linkedDeals.length} active deal${linkedDeals.length === 1 ? '' : 's'}` : '',
       ].filter(Boolean).join(' and ');
-      onNotice(`Cannot delete ${product.name}: it is linked to ${linkedTypes}. Reassign or close those records first.`);
-      return;
+      return `Cannot delete ${product.name}: it is linked to ${linkedTypes}. Reassign or close those records first.`;
     }
     if (!products.some((item) => item.code === product.code)) {
-      onNotice(`${product.name} could not be deleted because it is no longer in the catalog.`);
+      return `${product.name} could not be deleted because it is no longer in the catalog.`;
+    }
+    return '';
+  };
+
+  const handleDeleteProduct = (product: ProductCode) => {
+    const reason = productDeleteBlockReason(product);
+    if (reason) {
+      onNotice(reason);
       return;
     }
+    setPendingProductDeletion(product);
+  };
+
+  const confirmDeleteProduct = () => {
+    if (!pendingProductDeletion) return;
+    const reason = productDeleteBlockReason(pendingProductDeletion);
+    if (reason) {
+      onNotice(reason);
+      setPendingProductDeletion(null);
+      return;
+    }
+    const product = pendingProductDeletion;
     setProducts((current) => current.filter((item) => item.code !== product.code));
     onNotice(`${product.name} deleted from the catalog and queued for Supabase sync.`);
+    setPendingProductDeletion(null);
   };
 
   return (
@@ -418,14 +434,14 @@ function ProductManagement({
         <div className="flex items-center justify-between gap-3 mb-4">
           <div>
             <h3 className="text-white font-semibold">Item / Product Management</h3>
-            <p className="text-xs text-muted mt-0.5">Manage the 49 NM CODES products and custom insurance items used by Lead and Deal forms.</p>
+            <p className="text-xs text-muted mt-0.5">Manage the 49 NM CODES products and custom insurance items used by Lead and Deal forms. Products share the main product-filtered placement pipeline.</p>
           </div>
           <button type="button" className="btn-primary !py-1.5" onClick={startAdd}><Plus size={14} /> Add Product</button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[1500px]">
             <thead className="text-[11px] uppercase tracking-wider text-muted border-b border-ink-600">
-              <tr><th className="text-left px-3 py-2">Class</th><th className="text-left px-3 py-2">Product Code</th><th className="text-left px-3 py-2">Description</th><th className="text-right px-3 py-2">Brokerage %</th><th className="text-left px-3 py-2">Mandatory</th><th className="text-left px-3 py-2">Target CRM Pipeline</th><th className="text-left px-3 py-2">Sales Cycle / Velocity</th><th className="text-left px-3 py-2">Risk Level</th><th className="text-left px-3 py-2 min-w-[360px]">Key Underwriting Intake Artifacts</th><th className="px-3 py-2" /></tr>
+              <tr><th className="text-left px-3 py-2">Class</th><th className="text-left px-3 py-2">Product Code</th><th className="text-left px-3 py-2">Description</th><th className="text-right px-3 py-2">Brokerage %</th><th className="text-left px-3 py-2">Mandatory</th><th className="text-left px-3 py-2">Pipeline Model</th><th className="text-left px-3 py-2">Sales Cycle / Velocity</th><th className="text-left px-3 py-2">Risk Level</th><th className="text-left px-3 py-2 min-w-[360px]">Key Underwriting Intake Artifacts</th><th className="px-3 py-2" /></tr>
             </thead>
             <tbody>
               {products.map((product) => (
@@ -435,7 +451,7 @@ function ProductManagement({
                   <td className="px-3 py-2 text-muted">{product.description || product.name}</td>
                   <td className="px-3 py-2 text-right text-brand-300">{product.standardBrokerageRatePct}%</td>
                   <td className="px-3 py-2"><Badge variant={product.isStatutoryMandatory ? 'hot' : 'muted'}>{product.isStatutoryMandatory ? 'Yes' : 'No'}</Badge></td>
-                  <td className="px-3 py-2 text-muted">{pipelines.find((pipeline) => pipeline.code === product.defaultPipelineCode)?.name ?? product.defaultPipelineCode}</td>
+                  <td className="px-3 py-2 text-muted">Shared product-filtered</td>
                   <td className="px-3 py-2 text-muted">{product.salesCycleVelocity ?? '14–30 Days'}</td>
                   <td className="px-3 py-2"><Badge variant={product.riskLevel === 'Very High' || product.riskLevel === 'High' ? 'hot' : product.riskLevel === 'Low' ? 'cold' : 'muted'}>{product.riskLevel ?? 'Medium'}</Badge></td>
                   <td className="px-3 py-2 text-muted whitespace-normal">{product.keyUnderwritingIntakeArtifacts ?? 'Completed proposal form, asset/risk schedule and prior claims history'}</td>
@@ -448,19 +464,29 @@ function ProductManagement({
       </div>
       <Modal open={Boolean(form)} onClose={() => { setForm(null); setEditing(null); setError(''); }} title={editing ? 'Edit Product' : 'Add Product'} subtitle="Update the master product classification matrix." size="lg" footer={<><button type="button" className="btn-ghost" onClick={() => { setForm(null); setEditing(null); setError(''); }}>Cancel</button><button type="submit" form="product-form" className="btn-primary"><Check size={14} /> Save Product</button></>}>
         {form && <form id="product-form" onSubmit={save} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Product Code *"><input className="input" value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })} required /></Field>
+            <Field label="Product Code *"><input className="input" value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value.toUpperCase() })} required /></Field>
             <Field label="Name *"><input className="input" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></Field>
             <Field label="Description *"><input className="input" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} required /></Field>
             <Field label="Industry Class *"><input className="input" value={form.classType} onChange={(event) => setForm({ ...form, classType: event.target.value })} required /></Field>
             <Field label="Category"><input className="input" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} /></Field>
             <Field label="Standard Brokerage Rate (%) *"><input className="input" type="number" min="0" max="100" step="0.01" value={form.standardBrokerageRatePct} onChange={(event) => setForm({ ...form, standardBrokerageRatePct: Number(event.target.value) })} required /></Field>
-            <Field label="Target CRM Pipeline *"><select className="input" value={form.defaultPipelineCode} onChange={(event) => setForm({ ...form, defaultPipelineCode: event.target.value })} required><option value="">Select pipeline</option>{activePipelines.map((pipeline) => <option key={pipeline.code} value={pipeline.code}>{pipeline.name}</option>)}</select></Field>
+            <div className="sm:col-span-2 rounded-lg border border-ink-600 bg-ink-900/40 p-3 text-xs text-muted">All products use the shared commercial placement pipeline. Retail, SME, and renewal workflows are selected at the deal level.</div>
             <Field label="Sales Cycle / Velocity *"><input className="input" value={form.salesCycleVelocity ?? ''} onChange={(event) => setForm({ ...form, salesCycleVelocity: event.target.value })} placeholder="e.g. 3–7 Days" required /></Field>
             <Field label="Risk Level *"><select className="input" value={form.riskLevel ?? 'Medium'} onChange={(event) => setForm({ ...form, riskLevel: event.target.value as ProductCode['riskLevel'] })} required><option>Low</option><option>Medium</option><option>High</option><option>Very High</option></select></Field>
             <Field label="Key Underwriting Intake Artifacts *"><textarea className="input min-h-[88px] sm:col-span-2" value={form.keyUnderwritingIntakeArtifacts ?? ''} onChange={(event) => setForm({ ...form, keyUnderwritingIntakeArtifacts: event.target.value })} required /></Field>
             <label className="flex items-center gap-2 text-sm text-white self-end"><input type="checkbox" checked={form.isStatutoryMandatory} onChange={(event) => setForm({ ...form, isStatutoryMandatory: event.target.checked })} className="accent-brand-500" /> Statutory mandatory</label>
             {error && <p role="alert" className="sm:col-span-2 text-sm text-hot">{error}</p>}
           </form>}
+      </Modal>
+      <Modal
+        open={Boolean(pendingProductDeletion)}
+        onClose={() => setPendingProductDeletion(null)}
+        title="Delete product?"
+        subtitle={`Delete “${pendingProductDeletion?.name ?? ''}”? This action cannot be undone.`}
+        size="sm"
+        footer={<><button type="button" className="btn-ghost" onClick={() => setPendingProductDeletion(null)}>Cancel</button><button type="button" className="btn-primary !bg-hot-600" onClick={confirmDeleteProduct}>Delete Product</button></>}
+      >
+        <p className="text-sm text-muted">The product will be removed from the item master if no active leads or deals are linked to it.</p>
       </Modal>
     </div>
   );

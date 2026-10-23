@@ -94,6 +94,7 @@ const normalizeProduct = (product: ProductCode): ProductCode => {
     ...catalogProduct,
     ...product,
     id: product.id || product.code,
+    defaultPipelineCode: 'COMMERCIAL',
     salesCycleVelocity: product.salesCycleVelocity || catalogProduct?.salesCycleVelocity || '14–30 Days',
     riskLevel: product.riskLevel || catalogProduct?.riskLevel || 'Medium',
     keyUnderwritingIntakeArtifacts: product.keyUnderwritingIntakeArtifacts || catalogProduct?.keyUnderwritingIntakeArtifacts || 'Completed proposal form, asset/risk schedule and prior claims history',

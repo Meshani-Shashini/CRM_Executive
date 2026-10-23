@@ -2,31 +2,60 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
-import { Columns3, Filter, List, Plus, X, Pencil } from 'lucide-react';
-import type { Client, Lead, LeadFunnelStage } from '../types';
+import { CalendarDays, CheckCircle2, CircleDot, Columns3, Filter, List, Mail, Plus, Search, ShieldCheck, TrendingUp, UserRound, X, Pencil } from 'lucide-react';
+import type { Client, Lead } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
 import { formatDate, normalizeDateInput } from '../utils/date';
 import DateInput from '../components/ui/DateInput';
 import ProductSelect from '../components/ui/ProductSelect';
 import { calculateBrokerageCommission } from '../utils/insurance';
+import { hasCompleteCommunicationChannels } from '../utils/communication';
+import { hasCompleteClientProfile, INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
 
-const PRE_PIPELINE_STAGES: LeadFunnelStage[] = [
-  'L0: Capture',
-  'L1: KYC/AML Triage',
-  'L2: LOB Scoping',
-  'L3: Qualified Opportunity',
-];
+const LEAD_FUNNEL_STAGES = [
+  'Lead Identified',
+  'Contact Made',
+  'Key Person Identified',
+  'Intro Email Sent',
+  'Meetings Ongoing',
+  'Qualified to Deals',
+] as const;
+
+type LeadBoardStage = (typeof LEAD_FUNNEL_STAGES)[number];
+
+function boardStageForLead(lead: Lead, linkedDealIds: ReadonlySet<string>): LeadBoardStage {
+  if (lead.dealId && linkedDealIds.has(lead.dealId)) return 'Qualified to Deals';
+  const stage = lead.funnelStage.toLowerCase();
+  if (stage.includes('qualified to deal') || stage.includes('qualified opportunity') || stage.includes('bound') || stage.includes('won')) return 'Qualified to Deals';
+  if (stage.includes('meeting') || stage.includes('negotiat') || stage.includes('underwriter')) return 'Meetings Ongoing';
+  if (stage.includes('intro') || stage.includes('email') || stage.includes('quoted')) return 'Intro Email Sent';
+  if (stage.includes('key person') || stage.includes('comparative') || stage.includes('presentation') || stage.includes('quote comparison') || stage.includes('lob scoping')) return 'Key Person Identified';
+  if (stage.includes('contact') || stage.includes('market') || stage.includes('tender') || stage.includes('slip') || stage.includes('kyc')) return 'Contact Made';
+  if (stage.includes('l3:')) return 'Qualified to Deals';
+  if (stage.includes('l2:')) return 'Key Person Identified';
+  if (stage.includes('l1:')) return 'Contact Made';
+  return 'Lead Identified';
+}
+
+function boardStageIcon(stage: LeadBoardStage) {
+  if (stage === 'Lead Identified') return CircleDot;
+  if (stage === 'Contact Made') return UserRound;
+  if (stage === 'Key Person Identified') return ShieldCheck;
+  if (stage === 'Intro Email Sent') return Mail;
+  if (stage === 'Meetings Ongoing') return CalendarDays;
+  return CheckCircle2;
+}
 
 export default function LeadsPage() {
   const {
-    leads, setLeads, deals, clients, setClients, user, users, pipelines, pipelineStages,
+    leads, setLeads, deals, clients, setClients, user, users, pipelines,
     customerLookups, setCustomerLookups, products,
   } = useApp();
   const PRODUCT_CODES = products;
   const [selectedPipelineId, setSelectedPipelineId] = useState('');
-  const [selectedStageId, setSelectedStageId] = useState('');
-  const [view, setView] = useState<'kanban' | 'table'>('kanban');
+  const [view, setView] = useState<'list' | 'funnel' | 'forecast'>('funnel');
+  const [searchQuery, setSearchQuery] = useState('');
   const [newLeadOpen, setNewLeadOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [newOrganizationOpen, setNewOrganizationOpen] = useState(false);
@@ -45,7 +74,7 @@ export default function LeadsPage() {
   const [productCode, setProductCode] = useState('');
   const [closeDate, setCloseDate] = useState('');
   const [ownerId, setOwnerId] = useState('');
-  const [leadFunnelStage, setLeadFunnelStage] = useState<LeadFunnelStage>('L0: Capture');
+  const [leadBoardStage, setLeadBoardStage] = useState<LeadBoardStage>('Lead Identified');
   const [leadCurrency, setLeadCurrency] = useState<Currency | ''>('');
   const [leadValue, setLeadValue] = useState('');
   const [exchangeRate, setExchangeRate] = useState('');
@@ -57,11 +86,10 @@ export default function LeadsPage() {
   const [leadIdFilter, setLeadIdFilter] = useState(() => hashParams().get('id') ?? '');
   const [statusFilter, setStatusFilter] = useState(() => hashParams().get('status') ?? '');
   const [insuranceClassFilter, setInsuranceClassFilter] = useState(() => hashParams().get('insuranceClass') ?? '');
+  const [pendingLeadDeletion, setPendingLeadDeletion] = useState<Lead | null>(null);
   const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
+  const linkedDealIds = useMemo(() => new Set(deals.map((deal) => deal.id)), [deals]);
   const selectedPipeline = activePipelines.find((pipeline) => pipeline.id === selectedPipelineId);
-  const stages = useMemo(() => pipelineStages
-    .filter((stage) => stage.pipelineId === selectedPipelineId)
-    .sort((left, right) => left.stageOrder - right.stageOrder), [pipelineStages, selectedPipelineId]);
   const selectedOrganization = clients.find(
     (client) => client.name.trim().toLowerCase() === organizationQuery.trim().toLowerCase(),
   );
@@ -76,30 +104,17 @@ export default function LeadsPage() {
     ...users.filter((candidate) => candidate.role === 'sales').map((candidate) => candidate.name),
     ...customerLookups.salesPersons,
   ])], [customerLookups.salesPersons, users]);
-  const boardPipeline = selectedPipeline ?? activePipelines[0];
-  const boardStages = pipelineStages
-    .filter((stage) => stage.pipelineId === boardPipeline?.id)
-    .sort((left, right) => left.stageOrder - right.stageOrder);
+  const boardPipeline = selectedPipeline
+    ?? activePipelines.find((pipeline) => pipeline.code === 'COMMERCIAL')
+    ?? activePipelines[0];
   useEffect(() => {
-    const product = products.find((item) => item.code === productCode);
-    const routedPipeline = activePipelines.find((pipeline) => pipeline.code === product?.defaultPipelineCode);
-    if (routedPipeline && (!selectedPipelineId || selectedPipelineId !== routedPipeline.id)) {
-      setSelectedPipelineId(routedPipeline.id);
-    }
-  }, [activePipelines, productCode, products, selectedPipelineId]);
+    if (boardPipeline && selectedPipelineId !== boardPipeline.id) setSelectedPipelineId(boardPipeline.id);
+  }, [boardPipeline, selectedPipelineId]);
   useEffect(() => {
     if (editingLead || titleManuallyEdited) return;
     const product = products.find((item) => item.code === productCode);
     if (organizationQuery.trim() && product) setLeadTitle(`${organizationQuery.trim()} - ${product.name}`);
   }, [editingLead, organizationQuery, productCode, products, titleManuallyEdited]);
-  useEffect(() => {
-    const firstStage = stages[0];
-    if (!firstStage) {
-      setSelectedStageId('');
-    } else if (!stages.some((stage) => stage.id === selectedStageId)) {
-      setSelectedStageId(firstStage.id);
-    }
-  }, [selectedStageId, stages]);
   useEffect(() => {
     const applyHashFilters = () => {
       const params = hashParams();
@@ -116,27 +131,50 @@ export default function LeadsPage() {
   const matchesLeadFilters = (lead: Lead) =>
     (user.role === 'admin' || (user.role === 'sales' && lead.ownerId === user.id)) &&
     (!temperatureFilter || lead.temperature === temperatureFilter) &&
-    (!stageFilter || lead.funnelStage === stageFilter) &&
+    (!stageFilter || lead.funnelStage === stageFilter || boardStageForLead(lead, linkedDealIds) === stageFilter) &&
     (!ownerFilter || lead.ownerId === ownerFilter) &&
     (!leadIdFilter || lead.id === leadIdFilter) &&
     (!insuranceClassFilter || lead.insuranceClass === insuranceClassFilter) &&
     (!statusFilter || (statusFilter === 'active' ? lead.status !== 'COMPLETED' : lead.status === statusFilter));
-  const visibleLeads = leads.filter((lead) =>
-    matchesLeadFilters(lead) &&
-    (!boardPipeline || lead.pipelineId === boardPipeline.id ||
-      (!lead.pipelineId && !lead.leadFunnelStage && boardPipeline.id === activePipelines[0]?.id))
-  );
-  const prePipelineLeads = leads.filter((lead) => matchesLeadFilters(lead) && !lead.pipelineId && Boolean(lead.leadFunnelStage));
+  const visibleLeads = leads.filter(matchesLeadFilters);
+  const searchedLeads = visibleLeads.filter((lead) => {
+    const owner = staffOptions.find((candidate) => candidate.id === lead.ownerId)?.name ?? lead.ownerId;
+    const product = products.find((candidate) => candidate.code === lead.productCode);
+    const search = `${lead.title ?? ''} ${lead.client} ${lead.contact} ${owner} ${lead.insuranceClass} ${lead.productCode} ${product?.name ?? ''}`.toLowerCase();
+    return search.includes(searchQuery.trim().toLowerCase());
+  });
+  const leadsByBoardStage = LEAD_FUNNEL_STAGES.map((stage) => ({
+    stage,
+    leads: searchedLeads.filter((lead) => boardStageForLead(lead, linkedDealIds) === stage),
+  }));
+  const moveLeadToStage = (lead: Lead, stage: LeadBoardStage) => {
+    if (stage === 'Qualified to Deals') {
+      const company = clients.find((client) => client.id === lead.clientId)
+        ?? clients.find((client) => client.name.trim().toLowerCase() === lead.client.trim().toLowerCase());
+      if (!hasCompleteCommunicationChannels(lead) || !company || !hasCompleteClientProfile(company)) {
+        window.alert('Complete the company profile and valid phone, WhatsApp, and Telegram details before qualifying this lead for a deal.');
+        return;
+      }
+    }
+    setLeads((current) => current.map((item) => item.id === lead.id
+      ? { ...item, funnelStage: stage, leadFunnelStage: stage === 'Qualified to Deals' ? 'L3: Qualified Opportunity' : undefined }
+      : item));
+  };
 
   const deleteLead = (lead: Lead) => {
     if (user.role !== 'admin' && user.role !== 'sales') return;
-    const linkedDeal = deals.some((deal) => deal.id === lead.dealId);
+    const linkedDeal = deals.some((deal) => deal.id === lead.dealId || deal.leadId === lead.id);
     if (linkedDeal) {
       window.alert('This Lead cannot be deleted because it has an associated Deal. Reassign or delete the associated Deal first.');
       return;
     }
-    if (!window.confirm(`Delete Lead "${lead.title ?? lead.client}"? This cannot be undone.`)) return;
-    setLeads((current) => current.filter((item) => item.id !== lead.id));
+    setPendingLeadDeletion(lead);
+  };
+
+  const confirmDeleteLead = () => {
+    if (!pendingLeadDeletion) return;
+    setLeads((current) => current.filter((item) => item.id !== pendingLeadDeletion.id));
+    setPendingLeadDeletion(null);
   };
 
   const resetLeadForm = () => {
@@ -156,13 +194,13 @@ export default function LeadsPage() {
     setProductCode('');
     setCloseDate('');
     setOwnerId(user.id);
-    setLeadFunnelStage('L0: Capture');
+    setLeadBoardStage('Lead Identified');
+    setPersonName(user.name);
     setLeadCurrency('');
     setLeadValue('');
     setExchangeRate('');
     setFormError('');
-    setSelectedPipelineId('');
-    setSelectedStageId('');
+    setSelectedPipelineId(boardPipeline?.id ?? '');
     setNewOrganizationOpen(false);
   };
 
@@ -187,8 +225,8 @@ export default function LeadsPage() {
     setProductCode(lead.productCode);
     setCloseDate(lead.closeDate ?? lead.renewalDate);
     setOwnerId(lead.ownerId);
-    setLeadFunnelStage(lead.leadFunnelStage ?? (lead.pipelineId ? 'L3: Qualified Opportunity' : 'L0: Capture'));
-    setSelectedPipelineId(lead.pipelineId ?? activePipelines[0]?.id ?? '');
+    setLeadBoardStage(boardStageForLead(lead, linkedDealIds));
+    setSelectedPipelineId(lead.pipelineId ?? boardPipeline?.id ?? '');
     setLeadCurrency(lead.currency ?? 'MVR');
     setLeadValue(String(lead.value ?? lead.premium));
     setExchangeRate(lead.currency === 'USD' ? String(lead.exchangeRate ?? DEFAULT_USD_TO_MVR_RATE) : '');
@@ -233,8 +271,9 @@ export default function LeadsPage() {
       productCode: '',
       class: '',
       ownerId: user.id,
-      tags: [],
+      tags: [INCOMPLETE_COMPANY_TAG],
       contactPerson: contactName,
+      accountStatus: 'draft',
     };
     setClients((current) => [organization, ...current]);
     setOrganizationQuery(name);
@@ -255,23 +294,22 @@ export default function LeadsPage() {
     const primaryContact = primaryContactName.trim();
     const email = contactEmail.trim();
     const phone = contactPhone.trim();
+    const whatsapp = String(data.get('whatsapp') ?? '').trim();
+    const telegram = String(data.get('telegram') ?? '').trim();
     const person = users.find((candidate) =>
       candidate.role === 'sales' && candidate.name.trim().toLowerCase() === selectedPersonName.toLowerCase(),
     );
-    const owner = user.role === 'sales'
-      ? user
-      : staffOptions.find((candidate) => candidate.id === ownerId);
+    const owner = staffOptions.find((candidate) => candidate.id === ownerId);
     const amount = Number(data.get('value'));
     const rate = leadCurrency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
-    const selectedStage = stages.find((stage) => stage.id === selectedStageId) ?? stages[0];
     const expectedCloseDate = normalizeDateInput(closeDate);
 
     if (!selectedOrganization) {
       setFormError('Choose an existing organization or create it first.');
       return;
     }
-    if (!title || !expectedCloseDate || !selectedPersonName || !primaryContact || !email || !phone || !owner || !product || !selectedPipeline || !selectedStage) {
-      setFormError('Complete Organization, Primary Contact Name, Contact Email, Contact Phone, Lead Title, Insurance Product, Pipeline, Stage, and Expected Close Date before saving.');
+    if (!title || !expectedCloseDate || !selectedPersonName || !primaryContact || !email || !phone || !owner || !product || !selectedPipeline) {
+      setFormError('Complete Organization, Primary Contact Name, Contact Email, Contact Phone, Lead Title, Insurance Product, Pipeline, Owner, and Expected Close Date before saving.');
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -280,6 +318,11 @@ export default function LeadsPage() {
     }
     if (!/^[+()\d\s-]{7,}$/.test(phone)) {
       setFormError('Enter a valid contact phone number.');
+      return;
+    }
+    if (leadBoardStage === 'Qualified to Deals' &&
+      (!hasCompleteCommunicationChannels({ contactPhone: phone, whatsapp, telegram }) || !hasCompleteClientProfile(selectedOrganization))) {
+      setFormError('Complete the company profile and enter valid phone, WhatsApp, and Telegram details before qualifying this lead for a deal.');
       return;
     }
     if (!leadCurrency || !Number.isFinite(amount) || amount < 0 ||
@@ -309,6 +352,8 @@ export default function LeadsPage() {
       contact: primaryContact,
       contactEmail: email,
       contactPhone: phone,
+      whatsapp,
+      telegram,
       source: leadSource.trim(),
       notes: leadNotes.trim(),
       country: selectedOrganization.country,
@@ -316,14 +361,14 @@ export default function LeadsPage() {
       productCode: product.code,
       temperature: editingLead?.temperature ?? 'WARM',
       status: editingLead?.status ?? 'TO-DO',
-      funnelStage: selectedStage.name,
+      funnelStage: leadBoardStage,
       renewalDate: expectedCloseDate,
       sumInsured: valueMvr,
       premium: valueMvr,
       ownerId: owner.id,
       lastActivity: editingLead?.lastActivity ?? 'Just now',
-      leadFunnelStage: 'L3: Qualified Opportunity',
-      ...(editingLead?.dealId ? { dealId: editingLead.dealId } : { dealId: `D-${Date.now()}` }),
+      ...(leadBoardStage === 'Qualified to Deals' ? { leadFunnelStage: 'L3: Qualified Opportunity' as const } : { leadFunnelStage: undefined }),
+      ...(editingLead?.dealId ? { dealId: editingLead.dealId } : {}),
       routedAt: editingLead?.routedAt ?? new Date().toISOString(),
     };
     if (!personOptions.some((name) => name.toLowerCase() === selectedPersonName.toLowerCase())) {
@@ -342,69 +387,95 @@ export default function LeadsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-3 justify-between">
-        <div className="flex min-w-0 items-center gap-2">
-          <label className="sr-only" htmlFor="lead-pipeline-filter">Pipeline</label>
-          <select
-            id="lead-pipeline-filter"
-            className="input w-auto min-w-52"
-            value={boardPipeline?.id ?? ''}
-            onChange={(event) => { setSelectedPipelineId(event.target.value); setStageFilter(''); }}
-          >
-            {activePipelines.length === 0 && <option value="">No pipelines available</option>}
-            {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
-          </select>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-1 rounded-lg border border-ink-600 bg-ink-800/60 p-1" role="tablist" aria-label="Lead views">
+          <button role="tab" aria-selected={view === 'list'} onClick={() => setView('list')} className={`rounded-md px-3 py-1.5 text-sm ${view === 'list' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}><List size={14} className="mr-1.5 inline" />List</button>
+          <button role="tab" aria-selected={view === 'funnel'} onClick={() => setView('funnel')} className={`rounded-md px-3 py-1.5 text-sm ${view === 'funnel' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}><Columns3 size={14} className="mr-1.5 inline" />Funnel</button>
+          <button role="tab" aria-selected={view === 'forecast'} onClick={() => setView('forecast')} className={`rounded-md px-3 py-1.5 text-sm ${view === 'forecast' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}><TrendingUp size={14} className="mr-1.5 inline" />Forecast</button>
         </div>
-        <div className="flex items-center gap-2">
-          <button className="btn-ghost !py-1.5" onClick={() => setFilterOpen(true)}><Filter size={14} /> Filter</button>
-          <div className="flex gap-1 bg-ink-800/60 border border-ink-600 rounded-lg p-1">
-            <button aria-label="Kanban view" aria-pressed={view === 'kanban'} onClick={() => setView('kanban')} className={`p-1.5 rounded-md ${view === 'kanban' ? 'bg-ink-700 text-white' : 'text-muted'}`}><Columns3 size={15} /></button>
-            <button aria-label="Table view" aria-pressed={view === 'table'} onClick={() => setView('table')} className={`p-1.5 rounded-md ${view === 'table' ? 'bg-ink-700 text-white' : 'text-muted'}`}><List size={15} /></button>
-          </div>
-          <button className="btn-primary !py-1.5" onClick={openLeadForm} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create a pipeline before adding a lead' : undefined}><Plus size={14} /> Add Lead</button>
-        </div>
+        <button className="btn-primary" onClick={openLeadForm} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding a lead' : undefined}><Plus size={15} /> Add a New Lead</button>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="relative min-w-56 flex-1">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+          <input className="input pl-9" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search leads" aria-label="Search leads" />
+        </label>
+        <button className="btn-ghost" onClick={() => setFilterOpen(true)}><Filter size={14} /> Filter</button>
       </div>
 
       {activePipelines.length === 0 ? (
-        <div className="glass rounded-2xl p-8 text-center text-sm text-muted">Create an active pipeline and at least one stage before adding leads.</div>
-      ) : boardStages.length === 0 ? (
-        <div className="glass rounded-2xl p-8 text-center text-sm text-muted">Add at least one stage to this pipeline before adding leads.</div>
-      ) : view === 'kanban' ? (
-        <div className="flex gap-3 overflow-x-auto pb-3">
-          {boardStages.map((stage) => {
-            const stageLeads = visibleLeads.filter((lead) => lead.funnelStage === stage.name);
-            return (
-              <div key={stage.id} className="w-72 shrink-0">
-                <div className="flex items-center justify-between mb-2 px-1">
-                  <div className="text-sm font-semibold text-white">{stage.name}</div>
-                  <span className="pill bg-ink-700 text-muted border border-ink-600">{stageLeads.length}</span>
-                </div>
-                <div className="space-y-2 min-h-[200px] bg-ink-900/40 rounded-xl p-2">
-                  {stageLeads.map((lead) => (
-                    <article key={lead.id} className="glass-soft rounded-xl p-3">
-                      <h3 className="text-sm font-semibold text-white">{lead.title ?? `${lead.client} lead`}</h3>
-                      <div className="text-[11px] text-muted mt-1">{lead.client} · Person: {lead.person ?? lead.contact}</div>
-                      <div className="text-[11px] text-muted mt-1">Contact: {lead.contact} · {lead.contactEmail} · {lead.contactPhone}</div>
-                      <div className="text-[11px] text-muted mt-1">Owner: {staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId}</div>
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        <Badge variant="brand">{PRODUCT_CODES.find((product) => product.code === lead.productCode)?.name ?? lead.productCode}</Badge>
-                      </div>
-                      <div className="flex items-center justify-between text-[11px] text-muted pt-2 mt-2 border-t border-ink-700/60">
-                        <span>{formatAmount(lead.value ?? lead.premium, lead.currency ?? 'MVR')}</span>
-                        {lead.currency === 'USD' && <span>{formatAmount(lead.valueMvr ?? lead.premium, 'MVR')}</span>}
-                      </div>
-                      <div className="text-[11px] text-muted mt-1">Expected close {formatDate(lead.closeDate ?? lead.renewalDate)}</div>
-                      {lead.notes && <div className="text-[11px] text-muted mt-1 line-clamp-2">Notes: {lead.notes}</div>}
-                      {(user.role === 'admin' || user.role === 'sales') && (
-                        <div className="flex gap-2 mt-2"><button type="button" className="btn-ghost !py-1.5" onClick={() => openEditLead(lead)}><Pencil size={13} /> Edit Lead</button><button type="button" className="btn-ghost !py-1.5 text-hot" onClick={() => deleteLead(lead)}>Delete</button></div>
-                      )}
-                    </article>
-                  ))}
-                  {stageLeads.length === 0 && <div className="text-center text-[11px] text-muted/60 py-8">No leads in this stage.</div>}
-                </div>
+        <div className="glass rounded-2xl p-8 text-center text-sm text-muted">Create an active pipeline before adding leads.</div>
+      ) : view === 'funnel' ? (
+        <div className="overflow-x-auto pb-3">
+        <div className="grid min-w-[1560px] grid-cols-6 gap-3">
+          {leadsByBoardStage.map(({ stage, leads: stageLeads }) => {
+            const StageIcon = boardStageIcon(stage);
+            const aggregateMvr = stageLeads.reduce((total, lead) => total + (lead.valueMvr ?? toMvr(lead.value ?? lead.premium, lead.currency ?? 'MVR', lead.exchangeRate)), 0);
+            const showAggregate = stage === 'Contact Made' || stage === 'Intro Email Sent';
+            return <section key={stage} className="min-w-0 rounded-xl border border-ink-700 bg-ink-900/55 p-2.5">
+              <header className="mb-2 flex min-h-11 items-start justify-between gap-2 px-1">
+                <div className="flex items-center gap-2 text-sm font-semibold text-white"><StageIcon size={15} className="shrink-0 text-brand-300" /><h2>{stage}</h2></div>
+                <Badge variant="muted">{stageLeads.length}</Badge>
+              </header>
+              {showAggregate && <div className="mb-2 rounded-lg border border-brand-400/15 bg-brand-400/5 px-2.5 py-2">
+                <div className="text-[10px] uppercase tracking-wide text-muted">Aggregate MVR value</div>
+                <div className="text-sm font-semibold text-brand-200">{formatAmount(aggregateMvr, 'MVR')}</div>
+              </div>}
+              <div className="max-h-[calc(100vh-300px)] min-h-48 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
+                {stageLeads.map((lead) => {
+                  const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId;
+                  const product = PRODUCT_CODES.find((item) => item.code === lead.productCode);
+                  const CompanyIcon = lead.status === 'COMPLETED' ? CheckCircle2 : CircleDot;
+                  return <article key={lead.id} className="rounded-lg border border-ink-700 bg-ink-800/80 p-3 shadow-sm transition hover:border-brand-400/50">
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <button type="button" onClick={() => openEditLead(lead)} className="min-w-0 text-left">
+                        <h3 className="truncate text-sm font-bold text-white">{lead.title ?? `${lead.client} lead`}</h3>
+                      </button>
+                      <CompanyIcon size={15} className={lead.status === 'COMPLETED' ? 'shrink-0 text-emerald-400' : lead.temperature === 'HOT' ? 'shrink-0 text-hot' : 'shrink-0 text-brand-300'} aria-label={lead.status === 'COMPLETED' ? 'Completed' : lead.temperature === 'HOT' ? 'Hot lead' : 'Active lead'} />
+                    </div>
+                    <div className="truncate text-xs text-muted">{lead.client}</div>
+                    <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-ink-600 text-[9px] font-semibold text-white">{ownerName.slice(0, 1).toUpperCase()}</span><span className="truncate">Rep: {ownerName}</span></div>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      <Badge variant="brand">{product?.category ?? lead.insuranceClass}</Badge>
+                      <Badge variant="muted">{product?.code ?? lead.productCode}</Badge>
+                      <Badge variant={lead.temperature === 'HOT' ? 'hot' : 'muted'}>{lead.temperature ?? 'WARM'}</Badge>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between border-t border-ink-700/80 pt-2 text-[11px]">
+                      <span className="text-muted">MVR value</span>
+                      <span className="font-medium text-white">{formatAmount(lead.valueMvr ?? toMvr(lead.value ?? lead.premium, lead.currency ?? 'MVR', lead.exchangeRate), 'MVR')}</span>
+                    </div>
+                    <div className="mt-1 text-[10px] text-muted">Expected close {formatDate(lead.closeDate ?? lead.renewalDate)}</div>
+                    <label className="mt-2 block">
+                      <span className="sr-only">Move {lead.title ?? lead.client} to stage</span>
+                      <select className="input !min-h-8 !py-1 text-[11px]" value={boardStageForLead(lead, linkedDealIds)} disabled={Boolean(lead.dealId && linkedDealIds.has(lead.dealId))} onChange={(event) => moveLeadToStage(lead, event.target.value as LeadBoardStage)}>
+                        {LEAD_FUNNEL_STAGES.map((item) => <option key={item} value={item}>{item}</option>)}
+                      </select>
+                    </label>
+                    {(user.role === 'admin' || user.role === 'sales') && <div className="mt-2 flex justify-between border-t border-ink-700/80 pt-2">
+                      <button type="button" className="btn-ghost !py-1 text-[11px]" onClick={() => openEditLead(lead)}><Pencil size={12} /> Edit</button>
+                      <button type="button" className="btn-ghost !py-1 text-[11px] text-hot" onClick={() => deleteLead(lead)}>Delete</button>
+                    </div>}
+                  </article>;
+                })}
+                {stageLeads.length === 0 && <div className="py-8 text-center text-[11px] text-muted/60">No leads in this stage.</div>}
               </div>
-            );
+            </section>;
           })}
+        </div>
+        </div>
+      ) : view === 'forecast' ? (
+        <div className="glass rounded-2xl p-5">
+          <div className="mb-4"><h2 className="font-semibold text-white">Lead Forecast</h2><p className="mt-1 text-xs text-muted">Open lead exposure converted to MVR, grouped by funnel stage. Forecast values are unweighted estimates.</p></div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {leadsByBoardStage.map(({ stage, leads: stageLeads }) => {
+              const total = stageLeads.reduce((sum, lead) => sum + (lead.valueMvr ?? toMvr(lead.value ?? lead.premium, lead.currency ?? 'MVR', lead.exchangeRate)), 0);
+              return <div key={stage} className="rounded-xl border border-ink-700 bg-ink-900/50 p-4">
+                <div className="flex items-center justify-between text-sm text-white"><span>{stage}</span><Badge variant="muted">{stageLeads.length}</Badge></div>
+                <div className="mt-3 text-xl font-semibold text-brand-200">{formatAmount(total, 'MVR')}</div>
+                <div className="mt-1 text-xs text-muted">Unweighted pipeline value</div>
+              </div>;
+            })}
+          </div>
         </div>
       ) : (
         <div className="glass rounded-2xl overflow-x-auto">
@@ -421,9 +492,9 @@ export default function LeadsPage() {
               </tr>
             </thead>
             <tbody>
-              {visibleLeads.map((lead) => (
+              {searchedLeads.map((lead) => (
                 <tr key={lead.id} className="table-row">
-                  <td className="px-4 py-3"><div className="text-white font-medium">{lead.title ?? `${lead.client} lead`}</div><div className="text-[11px] text-muted">{lead.client}</div></td>
+                  <td className="px-4 py-3"><div className="text-white font-medium">{lead.title ?? `${lead.client} lead`}</div><div className="text-[11px] text-muted">{lead.client}</div><div className="mt-1 text-[11px] text-brand-300">{boardStageForLead(lead, linkedDealIds)}</div></td>
                   <td className="px-4 py-3 text-muted"><div>{lead.contact}</div><div className="text-[11px]">{lead.contactEmail} · {lead.contactPhone}</div></td>
                   <td className="px-4 py-3 text-muted">{staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId}</td>
                   <td className="px-4 py-3 text-muted">{PRODUCT_CODES.find((product) => product.code === lead.productCode)?.name ?? lead.insuranceClass}</td>
@@ -436,37 +507,10 @@ export default function LeadsPage() {
                   )}
                 </tr>
               ))}
-              {visibleLeads.length === 0 && <tr><td colSpan={user.role === 'admin' || user.role === 'sales' ? 7 : 6} className="px-4 py-8 text-center text-muted">No leads yet.</td></tr>}
+              {searchedLeads.length === 0 && <tr><td colSpan={user.role === 'admin' || user.role === 'sales' ? 7 : 6} className="px-4 py-8 text-center text-muted">No leads found.</td></tr>}
             </tbody>
           </table>
         </div>
-      )}
-
-      {prePipelineLeads.length > 0 && (
-        <section className="glass rounded-2xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-white font-semibold">Pre-Pipeline Lead Funnel</h2>
-              <p className="text-xs text-muted mt-1">Qualify Leads through L0–L3 before routing them to an active pipeline.</p>
-            </div>
-            <Badge variant="brand">{prePipelineLeads.length} Leads</Badge>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            {PRE_PIPELINE_STAGES.map((stage) => {
-              const stageLeads = prePipelineLeads.filter((lead) => lead.leadFunnelStage === stage);
-              return <div key={stage} className="rounded-xl bg-ink-900/50 p-3">
-                <div className="flex items-center justify-between text-sm text-white"><span>{stage}</span><Badge variant="muted">{stageLeads.length}</Badge></div>
-                <div className="mt-3 space-y-2">
-                  {stageLeads.map((lead) => <button key={lead.id} type="button" onClick={() => openEditLead(lead)} className="w-full rounded-lg border border-ink-700 p-2 text-left hover:border-brand-400/50">
-                    <div className="text-xs font-medium text-white truncate">{lead.client}</div>
-                    <div className="text-[11px] text-muted truncate">{lead.title ?? 'Untitled lead'}{lead.dealId ? ` · ${lead.dealId}` : ''}</div>
-                  </button>)}
-                  {stageLeads.length === 0 && <div className="py-4 text-center text-[11px] text-muted/60">No Leads</div>}
-                </div>
-              </div>;
-            })}
-          </div>
-        </section>
       )}
 
       <Modal
@@ -486,7 +530,12 @@ export default function LeadsPage() {
               required
               maxLength={120}
               value={personName}
-              onChange={(event) => setPersonName(event.target.value)}
+              onChange={(event) => {
+                const name = event.target.value;
+                setPersonName(name);
+                const selectedRep = staffOptions.find((candidate) => candidate.role === 'sales' && candidate.name.toLowerCase() === name.trim().toLowerCase());
+                if (selectedRep) setOwnerId(selectedRep.id);
+              }}
               placeholder="Select or type a sales person"
               autoComplete="off"
             />
@@ -517,6 +566,8 @@ export default function LeadsPage() {
           <Field label="Primary Contact Name *"><input className="input" value={primaryContactName} onChange={(event) => setPrimaryContactName(event.target.value)} required placeholder="Contact full name" /></Field>
           <Field label="Contact Email *"><input className="input" type="email" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} required placeholder="name@company.com" /></Field>
           <Field label="Contact Phone *"><input className="input" type="tel" value={contactPhone} onChange={(event) => setContactPhone(event.target.value)} required placeholder="+960 ..." /></Field>
+          <Field label="WhatsApp"><input className="input" name="whatsapp" type="tel" defaultValue={editingLead?.whatsapp ?? ''} placeholder="+960 ..." /></Field>
+          <Field label="Telegram"><input className="input" name="telegram" defaultValue={editingLead?.telegram ?? ''} placeholder="@username or phone" /></Field>
           <SectionHeading title="Opportunity Details" />
           <Field label="Title *"><input className="input" name="title" maxLength={200} required value={leadTitle} onChange={(event) => { setTitleManuallyEdited(true); setLeadTitle(event.target.value); }} /></Field>
           <Field label="Type of Insurance Product *">
@@ -528,24 +579,25 @@ export default function LeadsPage() {
               onChange={(product) => setProductCode(product?.code ?? '')}
             />
           </Field>
+          {products.find((product) => product.code === productCode) && <div className="sm:col-span-2 rounded-lg border border-ink-600 bg-ink-900/40 p-3 text-xs text-muted">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-medium text-white">{products.find((product) => product.code === productCode)?.code} · {products.find((product) => product.code === productCode)?.name}</span>
+              <span>{products.find((product) => product.code === productCode)?.riskLevel ?? 'Medium'} risk · {products.find((product) => product.code === productCode)?.salesCycleVelocity ?? '14–30 Days'}</span>
+            </div>
+            <p className="mt-1"><span className="text-white">Underwriting intake:</span> {products.find((product) => product.code === productCode)?.keyUnderwritingIntakeArtifacts}</p>
+          </div>}
           <Field label="Source"><select className="input" value={leadSource} onChange={(event) => setLeadSource(event.target.value)}><option value="">Select source</option><option>Referral</option><option>Website</option><option>Renewal</option><option>Walk-in</option><option>Partner</option></select></Field>
           <Field label="Remarks / Notes"><textarea className="input min-h-20" value={leadNotes} onChange={(event) => setLeadNotes(event.target.value)} placeholder="Initial scoping, client context, or missing information" /></Field>
           <SectionHeading title="Pipeline & Progress" />
-          <Field label="Pre-pipeline stage">
-            <select className="input" value={leadFunnelStage} onChange={(event) => setLeadFunnelStage(event.target.value as LeadFunnelStage)}>
-              {PRE_PIPELINE_STAGES.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
+          <Field label="Funnel stage">
+            <select className="input" value={leadBoardStage} onChange={(event) => setLeadBoardStage(event.target.value as LeadBoardStage)}>
+              {LEAD_FUNNEL_STAGES.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
             </select>
           </Field>
-          <Field label="Pipeline">
+          <Field label="Deal pipeline">
             <select className="input" value={selectedPipelineId} onChange={(event) => setSelectedPipelineId(event.target.value)}>
-              <option value="">Select pipeline</option>
+              <option value="">Select deal pipeline</option>
               {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
-            </select>
-          </Field>
-          <Field label="Stage">
-            <select className="input" value={selectedStageId} required onChange={(event) => setSelectedStageId(event.target.value)}>
-              <option value="">Select stage</option>
-              {stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}
             </select>
           </Field>
           <SectionHeading title="Valuation & Financials" />
@@ -572,20 +624,20 @@ export default function LeadsPage() {
             </>
           )}
           <Field label="Owner">
-            {user.role === 'sales' ? (
-              <input className="input" value={user.name} readOnly aria-readonly="true" />
-            ) : (
-              <select className="input" required value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>
-                <option value="">Select owner</option>
-                {staffOptions.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
-              </select>
-            )}
+            <select className="input" required value={ownerId} onChange={(event) => {
+              const nextOwnerId = event.target.value;
+              setOwnerId(nextOwnerId);
+              const nextOwner = staffOptions.find((candidate) => candidate.id === nextOwnerId);
+              if (nextOwner) setPersonName(nextOwner.name);
+            }}>
+              <option value="">Select owner</option>
+              {staffOptions.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}{owner.id === user.id ? ' (You)' : ''}</option>)}
+            </select>
           </Field>
           <Field label="Expected Close Date">
             <DateInput name="closeDate" required value={closeDate} onIsoChange={setCloseDate} aria-label="Expected close date" />
           </Field>
           {formError && <p role="alert" className="sm:col-span-2 text-sm text-hot">{formError}</p>}
-          {selectedPipelineId && stages.length === 0 && <p role="alert" className="sm:col-span-2 text-sm text-hot">This pipeline has no stages. Add a stage in Pipelines before saving leads.</p>}
         </form>
       </Modal>
 
@@ -599,7 +651,7 @@ export default function LeadsPage() {
         footer={<><button type="button" className="btn-ghost" onClick={() => setNewOrganizationOpen(false)}>Cancel</button><button type="submit" form="new-organization-form" className="btn-primary"><Plus size={14} /> Create Organization</button></>}
       >
         <form id="new-organization-form" onSubmit={createOrganization} className="space-y-3">
-          <p className="text-xs text-warm">Complete all organization contact details now so the Lead can be saved without missing information.</p>
+          <p className="text-xs text-warm">This quick-created company will be tagged “{INCOMPLETE_COMPANY_TAG}” until its remaining profile details are completed.</p>
           <Field label="Organization name *"><input className="input" name="name" value={organizationQuery} onChange={(event) => setOrganizationQuery(event.target.value)} required autoFocus /></Field>
           <Field label="Primary contact name *"><input className="input" name="contactName" value={organizationContactName} onChange={(event) => setOrganizationContactName(event.target.value)} required /></Field>
           <Field label="Contact email *"><input className="input" type="email" name="contactEmail" value={organizationContactEmail} onChange={(event) => setOrganizationContactEmail(event.target.value)} required /></Field>
@@ -608,11 +660,24 @@ export default function LeadsPage() {
         </form>
       </Modal>
 
-      <Modal open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Leads" size="sm" footer={<><button type="button" className="btn-ghost" onClick={() => { setTemperatureFilter(''); setStageFilter(''); }}>Clear</button><button type="button" className="btn-primary" onClick={() => setFilterOpen(false)}>Apply Filter</button></>}>
+      <Modal open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Leads" size="sm" footer={<><button type="button" className="btn-ghost" onClick={() => { setTemperatureFilter(''); setStageFilter(''); setOwnerFilter(''); setInsuranceClassFilter(''); setStatusFilter(''); setLeadIdFilter(''); }}>Clear</button><button type="button" className="btn-primary" onClick={() => setFilterOpen(false)}>Apply Filter</button></>}>
         <div className="space-y-3">
-          <Field label="Pipeline stage"><select className="input" value={stageFilter} onChange={(event) => setStageFilter(event.target.value)}><option value="">All stages</option>{boardStages.map((stage) => <option key={stage.id} value={stage.name}>{stage.name}</option>)}</select></Field>
+          <Field label="Funnel stage"><select className="input" value={stageFilter} onChange={(event) => setStageFilter(event.target.value)}><option value="">All stages</option>{LEAD_FUNNEL_STAGES.map((stage) => <option key={stage} value={stage}>{stage}</option>)}</select></Field>
           <Field label="Temperature"><select className="input" value={temperatureFilter} onChange={(event) => setTemperatureFilter(event.target.value)}><option value="">All temperatures</option><option>HOT</option><option>WARM</option><option>COLD</option></select></Field>
+          <Field label="Owner"><select className="input" value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)}><option value="">All owners</option>{staffOptions.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></Field>
+          <Field label="Line of business"><select className="input" value={insuranceClassFilter} onChange={(event) => setInsuranceClassFilter(event.target.value)}><option value="">All lines</option>{[...new Set(products.map((product) => product.category))].map((category) => <option key={category} value={category}>{category}</option>)}</select></Field>
+          <Field label="Status"><select className="input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="TO-DO">To do</option><option value="IN-PROGRESS">In progress</option><option value="BACKLOG">Backlog</option><option value="COMPLETED">Completed</option></select></Field>
         </div>
+      </Modal>
+      <Modal
+        open={Boolean(pendingLeadDeletion)}
+        onClose={() => setPendingLeadDeletion(null)}
+        title="Delete lead?"
+        subtitle={`Delete “${pendingLeadDeletion?.title ?? pendingLeadDeletion?.client ?? ''}”? This action cannot be undone.`}
+        size="sm"
+        footer={<><button type="button" className="btn-ghost" onClick={() => setPendingLeadDeletion(null)}>Cancel</button><button type="button" className="btn-primary !bg-hot-600" onClick={confirmDeleteLead}>Delete Lead</button></>}
+      >
+        <p className="text-sm text-muted">This lead will be permanently removed from the funnel.</p>
       </Modal>
     </div>
   );
@@ -625,4 +690,3 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function SectionHeading({ title }: { title: string }) {
   return <div className="sm:col-span-2 border-b border-ink-700 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-brand-300">{title}</div>;
 }
-

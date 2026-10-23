@@ -36,6 +36,8 @@ export interface Lead {
   contact: string;
   contactEmail?: string;
   contactPhone?: string;
+  whatsapp?: string;
+  telegram?: string;
   source?: string;
   notes?: string;
   country: string;
@@ -116,6 +118,8 @@ export interface InsuredEntityDetails {
 export interface Activity {
   id: string;
   clientId: string;
+  dealId?: string;
+  insurer?: string;
   type: 'call' | 'meeting' | 'email' | 'upload' | 'note' | 'quote';
   title: string;
   description: string;
@@ -230,6 +234,12 @@ export interface Deal {
   ownerId: string;
   closeDate: string;
   insurer: string;
+  leadId?: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  whatsapp?: string;
+  telegram?: string;
   disposition?: 'won' | 'lost';
   intentTier?: 'P1' | 'P2' | 'P3';
   proposalSummary?: string;

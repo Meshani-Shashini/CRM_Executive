@@ -11,6 +11,7 @@ import type { Client, InsuredEntityDetails } from '../../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../../utils/currency';
 import { formatDate } from '../../utils/date';
 import DateInput from '../ui/DateInput';
+import { hasCompleteClientProfile, INCOMPLETE_COMPANY_TAG } from '../../utils/customerProfile';
 
 const TARGET_LINES = [
   'Marine Hull',
@@ -232,7 +233,28 @@ export default function NewCustomerAccountModal({ onClose, onCreated }: NewCusto
       productCode: '',
       class: lookupValues.industrySectors[0] || 'Miscellaneous',
       ownerId: user.id,
-      tags: targetLines,
+      contactPerson: primaryName,
+      tags: [
+        ...targetLines,
+        ...(!hasCompleteClientProfile({
+          id: '',
+          name,
+          tin: companyTin,
+          country: 'Maldives',
+          phone,
+          email,
+          address: postalBilling,
+          sumInsured: 0,
+          premium: premiumMvr,
+          expiry: '',
+          insurer: '',
+          productCode: '',
+          class: lookupValues.industrySectors[0] || 'Miscellaneous',
+          ownerId: user.id,
+          tags: targetLines,
+          contactPerson: primaryName,
+        }) ? [INCOMPLETE_COMPANY_TAG] : []),
+      ],
       accountStatus: isDraft ? 'draft' : 'active',
       insuredEntity: details,
     };

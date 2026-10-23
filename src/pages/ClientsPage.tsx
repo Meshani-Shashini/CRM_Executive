@@ -13,6 +13,7 @@ import type { Activity, Client } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { formatDate } from '../utils/date';
 import DateInput from '../components/ui/DateInput';
+import { hasCompleteClientProfile, INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
 
 const activityIcon = {
   call: Phone, meeting: Calendar, email: Mail, upload: Upload, note: MessageSquare, quote: FileText,
@@ -24,6 +25,7 @@ export default function ClientsPage() {
   const [portalClientId, setPortalClientId] = useState(user.clientId ?? '');
   const [query, setQuery] = useState('');
   const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [pendingDeletion, setPendingDeletion] = useState<Client | null>(null);
   const [isPortalEdit, setIsPortalEdit] = useState(false);
   const [profileError, setProfileError] = useState('');
   const [clientOpen, setClientOpen] = useState(false);
@@ -47,18 +49,28 @@ export default function ClientsPage() {
 
   const deleteClient = (client: Client) => {
     if (user.role !== 'admin') return;
-    const linkedLeads = leads.filter((lead) => lead.clientId === client.id || lead.client.trim().toLowerCase() === client.name.trim().toLowerCase());
-    const linkedDeals = deals.filter((deal) => deal.clientId === client.id || deal.client.trim().toLowerCase() === client.name.trim().toLowerCase());
+    const linkedLeads = leads.filter((lead) => (lead.clientId === client.id || lead.client.trim().toLowerCase() === client.name.trim().toLowerCase()) && lead.status !== 'COMPLETED');
+    const linkedDeals = deals.filter((deal) => {
+      const matchesClient = deal.clientId === client.id || deal.client.trim().toLowerCase() === client.name.trim().toLowerCase();
+      const stage = deal.stage.trim().toLowerCase();
+      const isClosed = deal.disposition === 'won' || deal.disposition === 'lost'
+        || /won|bound|renewed|policy issued|lost|declined/.test(stage);
+      return matchesClient && !isClosed;
+    });
     const linkedInvoices = invoices.filter((invoice) => invoice.clientId === client.id);
     if (linkedLeads.length || linkedDeals.length || linkedInvoices.length) {
       window.alert(`Cannot delete "${client.name}" because it has ${linkedLeads.length + linkedDeals.length + linkedInvoices.length} associated record(s). Reassign or delete the linked Leads, Deals, and Invoices first.`);
       return;
     }
-    if (!window.confirm(`Delete client "${client.name}"? This cannot be undone.`)) return;
-    setClients((current) => current.filter((item) => item.id !== client.id));
-    if (selected?.id === client.id) {
-      setSelectedId(visibleClients.find((item) => item.id !== client.id)?.id ?? '');
-    }
+    setPendingDeletion(client);
+  };
+
+  const confirmDeleteClient = () => {
+    if (!pendingDeletion) return;
+    const clientId = pendingDeletion.id;
+    setClients((current) => current.filter((item) => item.id !== clientId));
+    if (selected?.id === clientId) setSelectedId(visibleClients.find((item) => item.id !== clientId)?.id ?? '');
+    setPendingDeletion(null);
   };
 
   const saveClientProfile = async (event: FormEvent<HTMLFormElement>) => {
@@ -177,8 +189,36 @@ export default function ClientsPage() {
           insurer: read('insurer', editingClient.insurer),
           productCode: read('productCode', editingClient.productCode),
           class: read('class', editingClient.class),
-          tags: read('tags', editingClient.tags.join(',')).split(',').map((value) => value.trim()).filter(Boolean),
-          accountStatus: read('accountStatus', editingClient.accountStatus ?? 'active') as Client['accountStatus'],
+          tags: (hasCompleteClientProfile({
+            ...editingClient,
+            name: legalEntityName,
+            tin,
+            country,
+            phone,
+            email,
+            address,
+            class: read('class', editingClient.class),
+            productCode: read('productCode', editingClient.productCode),
+            contactPerson,
+          })
+            ? read('tags', editingClient.tags.filter((tag) => tag !== INCOMPLETE_COMPANY_TAG).join(','))
+              .split(',').map((value) => value.trim()).filter((value) => value && value !== INCOMPLETE_COMPANY_TAG)
+            : [...new Set([
+              ...read('tags', editingClient.tags.join(',')).split(',').map((value) => value.trim()).filter(Boolean),
+              INCOMPLETE_COMPANY_TAG,
+            ])]),
+          accountStatus: hasCompleteClientProfile({
+            ...editingClient,
+            name: legalEntityName,
+            tin,
+            country,
+            phone,
+            email,
+            address,
+            class: read('class', editingClient.class),
+            productCode: read('productCode', editingClient.productCode),
+            contactPerson,
+          }) ? 'active' : read('accountStatus', editingClient.accountStatus ?? 'draft') as Client['accountStatus'],
           contactPerson,
           ...(insuredEntity ? { insuredEntity } : {}),
         }
@@ -265,9 +305,10 @@ export default function ClientsPage() {
                   <span className="pill bg-brand-400/10 text-brand-400 border border-brand-400/30 !px-1.5">
                     {c.productCode}
                   </span>
-                  {c.tags.slice(0, 1).map((t) => (
+                  {c.tags.filter((tag) => tag !== INCOMPLETE_COMPANY_TAG).slice(0, 1).map((t) => (
                     <Badge key={t} variant="muted">{t}</Badge>
                   ))}
+                  {!hasCompleteClientProfile(c) && <Badge variant="warm">{INCOMPLETE_COMPANY_TAG}</Badge>}
                 </div>
               </button>
               {user.role === 'admin' && (
@@ -462,6 +503,16 @@ export default function ClientsPage() {
                   {profileError && <p role="alert" className="sm:col-span-2 text-sm text-hot">{profileError}</p>}
                 </form>
               )}
+            </Modal>
+            <Modal
+              open={Boolean(pendingDeletion)}
+              onClose={() => setPendingDeletion(null)}
+              title="Delete company?"
+              subtitle={`Delete “${pendingDeletion?.name ?? ''}”? This action cannot be undone.`}
+              size="sm"
+              footer={<><button type="button" className="btn-ghost" onClick={() => setPendingDeletion(null)}>Cancel</button><button type="button" className="btn-primary !bg-hot-600" onClick={confirmDeleteClient}>Delete Company</button></>}
+            >
+              <p className="text-sm text-muted">The company profile will be permanently removed.</p>
             </Modal>
             <Modal open={activityOpen} onClose={() => setActivityOpen(false)} title="Log Activity" subtitle={selected?.name} footer={<><button type="button" className="btn-ghost" onClick={() => setActivityOpen(false)}>Cancel</button><button type="submit" form="new-activity-form" className="btn-primary">Save Activity</button></>}>
               <form id="new-activity-form" onSubmit={(event) => addActivity(event, (new FormData(event.currentTarget).get('type') as Activity['type']))} className="space-y-3">

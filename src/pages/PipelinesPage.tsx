@@ -7,6 +7,8 @@ import Badge from '../components/ui/Badge';
 import type { Client, Deal, Pipeline, PipelineStage, StageHistoryAudit } from '../types';
 import { formatAmount, toMvr } from '../utils/currency';
 import { formatDate } from '../utils/date';
+import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
+import { hasCompleteClientProfile } from '../utils/customerProfile';
 
 const LOSS_REASONS = [
   'Price / premium',
@@ -52,47 +54,35 @@ interface PipelineTemplate {
 const PIPELINE_TEMPLATES: Record<string, PipelineTemplate> = {
   commercialDefault: {
     code: 'COMMERCIAL',
-    name: 'Commercial Lines',
+    name: 'Primary Commercial Lines Placement Pipeline',
     stages: [
-      { name: 'Fact-Finding & Risk Survey', winProbabilityPct: 20, stagnationDaysThreshold: 30 },
-      { name: 'Market Placement / Outender', winProbabilityPct: 40, stagnationDaysThreshold: 30 },
-      { name: 'Quote Comparison & Presentation', winProbabilityPct: 60, stagnationDaysThreshold: 14 },
-      { name: 'Underwriter Negotiation', winProbabilityPct: 80, stagnationDaysThreshold: 14 },
+      { name: 'Fact-Finding & Risk Survey', winProbabilityPct: 20, stagnationDaysThreshold: 10 },
+      { name: 'Market Tender & Placing Slip Submission', winProbabilityPct: 40, stagnationDaysThreshold: 14 },
+      { name: 'Comparative Analysis & Presentation', winProbabilityPct: 60, stagnationDaysThreshold: 7 },
+      { name: 'Underwriter Negotiation & Structuring', winProbabilityPct: 80, stagnationDaysThreshold: 5 },
       { name: 'Policy Bound / Won', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
-      { name: 'Lost / Declined', winProbabilityPct: 0, stagnationDaysThreshold: 0 },
+      { name: 'Lost / Market Declined', winProbabilityPct: 0, stagnationDaysThreshold: 0 },
     ],
   },
   smeRetailFastTrack: {
-    code: 'SME-RETAIL',
-    name: 'SME/Retail Fast-Track',
+    code: 'SME_VELOCITY',
+    name: 'Retail, SME & Velocity Packages',
     stages: [
-      { name: 'Fact-Finding & Risk Survey', winProbabilityPct: 20, stagnationDaysThreshold: 30 },
-      { name: 'Market Placement / Outender', winProbabilityPct: 40, stagnationDaysThreshold: 30 },
-      { name: 'Quote Comparison & Presentation', winProbabilityPct: 60, stagnationDaysThreshold: 14 },
-      { name: 'Underwriter Negotiation', winProbabilityPct: 80, stagnationDaysThreshold: 14 },
-      { name: 'Policy Bound / Won', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
-      { name: 'Lost / Declined', winProbabilityPct: 0, stagnationDaysThreshold: 0 },
-    ],
-  },
-  retailPersonal: {
-    code: 'RETAIL',
-    name: 'Retail & Personal Lines',
-    stages: [
-      { name: 'Inbound Lead', winProbabilityPct: 20, stagnationDaysThreshold: 2 },
-      { name: 'Automated Quote Issued', winProbabilityPct: 45, stagnationDaysThreshold: 2 },
-      { name: 'Payment Collection', winProbabilityPct: 75, stagnationDaysThreshold: 7 },
-      { name: 'Policy Issued', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
+      { name: 'Intake & Rating', winProbabilityPct: 20, stagnationDaysThreshold: 2 },
+      { name: 'Quoted', winProbabilityPct: 45, stagnationDaysThreshold: 2 },
+      { name: 'Client Confirmation', winProbabilityPct: 75, stagnationDaysThreshold: 3 },
+      { name: 'Payment & Immediate Cover', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
     ],
   },
   annualRenewals: {
     code: 'RENEWALS',
-    name: 'Annual Policy Renewals',
+    name: 'Annual Policy Renewals Pipeline',
     stages: [
-      { name: 'Renewal Audit (90d out)', winProbabilityPct: 20, stagnationDaysThreshold: 14 },
-      { name: 'Expiring Loss Run Review', winProbabilityPct: 40, stagnationDaysThreshold: 14 },
-      { name: 'Market Re-tender', winProbabilityPct: 60, stagnationDaysThreshold: 30 },
-      { name: 'Client Renewal Sign-off', winProbabilityPct: 80, stagnationDaysThreshold: 14 },
-      { name: 'Renewed', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
+      { name: 'T-90d Audit', winProbabilityPct: 20, stagnationDaysThreshold: 14 },
+      { name: 'T-60d Re-tender', winProbabilityPct: 40, stagnationDaysThreshold: 14 },
+      { name: 'T-30d Presentation', winProbabilityPct: 60, stagnationDaysThreshold: 7 },
+      { name: 'T-15d Sign-Off', winProbabilityPct: 80, stagnationDaysThreshold: 5 },
+      { name: 'Renewed & Re-Invoiced', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
     ],
   },
   claims: {
@@ -121,7 +111,8 @@ function isLostStage(name: string) {
 
 function isWonStage(name: string) {
   const normalized = name.toLowerCase();
-  return normalized.includes('policy bound') || normalized === 'closed-won';
+  return normalized.includes('policy bound') || normalized.includes('immediate cover')
+    || normalized.includes('policy issued') || normalized.includes('renewed') || normalized === 'closed-won';
 }
 
 function isRenewalPipeline(pipeline?: Pipeline) {
@@ -329,9 +320,21 @@ export default function PipelinesPage() {
     if (!deal) return;
     const current = stageForDeal(deal);
     if (!current || current.id === target.id) return;
+    if (requiresCommunicationChannels(target.name) && !hasCompleteCommunicationChannels(deal)) {
+      window.alert('Enter a valid phone, WhatsApp number, and Telegram username or number before moving this deal to a quotation or tender stage.');
+      return;
+    }
+    if (requiresCommunicationChannels(target.name)) {
+      const client = clients.find((item) => item.id === deal.clientId)
+        ?? clients.find((item) => item.name.trim().toLowerCase() === deal.client.trim().toLowerCase());
+      if (!client || !hasCompleteClientProfile(client)) {
+        window.alert('Complete the company profile before moving this deal to a quotation or tender stage.');
+        return;
+      }
+    }
     const renewalWin = isRenewalPipeline(selectedPipeline) && target.name.toLowerCase().includes('renewed');
-    if (target.name.toLowerCase().includes('proposal')
-      || target.name === 'Quote Comparison & Presentation'
+    if (requiresCommunicationChannels(target.name)
+      || target.name.toLowerCase().includes('proposal')
       || isLostStage(target.name)
       || isWonStage(target.name)
       || renewalWin) {
@@ -455,7 +458,7 @@ export default function PipelinesPage() {
         disposition,
         ...(isLostStage(to.name) || disposition === 'lost' ? { lossReason } : {}),
         ...(!(isLostStage(to.name) || disposition === 'lost') ? { lossReason: undefined } : {}),
-        ...(to.name.toLowerCase().includes('proposal') || to.name === 'Quote Comparison & Presentation'
+        ...(requiresCommunicationChannels(to.name) || to.name.toLowerCase().includes('proposal')
           ? { proposalSummary: details }
           : {}),
         ...(reachesPolicyBound && movingDeal ? {
