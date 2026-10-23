@@ -12,6 +12,7 @@ import ProductSelect from '../components/ui/ProductSelect';
 import { calculateBrokerageCommission } from '../utils/insurance';
 import { hasCompleteCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile, INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
+import DealWorkspace from './DealWorkspace';
 
 const LEAD_FUNNEL_STAGES = [
   'Lead Identified',
@@ -50,7 +51,7 @@ function boardStageIcon(stage: LeadBoardStage) {
 export default function LeadsPage() {
   const {
     leads, setLeads, deals, clients, setClients, user, users, pipelines,
-    customerLookups, setCustomerLookups, products,
+    customerLookups, setCustomerLookups, products, activities, setActivities,
   } = useApp();
   const PRODUCT_CODES = products;
   const [selectedPipelineId, setSelectedPipelineId] = useState('');
@@ -58,6 +59,9 @@ export default function LeadsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [newLeadOpen, setNewLeadOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
+  const [inspectedLeadId, setInspectedLeadId] = useState('');
+  const [pendingLeadStageChange, setPendingLeadStageChange] = useState<{ from: LeadBoardStage; to: LeadBoardStage } | null>(null);
+  const [stageChangeRemarks, setStageChangeRemarks] = useState('');
   const [newOrganizationOpen, setNewOrganizationOpen] = useState(false);
   const [organizationQuery, setOrganizationQuery] = useState('');
   const [organizationContactName, setOrganizationContactName] = useState('');
@@ -148,17 +152,12 @@ export default function LeadsPage() {
     leads: searchedLeads.filter((lead) => boardStageForLead(lead, linkedDealIds) === stage),
   }));
   const moveLeadToStage = (lead: Lead, stage: LeadBoardStage) => {
-    if (stage === 'Qualified to Deals') {
-      const company = clients.find((client) => client.id === lead.clientId)
-        ?? clients.find((client) => client.name.trim().toLowerCase() === lead.client.trim().toLowerCase());
-      if (!hasCompleteCommunicationChannels(lead) || !company || !hasCompleteClientProfile(company)) {
-        window.alert('Complete the company profile and valid phone, WhatsApp, and Telegram details before qualifying this lead for a deal.');
-        return;
-      }
-    }
-    setLeads((current) => current.map((item) => item.id === lead.id
-      ? { ...item, funnelStage: stage, leadFunnelStage: stage === 'Qualified to Deals' ? 'L3: Qualified Opportunity' : undefined }
-      : item));
+    if (stage === boardStageForLead(lead, linkedDealIds)) return;
+    if (lead.dealId && linkedDealIds.has(lead.dealId)) return;
+    setPendingLeadStageChange({ from: boardStageForLead(lead, linkedDealIds), to: stage });
+    setStageChangeRemarks('');
+    openEditLead(lead);
+    setLeadBoardStage(stage);
   };
 
   const deleteLead = (lead: Lead) => {
@@ -200,6 +199,8 @@ export default function LeadsPage() {
     setLeadValue('');
     setExchangeRate('');
     setFormError('');
+    setPendingLeadStageChange(null);
+    setStageChangeRemarks('');
     setSelectedPipelineId(boardPipeline?.id ?? '');
     setNewOrganizationOpen(false);
   };
@@ -325,6 +326,11 @@ export default function LeadsPage() {
       setFormError('Complete the company profile and enter valid phone, WhatsApp, and Telegram details before qualifying this lead for a deal.');
       return;
     }
+    if (pendingLeadStageChange && pendingLeadStageChange.to === 'Qualified to Deals'
+      && (!hasCompleteCommunicationChannels({ contactPhone: phone, whatsapp, telegram }) || !hasCompleteClientProfile(selectedOrganization))) {
+      setFormError('Complete client details and valid phone, WhatsApp, and Telegram information before saving this stage change.');
+      return;
+    }
     if (!leadCurrency || !Number.isFinite(amount) || amount < 0 ||
       (leadCurrency === 'USD' && (!Number.isFinite(rate) || !rate || rate <= 0))) {
       setFormError('Choose a currency, enter a non-negative lead value, and enter a positive exchange rate for USD.');
@@ -380,6 +386,19 @@ export default function LeadsPage() {
     setLeads((current) => editingLead
       ? current.map((existing) => existing.id === editingLead.id ? lead : existing)
       : [lead, ...current]);
+    if (editingLead && pendingLeadStageChange) {
+      const from = pendingLeadStageChange.from;
+      const to = pendingLeadStageChange.to;
+      setActivities([{
+        id: `activity-${crypto.randomUUID()}`,
+        clientId: selectedOrganization.id,
+        type: 'note',
+        title: `Lead stage changed: ${from} → ${to}`,
+        description: stageChangeRemarks.trim() || `Lead moved from ${from} to ${to}.`,
+        date: new Date().toISOString(),
+        userId: user.id,
+      }, ...activities]);
+    }
     setNewLeadOpen(false);
     resetLeadForm();
     if (selectedPipeline) setSelectedPipelineId(selectedPipeline.id);
@@ -403,7 +422,13 @@ export default function LeadsPage() {
         <button className="btn-ghost" onClick={() => setFilterOpen(true)}><Filter size={14} /> Filter</button>
       </div>
 
-      {activePipelines.length === 0 ? (
+      {inspectedLeadId ? (
+        <DealWorkspace
+          deals={deals}
+          initialSelectedKey={`lead:${inspectedLeadId}`}
+          onClose={() => setInspectedLeadId('')}
+        />
+      ) : activePipelines.length === 0 ? (
         <div className="glass rounded-2xl p-8 text-center text-sm text-muted">Create an active pipeline before adding leads.</div>
       ) : view === 'funnel' ? (
         <div className="overflow-x-auto pb-3">
@@ -412,7 +437,14 @@ export default function LeadsPage() {
             const StageIcon = boardStageIcon(stage);
             const aggregateMvr = stageLeads.reduce((total, lead) => total + (lead.valueMvr ?? toMvr(lead.value ?? lead.premium, lead.currency ?? 'MVR', lead.exchangeRate)), 0);
             const showAggregate = stage === 'Contact Made' || stage === 'Intro Email Sent';
-            return <section key={stage} className="min-w-0 rounded-xl border border-ink-700 bg-ink-900/55 p-2.5">
+            return <section key={stage} className="min-w-0 rounded-xl border border-ink-700 bg-ink-900/55 p-2.5"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                const leadId = event.dataTransfer.getData('text/lead-id');
+                const lead = searchedLeads.find((item) => item.id === leadId);
+                if (lead) moveLeadToStage(lead, stage);
+              }}>
               <header className="mb-2 flex min-h-11 items-start justify-between gap-2 px-1">
                 <div className="flex items-center gap-2 text-sm font-semibold text-white"><StageIcon size={15} className="shrink-0 text-brand-300" /><h2>{stage}</h2></div>
                 <Badge variant="muted">{stageLeads.length}</Badge>
@@ -426,9 +458,16 @@ export default function LeadsPage() {
                   const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId;
                   const product = PRODUCT_CODES.find((item) => item.code === lead.productCode);
                   const CompanyIcon = lead.status === 'COMPLETED' ? CheckCircle2 : CircleDot;
-                  return <article key={lead.id} className="rounded-lg border border-ink-700 bg-ink-800/80 p-3 shadow-sm transition hover:border-brand-400/50">
+                  const isLinked = Boolean(lead.dealId && linkedDealIds.has(lead.dealId));
+                  return <article key={lead.id} draggable={!isLinked}
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData('text/lead-id', lead.id);
+                      event.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onClick={() => setInspectedLeadId(lead.id)}
+                    className={`rounded-lg border border-ink-700 bg-ink-800/80 p-3 shadow-sm transition hover:border-brand-400/50 ${isLinked ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'}`}>
                     <div className="mb-2 flex items-start justify-between gap-2">
-                      <button type="button" onClick={() => openEditLead(lead)} className="min-w-0 text-left">
+                      <button type="button" onClick={(event) => { event.stopPropagation(); setInspectedLeadId(lead.id); }} className="min-w-0 text-left">
                         <h3 className="truncate text-sm font-bold text-white">{lead.title ?? `${lead.client} lead`}</h3>
                       </button>
                       <CompanyIcon size={15} className={lead.status === 'COMPLETED' ? 'shrink-0 text-emerald-400' : lead.temperature === 'HOT' ? 'shrink-0 text-hot' : 'shrink-0 text-brand-300'} aria-label={lead.status === 'COMPLETED' ? 'Completed' : lead.temperature === 'HOT' ? 'Hot lead' : 'Active lead'} />
@@ -447,13 +486,13 @@ export default function LeadsPage() {
                     <div className="mt-1 text-[10px] text-muted">Expected close {formatDate(lead.closeDate ?? lead.renewalDate)}</div>
                     <label className="mt-2 block">
                       <span className="sr-only">Move {lead.title ?? lead.client} to stage</span>
-                      <select className="input !min-h-8 !py-1 text-[11px]" value={boardStageForLead(lead, linkedDealIds)} disabled={Boolean(lead.dealId && linkedDealIds.has(lead.dealId))} onChange={(event) => moveLeadToStage(lead, event.target.value as LeadBoardStage)}>
+                      <select className="input !min-h-8 !py-1 text-[11px]" value={boardStageForLead(lead, linkedDealIds)} disabled={isLinked} onClick={(event) => event.stopPropagation()} onChange={(event) => moveLeadToStage(lead, event.target.value as LeadBoardStage)}>
                         {LEAD_FUNNEL_STAGES.map((item) => <option key={item} value={item}>{item}</option>)}
                       </select>
                     </label>
                     {(user.role === 'admin' || user.role === 'sales') && <div className="mt-2 flex justify-between border-t border-ink-700/80 pt-2">
-                      <button type="button" className="btn-ghost !py-1 text-[11px]" onClick={() => openEditLead(lead)}><Pencil size={12} /> Edit</button>
-                      <button type="button" className="btn-ghost !py-1 text-[11px] text-hot" onClick={() => deleteLead(lead)}>Delete</button>
+                      <button type="button" className="btn-ghost !py-1 text-[11px]" onClick={(event) => { event.stopPropagation(); openEditLead(lead); }}><Pencil size={12} /> Edit</button>
+                      <button type="button" className="btn-ghost !py-1 text-[11px] text-hot" onClick={(event) => { event.stopPropagation(); deleteLead(lead); }}>Delete</button>
                     </div>}
                   </article>;
                 })}
@@ -516,8 +555,8 @@ export default function LeadsPage() {
       <Modal
         open={newLeadOpen}
         onClose={() => { setNewLeadOpen(false); resetLeadForm(); }}
-        title={editingLead ? 'Edit Lead' : 'Add Lead'}
-        subtitle={editingLead ? 'Update this lead in its sales pipeline.' : 'Create a lead in a sales pipeline.'}
+        title={pendingLeadStageChange ? 'Update Lead Stage' : editingLead ? 'Edit Lead' : 'Add Lead'}
+        subtitle={pendingLeadStageChange ? `Move from ${pendingLeadStageChange.from} to ${pendingLeadStageChange.to}.` : editingLead ? 'Update this lead in its sales pipeline.' : 'Create a lead in a sales pipeline.'}
         size="lg"
         footer={<><button type="button" className="btn-ghost" onClick={() => { setNewLeadOpen(false); resetLeadForm(); }}><X size={14} /> Cancel</button><button type="submit" form="new-lead-form" className="btn-primary"><Plus size={14} /> {editingLead ? 'Update Lead' : 'Save Lead'}</button></>}
       >
@@ -590,10 +629,22 @@ export default function LeadsPage() {
           <Field label="Remarks / Notes"><textarea className="input min-h-20" value={leadNotes} onChange={(event) => setLeadNotes(event.target.value)} placeholder="Initial scoping, client context, or missing information" /></Field>
           <SectionHeading title="Pipeline & Progress" />
           <Field label="Funnel stage">
-            <select className="input" value={leadBoardStage} onChange={(event) => setLeadBoardStage(event.target.value as LeadBoardStage)}>
+            <select className="input" value={leadBoardStage} onChange={(event) => {
+              const nextStage = event.target.value as LeadBoardStage;
+              if (editingLead) {
+                const from = boardStageForLead(editingLead, linkedDealIds);
+                setPendingLeadStageChange(nextStage === from ? null : { from, to: nextStage });
+                setStageChangeRemarks('');
+              }
+              setLeadBoardStage(nextStage);
+            }}>
               {LEAD_FUNNEL_STAGES.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
             </select>
           </Field>
+          {pendingLeadStageChange && <div className="sm:col-span-2 rounded-lg border border-brand-400/20 bg-brand-400/5 p-3">
+            <p className="mb-2 text-xs text-muted">Stage change: <span className="text-white">{pendingLeadStageChange.from} → {pendingLeadStageChange.to}</span></p>
+            <Field label="Remarks / Notes (optional)"><textarea className="input min-h-20" value={stageChangeRemarks} onChange={(event) => setStageChangeRemarks(event.target.value)} placeholder="Add stage-change notes to the activity timeline." maxLength={2000} /></Field>
+          </div>}
           <Field label="Deal pipeline">
             <select className="input" value={selectedPipelineId} onChange={(event) => setSelectedPipelineId(event.target.value)}>
               <option value="">Select deal pipeline</option>

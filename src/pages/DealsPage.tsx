@@ -190,7 +190,7 @@ export default function DealsPage() {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><h1 className="text-xl font-semibold text-white">Insurance placement workspace</h1><p className="mt-1 text-xs text-muted">Single-screen deal lifecycle, pipeline, compliance and binding desk.</p></div>
+        <div><h1 className="text-xl font-semibold text-white">Deals pipeline</h1><p className="mt-1 text-xs text-muted">Kanban stage progression, validation, activity timeline, and placement inspection.</p></div>
         <div className="flex items-center gap-3">
           <div className="hidden text-right sm:block"><div className="text-[10px] uppercase text-muted">Open deals</div><div className="text-sm font-semibold text-white">{deals.length}</div></div>
           <button type="button" className="btn-ghost !py-1.5" onClick={() => setFilterOpen(true)}><Filter size={14} /> Filter</button>

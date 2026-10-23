@@ -248,6 +248,7 @@ export interface Deal {
   nextActivityTitle?: string;
   source?: string;
   notes?: string;
+  intakeCompleted?: boolean;
 }
 
 export interface Pipeline {
