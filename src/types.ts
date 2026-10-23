@@ -118,6 +118,7 @@ export interface InsuredEntityDetails {
 export interface Activity {
   id: string;
   clientId: string;
+  leadId?: string;
   dealId?: string;
   insurer?: string;
   type: 'call' | 'meeting' | 'email' | 'upload' | 'note' | 'quote';
@@ -125,6 +126,12 @@ export interface Activity {
   description: string;
   date: string;
   userId: string;
+  meetingMode?: 'Call' | 'Online' | 'Site Visit' | 'Physical Meeting';
+  venue?: string;
+  personsMet?: string;
+  outcome?: string;
+  followUpAction?: string;
+  durationMinutes?: number;
   quoteAmount?: number;
   quoteCurrency?: 'MVR' | 'USD';
   quoteExchangeRate?: number;

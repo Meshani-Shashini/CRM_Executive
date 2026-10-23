@@ -83,6 +83,7 @@ export default function LeadsPage() {
   const [leadValue, setLeadValue] = useState('');
   const [exchangeRate, setExchangeRate] = useState('');
   const [formError, setFormError] = useState('');
+  const [validationAttempted, setValidationAttempted] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [temperatureFilter, setTemperatureFilter] = useState(() => hashParams().get('temperature') ?? '');
   const [stageFilter, setStageFilter] = useState(() => hashParams().get('stage') ?? '');
@@ -97,6 +98,27 @@ export default function LeadsPage() {
   const selectedOrganization = clients.find(
     (client) => client.name.trim().toLowerCase() === organizationQuery.trim().toLowerCase(),
   );
+  const fieldErrors = {
+    personName: validationAttempted && !personName.trim() ? 'Sales person is required.' : '',
+    organization: validationAttempted && !selectedOrganization ? 'Choose an existing organization or create it first.' : '',
+    primaryContactName: validationAttempted && !primaryContactName.trim() ? 'Primary contact name is required.' : '',
+    contactEmail: !validationAttempted ? '' : !contactEmail.trim()
+      ? 'Contact email is required.'
+      : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim()) ? '' : 'Enter a valid contact email address.',
+    contactPhone: !validationAttempted ? '' : !contactPhone.trim()
+      ? 'Contact phone is required.'
+      : /^[+()\d\s-]{7,}$/.test(contactPhone.trim()) ? '' : 'Enter a valid contact phone number.',
+    leadTitle: validationAttempted && !leadTitle.trim() ? 'Title is required.' : '',
+    productCode: validationAttempted && !productCode ? 'Insurance product is required.' : '',
+    selectedPipelineId: validationAttempted && !selectedPipeline ? 'Deal pipeline is required.' : '',
+    ownerId: validationAttempted && !ownerId ? 'Owner is required.' : '',
+    closeDate: validationAttempted && !normalizeDateInput(closeDate) ? 'Expected close date is required.' : '',
+    leadCurrency: validationAttempted && !leadCurrency ? 'Currency is required.' : '',
+    leadValue: !validationAttempted || (leadValue.trim() && Number.isFinite(Number(leadValue)) && Number(leadValue) >= 0)
+      ? '' : 'Enter a non-negative lead value.',
+    exchangeRate: !validationAttempted || leadCurrency !== 'USD' || (Number.isFinite(Number(exchangeRate)) && Number(exchangeRate) > 0)
+      ? '' : 'Enter a positive exchange rate for USD.',
+  };
   const staffOptions = useMemo(() => {
     const staff = users.filter((candidate) => candidate.role === 'admin' || candidate.role === 'sales');
     if ((user.role === 'admin' || user.role === 'sales') && !staff.some((candidate) => candidate.id === user.id)) {
@@ -199,6 +221,7 @@ export default function LeadsPage() {
     setLeadValue('');
     setExchangeRate('');
     setFormError('');
+    setValidationAttempted(false);
     setPendingLeadStageChange(null);
     setStageChangeRemarks('');
     setSelectedPipelineId(boardPipeline?.id ?? '');
@@ -213,6 +236,7 @@ export default function LeadsPage() {
   const openEditLead = (lead: Lead) => {
     if (user.role !== 'admin' && user.role !== 'sales') return;
     setFormError('');
+    setValidationAttempted(false);
     setEditingLead(lead);
     setOrganizationQuery(lead.client);
     setPersonName(lead.person ?? lead.contact);
@@ -288,6 +312,8 @@ export default function LeadsPage() {
   const createLead = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (user.role !== 'admin' && user.role !== 'sales') return;
+    setValidationAttempted(true);
+    setFormError('');
     const data = new FormData(event.currentTarget);
     const title = leadTitle.trim();
     const product = products.find((item) => item.code === productCode);
@@ -331,7 +357,7 @@ export default function LeadsPage() {
       setFormError('Complete client details and valid phone, WhatsApp, and Telegram information before saving this stage change.');
       return;
     }
-    if (!leadCurrency || !Number.isFinite(amount) || amount < 0 ||
+    if (!leadCurrency || !leadValue.trim() || !Number.isFinite(amount) || amount < 0 ||
       (leadCurrency === 'USD' && (!Number.isFinite(rate) || !rate || rate <= 0))) {
       setFormError('Choose a currency, enter a non-negative lead value, and enter a positive exchange rate for USD.');
       return;
@@ -564,7 +590,7 @@ export default function LeadsPage() {
           <SectionHeading title="Basic Information" />
           <Field label="Sales Person">
             <input
-              className="input"
+              className={inputClass(fieldErrors.personName)}
               list="lead-sales-persons"
               required
               maxLength={120}
@@ -577,7 +603,9 @@ export default function LeadsPage() {
               }}
               placeholder="Select or type a sales person"
               autoComplete="off"
+              aria-invalid={Boolean(fieldErrors.personName)}
             />
+            {fieldErrors.personName && <p className="mt-1 text-xs text-red-400">{fieldErrors.personName}</p>}
             <datalist id="lead-sales-persons">
               {personOptions.map((person) => <option key={person} value={person} />)}
             </datalist>
@@ -585,7 +613,7 @@ export default function LeadsPage() {
           </Field>
           <Field label="Organization">
             <input
-              className="input"
+              className={inputClass(fieldErrors.organization)}
               list="lead-organizations"
               required
               value={organizationQuery}
@@ -596,27 +624,44 @@ export default function LeadsPage() {
                 }
               }}
               placeholder="Search or enter an organization"
+              aria-invalid={Boolean(fieldErrors.organization)}
             />
             <datalist id="lead-organizations">
               {clients.map((client) => <option key={client.id} value={client.name} />)}
             </datalist>
+            {fieldErrors.organization && <p className="mt-1 text-xs text-red-400">{fieldErrors.organization}</p>}
             {organizationQuery.trim() && !selectedOrganization && <p className="mt-1 text-xs text-warm">This organization is new. Create it to continue.</p>}
           </Field>
-          <Field label="Primary Contact Name *"><input className="input" value={primaryContactName} onChange={(event) => setPrimaryContactName(event.target.value)} required placeholder="Contact full name" /></Field>
-          <Field label="Contact Email *"><input className="input" type="email" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} required placeholder="name@company.com" /></Field>
-          <Field label="Contact Phone *"><input className="input" type="tel" value={contactPhone} onChange={(event) => setContactPhone(event.target.value)} required placeholder="+960 ..." /></Field>
+          <Field label="Primary Contact Name *">
+            <input className={inputClass(fieldErrors.primaryContactName)} value={primaryContactName} onChange={(event) => setPrimaryContactName(event.target.value)} required placeholder="Contact full name" aria-invalid={Boolean(fieldErrors.primaryContactName)} />
+            {fieldErrors.primaryContactName && <p className="mt-1 text-xs text-red-400">{fieldErrors.primaryContactName}</p>}
+          </Field>
+          <Field label="Contact Email *">
+            <input className={inputClass(fieldErrors.contactEmail)} type="email" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} required placeholder="name@company.com" aria-invalid={Boolean(fieldErrors.contactEmail)} />
+            {fieldErrors.contactEmail && <p className="mt-1 text-xs text-red-400">{fieldErrors.contactEmail}</p>}
+          </Field>
+          <Field label="Contact Phone *">
+            <input className={inputClass(fieldErrors.contactPhone)} type="tel" value={contactPhone} onChange={(event) => setContactPhone(event.target.value)} required placeholder="+960 ..." aria-invalid={Boolean(fieldErrors.contactPhone)} />
+            {fieldErrors.contactPhone && <p className="mt-1 text-xs text-red-400">{fieldErrors.contactPhone}</p>}
+          </Field>
           <Field label="WhatsApp"><input className="input" name="whatsapp" type="tel" defaultValue={editingLead?.whatsapp ?? ''} placeholder="+960 ..." /></Field>
           <Field label="Telegram"><input className="input" name="telegram" defaultValue={editingLead?.telegram ?? ''} placeholder="@username or phone" /></Field>
           <SectionHeading title="Opportunity Details" />
-          <Field label="Title *"><input className="input" name="title" maxLength={200} required value={leadTitle} onChange={(event) => { setTitleManuallyEdited(true); setLeadTitle(event.target.value); }} /></Field>
+          <Field label="Title *">
+            <input className={inputClass(fieldErrors.leadTitle)} name="title" maxLength={200} required value={leadTitle} onChange={(event) => { setTitleManuallyEdited(true); setLeadTitle(event.target.value); }} aria-invalid={Boolean(fieldErrors.leadTitle)} />
+            {fieldErrors.leadTitle && <p className="mt-1 text-xs text-red-400">{fieldErrors.leadTitle}</p>}
+          </Field>
           <Field label="Type of Insurance Product *">
             <ProductSelect
               pipelines={pipelines}
               name="productCode"
               value={productCode}
               required
+              className={inputClass(fieldErrors.productCode)}
+              aria-invalid={Boolean(fieldErrors.productCode)}
               onChange={(product) => setProductCode(product?.code ?? '')}
             />
+            {fieldErrors.productCode && <p className="mt-1 text-xs text-red-400">{fieldErrors.productCode}</p>}
           </Field>
           {products.find((product) => product.code === productCode) && <div className="sm:col-span-2 rounded-lg border border-ink-600 bg-ink-900/40 p-3 text-xs text-muted">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -646,49 +691,54 @@ export default function LeadsPage() {
             <Field label="Remarks / Notes (optional)"><textarea className="input min-h-20" value={stageChangeRemarks} onChange={(event) => setStageChangeRemarks(event.target.value)} placeholder="Add stage-change notes to the activity timeline." maxLength={2000} /></Field>
           </div>}
           <Field label="Deal pipeline">
-            <select className="input" value={selectedPipelineId} onChange={(event) => setSelectedPipelineId(event.target.value)}>
+            <select className={inputClass(fieldErrors.selectedPipelineId)} value={selectedPipelineId} onChange={(event) => setSelectedPipelineId(event.target.value)} aria-invalid={Boolean(fieldErrors.selectedPipelineId)}>
               <option value="">Select deal pipeline</option>
               {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
             </select>
+            {fieldErrors.selectedPipelineId && <p className="mt-1 text-xs text-red-400">{fieldErrors.selectedPipelineId}</p>}
           </Field>
           <SectionHeading title="Valuation & Financials" />
           <Field label="Lead Value Currency">
-            <select className="input" required value={leadCurrency} onChange={(event) => {
+            <select className={inputClass(fieldErrors.leadCurrency)} required value={leadCurrency} onChange={(event) => {
               const currency = event.target.value as Currency | '';
               setLeadCurrency(currency);
               setLeadValue('');
               setExchangeRate(currency === 'USD' ? String(DEFAULT_USD_TO_MVR_RATE) : '');
-            }}>
+            }} aria-invalid={Boolean(fieldErrors.leadCurrency)}>
               <option value="">Select currency</option><option value="USD">USD</option><option value="MVR">MVR</option>
             </select>
+            {fieldErrors.leadCurrency && <p className="mt-1 text-xs text-red-400">{fieldErrors.leadCurrency}</p>}
           </Field>
           <Field label={`Total Insured Value${leadCurrency ? ` (${leadCurrency})` : ''}`}>
-            <input className="input" name="value" type="number" min="0" step="0.01" required value={leadValue} onChange={(event) => setLeadValue(event.target.value)} />
+            <input className={inputClass(fieldErrors.leadValue)} name="value" type="number" min="0" step="0.01" required value={leadValue} onChange={(event) => setLeadValue(event.target.value)} aria-invalid={Boolean(fieldErrors.leadValue)} />
+            {fieldErrors.leadValue && <p className="mt-1 text-xs text-red-400">{fieldErrors.leadValue}</p>}
           </Field>
           {productCode && Number(leadValue) >= 0 && PRODUCT_CODES.find((product) => product.code === productCode) && <p className="self-end text-sm text-brand-300">Tentative Brokerage: {formatAmount(calculateBrokerageCommission(Number(leadValue), PRODUCT_CODES.find((product) => product.code === productCode)), leadCurrency || 'MVR')} ({PRODUCT_CODES.find((product) => product.code === productCode)?.standardBrokerageRatePct ?? 0}%)</p>}
           {leadCurrency === 'USD' && (
             <>
               <Field label="Exchange rate (MVR per USD)">
-                <input className="input" name="exchangeRate" type="number" min="0.000001" step="any" required value={exchangeRate} onChange={(event) => setExchangeRate(event.target.value)} />
+                <input className={inputClass(fieldErrors.exchangeRate)} name="exchangeRate" type="number" min="0.000001" step="any" required value={exchangeRate} onChange={(event) => setExchangeRate(event.target.value)} aria-invalid={Boolean(fieldErrors.exchangeRate)} />
+                {fieldErrors.exchangeRate && <p className="mt-1 text-xs text-red-400">{fieldErrors.exchangeRate}</p>}
               </Field>
               {Number(leadValue) > 0 && Number(exchangeRate) > 0 && <p className="self-end text-sm text-muted">MVR equivalent: {formatAmount(toMvr(Number(leadValue), 'USD', Number(exchangeRate)), 'MVR')}</p>}
             </>
           )}
           <Field label="Owner">
-            <select className="input" required value={ownerId} onChange={(event) => {
+            <select className={inputClass(fieldErrors.ownerId)} required value={ownerId} onChange={(event) => {
               const nextOwnerId = event.target.value;
               setOwnerId(nextOwnerId);
               const nextOwner = staffOptions.find((candidate) => candidate.id === nextOwnerId);
               if (nextOwner) setPersonName(nextOwner.name);
-            }}>
+            }} aria-invalid={Boolean(fieldErrors.ownerId)}>
               <option value="">Select owner</option>
               {staffOptions.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}{owner.id === user.id ? ' (You)' : ''}</option>)}
             </select>
+            {fieldErrors.ownerId && <p className="mt-1 text-xs text-red-400">{fieldErrors.ownerId}</p>}
           </Field>
           <Field label="Expected Close Date">
-            <DateInput name="closeDate" required value={closeDate} onIsoChange={setCloseDate} aria-label="Expected close date" />
+            <DateInput name="closeDate" required value={closeDate} onIsoChange={setCloseDate} aria-label="Expected close date" className={inputClass(fieldErrors.closeDate)} />
+            {fieldErrors.closeDate && <p className="mt-1 text-xs text-red-400">{fieldErrors.closeDate}</p>}
           </Field>
-          {formError && <p role="alert" className="sm:col-span-2 text-sm text-hot">{formError}</p>}
         </form>
       </Modal>
 
@@ -707,7 +757,6 @@ export default function LeadsPage() {
           <Field label="Primary contact name *"><input className="input" name="contactName" value={organizationContactName} onChange={(event) => setOrganizationContactName(event.target.value)} required /></Field>
           <Field label="Contact email *"><input className="input" type="email" name="contactEmail" value={organizationContactEmail} onChange={(event) => setOrganizationContactEmail(event.target.value)} required /></Field>
           <Field label="Contact phone *"><input className="input" type="tel" name="contactPhone" value={organizationContactPhone} onChange={(event) => setOrganizationContactPhone(event.target.value)} required /></Field>
-          {formError && <p role="alert" className="text-sm text-hot">{formError}</p>}
         </form>
       </Modal>
 
@@ -730,8 +779,20 @@ export default function LeadsPage() {
       >
         <p className="text-sm text-muted">This lead will be permanently removed from the funnel.</p>
       </Modal>
+      {formError && (newLeadOpen || newOrganizationOpen) && (
+        <div role="alert" aria-live="assertive" className="fixed right-4 top-4 z-[100] flex max-w-sm items-start gap-3 rounded-xl border border-red-500/50 bg-ink-900 px-4 py-3 text-sm text-red-300 shadow-2xl">
+          <p className="flex-1">{formError}</p>
+          <button type="button" onClick={() => setFormError('')} className="rounded p-0.5 text-red-300 hover:bg-red-500/10 hover:text-white" aria-label="Dismiss error">
+            <X size={16} />
+          </button>
+        </div>
+      )}
     </div>
   );
+}
+
+function inputClass(error?: string) {
+  return error ? 'input border-red-500 focus:border-red-500 focus:ring-red-500/20' : 'input';
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

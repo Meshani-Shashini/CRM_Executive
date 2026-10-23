@@ -23,6 +23,14 @@ const LOSS_REASONS = [
   'Other',
 ];
 
+interface TimelineEntry {
+  key: string;
+  title: string;
+  description: string;
+  date: string;
+  durationMinutes?: number;
+}
+
 function isLostStage(name: string) {
   return name.toLowerCase().includes('lost') || name.toLowerCase().includes('declined');
 }
@@ -113,9 +121,12 @@ export default function DealWorkspace({
   const stages = pipelineStages.filter((stage) => stage.pipelineId === selectedDeal?.pipelineId)
     .sort((left, right) => left.stageOrder - right.stageOrder);
   const currentStage = stages.find((stage) => stage.name === selectedDeal?.stage);
+  const relatedLeadId = selectedDeal?.leadId ?? selectedLead?.id;
+  const relatedDealId = selectedDeal?.id ?? selectedLead?.dealId;
   const selectedActivities = activities
-    .filter((activity) => (selectedClient && activity.clientId === selectedClient.id)
-      || (selectedDeal && activity.dealId === selectedDeal.id))
+    .filter((activity) => (Boolean(relatedDealId) && activity.dealId === relatedDealId)
+      || (Boolean(relatedLeadId) && activity.leadId === relatedLeadId)
+      || (!activity.dealId && !activity.leadId && Boolean(selectedClient) && activity.clientId === selectedClient?.id))
     .sort((left, right) => Date.parse(right.date) - Date.parse(left.date));
   const quotes = selectedActivities.filter((activity) => activity.type === 'quote' && activity.quoteAmount !== undefined);
   const selectedHistory = selectedDeal
@@ -132,6 +143,54 @@ export default function DealWorkspace({
     ?? activePipelines[0];
   const kanbanStages = pipelineStages.filter((stage) => stage.pipelineId === kanbanPipeline?.id)
     .sort((left, right) => left.stageOrder - right.stageOrder);
+  const timelineEntries: TimelineEntry[] = [
+    ...(selectedDeal?.createdAt ? [{
+      key: `deal-created-${selectedDeal.id}`,
+      title: 'Deal created',
+      description: `${selectedDeal.product} · ${selectedDeal.stage}`,
+      date: selectedDeal.createdAt,
+    }] : []),
+    ...(selectedDeal?.nextActivityAt ? [{
+      key: `deal-follow-up-${selectedDeal.id}`,
+      title: selectedDeal.nextActivityTitle ?? 'Scheduled follow-up',
+      description: 'Scheduled activity',
+      date: selectedDeal.nextActivityAt,
+    }] : []),
+    ...(selectedLead?.lastActivity ? [{
+      key: `lead-last-activity-${selectedLead.id}`,
+      title: 'Lead activity',
+      description: `${selectedLead.lastActivity}${selectedLead.notes ? ` · ${selectedLead.notes}` : ''}`,
+      date: selectedLead.closeDate ?? selectedLead.renewalDate,
+    }] : []),
+    ...selectedHistory.map((entry) => {
+      const target = pipelineStages.find((stage) => stage.id === entry.toStageId)?.name ?? 'Pipeline stage';
+      return {
+        key: entry.id,
+        title: `Stage: ${target}`,
+        description: entry.lossReason ? `Loss reason: ${entry.lossReason}` : entry.details ?? '',
+        date: entry.enteredAt,
+      };
+    }),
+    ...selectedActivities.map((activity) => {
+      const actor = users.find((person) => person.id === activity.userId);
+      const details = [
+        activity.description,
+        activity.personsMet ? `Persons met: ${activity.personsMet}` : '',
+        activity.meetingMode ? `Mode: ${activity.meetingMode}` : '',
+        activity.venue ? `Venue: ${activity.venue}` : '',
+        activity.outcome ? `Outcome: ${activity.outcome}` : '',
+        activity.followUpAction ? `Follow-up: ${activity.followUpAction}` : '',
+        activity.userId ? `By ${actor?.name ?? (activity.userId === user.id ? user.name : activity.userId)}` : '',
+      ].filter(Boolean).join(' · ');
+      return {
+        key: activity.id,
+        title: activity.title,
+        description: details,
+        date: activity.date,
+        ...(activity.durationMinutes !== undefined ? { durationMinutes: activity.durationMinutes } : {}),
+      };
+    }),
+  ].sort((left, right) => Date.parse(right.date) - Date.parse(left.date));
 
   useEffect(() => {
     if (!kanbanPipeline || kanbanPipelineId === kanbanPipeline.id) return;
@@ -180,9 +239,12 @@ export default function DealWorkspace({
     const currency = type === 'quote' ? String(data.get('quoteCurrency')) as 'MVR' | 'USD' : undefined;
     const insurer = String(data.get('insurer') ?? '').trim();
     const activityDate = String(data.get('activityDate') ?? '');
+    const meetingMode = String(data.get('meetingMode') ?? '') as Activity['meetingMode'];
+    const durationMinutes = type === 'meeting' ? Number(data.get('durationMinutes')) : undefined;
     const activity: Activity = {
       id: `activity-${crypto.randomUUID()}`,
       clientId: selectedClient?.id ?? selectedItem.clientId ?? '',
+      ...(selectedLead ? { leadId: selectedLead.id } : selectedDeal?.leadId ? { leadId: selectedDeal.leadId } : {}),
       ...(selectedDeal ? { dealId: selectedDeal.id } : {}),
       ...(insurer ? { insurer } : {}),
       type,
@@ -190,6 +252,14 @@ export default function DealWorkspace({
       description: String(data.get('description') ?? '').trim(),
       date: activityDate ? new Date(activityDate).toISOString() : new Date().toISOString(),
       userId: user.id,
+      ...(type === 'meeting' ? {
+        meetingMode,
+        venue: String(data.get('venue') ?? '').trim(),
+        personsMet: String(data.get('personsMet') ?? '').trim(),
+        outcome: String(data.get('outcome') ?? '').trim(),
+        followUpAction: String(data.get('followUpAction') ?? '').trim(),
+        durationMinutes,
+      } : {}),
       ...(amount !== undefined && currency ? { quoteAmount: amount, quoteCurrency: currency } : {}),
     };
     setActivities([activity, ...activities]);
@@ -598,23 +668,19 @@ export default function DealWorkspace({
           <section className="mt-5">
             <div className="mb-3 flex items-center justify-between gap-2"><h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Clock3 size={15} className="text-brand-300" /> History & activity</h2>
               <div className="flex gap-2">
-                <button type="button" className="btn-ghost !px-2.5 !py-1.5" onClick={() => setActivityModal('meeting')}><CalendarDays size={13} /> Meeting</button>
+                <button type="button" className="btn-ghost !px-2.5 !py-1.5" onClick={() => setActivityModal('meeting')}><CalendarDays size={13} /> Schedule / Log Meeting</button>
                 <button type="button" className="btn-ghost !px-2.5 !py-1.5" onClick={() => setActivityModal('note')}><Plus size={13} /> Note</button>
               </div>
             </div>
             <div className="relative space-y-3 border-l border-ink-600 pl-4">
-              {selectedDeal?.createdAt && <TimelineItem title="Deal created" description={`${selectedDeal.product} · ${selectedDeal.stage}`} date={selectedDeal.createdAt} />}
-              {selectedDeal?.nextActivityAt && <TimelineItem title={selectedDeal.nextActivityTitle ?? 'Scheduled follow-up'} description="Scheduled activity" date={selectedDeal.nextActivityAt} />}
-              {selectedLead?.lastActivity && <TimelineItem title="Lead activity" description={`${selectedLead.lastActivity}${selectedLead.notes ? ` · ${selectedLead.notes}` : ''}`} date={selectedLead.closeDate ?? selectedLead.renewalDate} />}
-              {selectedHistory.map((entry) => {
-                const target = pipelineStages.find((stage) => stage.id === entry.toStageId)?.name ?? 'Pipeline stage';
-                return <TimelineItem key={entry.id} title={`Stage: ${target}`} description={entry.lossReason ? `Loss reason: ${entry.lossReason}` : entry.details ?? ''} date={entry.enteredAt} />;
-              })}
-              {selectedActivities.map((activity) => {
-                const actor = users.find((person) => person.id === activity.userId);
-                return <TimelineItem key={activity.id} title={activity.title} description={`${activity.description}${activity.userId ? ` · By ${actor?.name ?? (activity.userId === user.id ? user.name : activity.userId)}` : ''}`} date={activity.date} />;
-              })}
-              {!selectedActivities.length && !selectedHistory.length && !selectedLead?.lastActivity && !selectedDeal?.createdAt && <p className="text-sm text-muted">No activity has been recorded yet.</p>}
+              {timelineEntries.map((entry) => <TimelineItem
+                key={entry.key}
+                title={entry.title}
+                description={entry.description}
+                date={entry.date}
+                durationMinutes={entry.durationMinutes}
+              />)}
+              {!timelineEntries.length && <p className="text-sm text-muted">No activity has been recorded yet.</p>}
             </div>
           </section>
         </>}
@@ -684,17 +750,26 @@ export default function DealWorkspace({
     </div>
       )}
       <Modal open={Boolean(activityModal)} onClose={() => setActivityModal(null)}
-        title={activityModal === 'meeting' ? 'Log meeting' : activityModal === 'quote' ? 'Add insurer quote' : 'Add note'}
+        title={activityModal === 'meeting' ? 'Schedule / Log Meeting' : activityModal === 'quote' ? 'Add insurer quote' : 'Add note'}
         subtitle={selectedItem?.client}
-        footer={<><button type="button" className="btn-ghost" onClick={() => setActivityModal(null)}>Cancel</button><button type="submit" form="workspace-activity-form" className="btn-primary">Save activity</button></>}>
+        footer={<><button type="button" className="btn-ghost" onClick={() => setActivityModal(null)}>Cancel</button><button type="submit" form="workspace-activity-form" className="btn-primary">{activityModal === 'meeting' ? 'Save Meeting' : 'Save activity'}</button></>}>
         <form id="workspace-activity-form" onSubmit={addActivity} className="space-y-3">
           <Field label="Title"><input className="input" name="title" required maxLength={120} placeholder={activityModal === 'meeting' ? 'Client placement review' : activityModal === 'quote' ? 'Commercial terms' : 'Activity note'} /></Field>
-          {activityModal === 'meeting' && <Field label="Meeting date and time"><input className="input" name="activityDate" type="datetime-local" /></Field>}
+          {activityModal === 'meeting' && <>
+            <Field label="Date & Time *"><input className="input" name="activityDate" type="datetime-local" required defaultValue={localDateTimeInput()} /></Field>
+            <Field label="Mode *"><select className="input" name="meetingMode" required defaultValue=""><option value="" disabled>Select meeting mode</option><option>Call</option><option>Online</option><option>Site Visit</option><option>Physical Meeting</option></select></Field>
+            <Field label="Venue *"><input className="input" name="venue" required maxLength={200} placeholder="Meeting location or online platform" /></Field>
+            <Field label="Persons Met *"><input className="input" name="personsMet" required maxLength={500} placeholder="Stakeholder / client contact names" /></Field>
+            <Field label="Duration (minutes) *"><input className="input" name="durationMinutes" type="number" min="1" step="1" required /></Field>
+            <Field label="Discussion Notes *"><textarea className="input min-h-24" name="description" required placeholder="Record the topics discussed." /></Field>
+            <Field label="Outcome *"><textarea className="input min-h-20" name="outcome" required placeholder="Record decisions or results." /></Field>
+            <Field label="Follow-up action *"><textarea className="input min-h-20" name="followUpAction" required placeholder="Record the next action and owner." /></Field>
+          </>}
           {activityModal === 'quote' && <>
             <Field label="Insurer"><input className="input" name="insurer" required placeholder="Insurer name" /></Field>
             <div className="grid grid-cols-2 gap-3"><Field label="Premium"><input className="input" name="quoteAmount" type="number" min="0" step="0.01" required /></Field><Field label="Currency"><select className="input" name="quoteCurrency" defaultValue="MVR"><option>MVR</option><option>USD</option></select></Field></div>
           </>}
-          <Field label={activityModal === 'meeting' ? 'Meeting notes' : activityModal === 'quote' ? 'Terms / coverage notes' : 'Note'}><textarea className="input min-h-24" name="description" required placeholder="Record the client discussion, terms, or next steps." /></Field>
+          {activityModal !== 'meeting' && <Field label={activityModal === 'quote' ? 'Terms / coverage notes' : 'Note'}><textarea className="input min-h-24" name="description" required placeholder="Record the terms, coverage, or next steps." /></Field>}
         </form>
       </Modal>
 
@@ -734,8 +809,18 @@ function OverviewStat({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg border border-ink-600 bg-ink-900/40 p-3"><div className="text-[10px] uppercase tracking-wide text-muted">{label}</div><div className="mt-1 truncate text-sm font-semibold text-white">{value}</div></div>;
 }
 
-function TimelineItem({ title, description, date }: { title: string; description: string; date?: string }) {
-  return <div className="relative"><span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-brand-400 bg-ink-950" /><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-medium text-white">{title}</span><span className="text-[10px] text-muted">{date ? formatDate(date) : ''}</span></div>{description && <p className="mt-1 text-xs leading-relaxed text-muted">{description}</p>}</div>;
+function localDateTimeInput() {
+  const date = new Date();
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+}
+
+function TimelineItem({ title, description, date, durationMinutes }: { title: string; description: string; date?: string; durationMinutes?: number }) {
+  const timestamp = date ? new Date(date) : null;
+  const formattedTimestamp = timestamp && Number.isFinite(timestamp.getTime())
+    ? `${formatDate(timestamp)} · ${timestamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+    : '';
+  return <div className="relative"><span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-brand-400 bg-ink-950" /><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-medium text-white">{title}</span><span className="text-[10px] text-muted">{formattedTimestamp}</span></div>{description && <p className="mt-1 text-xs leading-relaxed text-muted">{description}</p>}{durationMinutes !== undefined && <p className="mt-1 text-[10px] text-muted">Duration: {durationMinutes} minutes</p>}</div>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
