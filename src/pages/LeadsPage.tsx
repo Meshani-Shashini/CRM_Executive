@@ -64,11 +64,10 @@ export default function LeadsPage() {
   const [stageChangeRemarks, setStageChangeRemarks] = useState('');
   const [newOrganizationOpen, setNewOrganizationOpen] = useState(false);
   const [organizationQuery, setOrganizationQuery] = useState('');
-  const [organizationContactName, setOrganizationContactName] = useState('');
-  const [organizationContactEmail, setOrganizationContactEmail] = useState('');
-  const [organizationContactPhone, setOrganizationContactPhone] = useState('');
   const [personName, setPersonName] = useState('');
   const [primaryContactName, setPrimaryContactName] = useState('');
+  const [contactProfileId, setContactProfileId] = useState('');
+  const [contactRole, setContactRole] = useState('Decision Maker');
   const [contactEmail, setContactEmail] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [leadTitle, setLeadTitle] = useState('');
@@ -201,11 +200,10 @@ export default function LeadsPage() {
   const resetLeadForm = () => {
     setEditingLead(null);
     setOrganizationQuery('');
-    setOrganizationContactName('');
-    setOrganizationContactEmail('');
-    setOrganizationContactPhone('');
     setPersonName('');
     setPrimaryContactName('');
+    setContactProfileId('');
+    setContactRole('Decision Maker');
     setContactEmail('');
     setContactPhone('');
     setLeadTitle('');
@@ -241,6 +239,8 @@ export default function LeadsPage() {
     setOrganizationQuery(lead.client);
     setPersonName(lead.person ?? lead.contact);
     setPrimaryContactName(lead.contact);
+    setContactProfileId(lead.contactProfileId ?? '');
+    setContactRole(lead.contactRole ?? 'Decision Maker');
     setContactEmail(lead.contactEmail ?? '');
     setContactPhone(lead.contactPhone ?? '');
     setLeadTitle(lead.title ?? `${lead.client} lead`);
@@ -262,15 +262,8 @@ export default function LeadsPage() {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const name = String(data.get('name') ?? '').trim();
-    const contactName = String(data.get('contactName') ?? '').trim();
-    const email = String(data.get('contactEmail') ?? '').trim();
-    const phone = String(data.get('contactPhone') ?? '').trim();
-    if (!name || !contactName || !email || !phone) {
-      setFormError('Complete the organization name, primary contact name, contact email, and contact phone before creating the organization.');
-      return;
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^[+()\d\s-]{7,}$/.test(phone)) {
-      setFormError('Enter a valid organization contact email and phone number.');
+    if (!name) {
+      setFormError('Enter an organization name before creating the organization.');
       return;
     }
     const existing = clients.find((client) => client.name.trim().toLowerCase() === name.toLowerCase());
@@ -286,8 +279,8 @@ export default function LeadsPage() {
       name,
       tin: '',
       country: '',
-      phone,
-      email,
+      phone: '',
+      email: '',
       address: '',
       sumInsured: 0,
       premium: 0,
@@ -297,14 +290,10 @@ export default function LeadsPage() {
       class: '',
       ownerId: user.id,
       tags: [INCOMPLETE_COMPANY_TAG],
-      contactPerson: contactName,
       accountStatus: 'draft',
     };
     setClients((current) => [organization, ...current]);
     setOrganizationQuery(name);
-    setPrimaryContactName(contactName);
-    setContactEmail(email);
-    setContactPhone(phone);
     setNewOrganizationOpen(false);
     setFormError('');
   };
@@ -323,6 +312,10 @@ export default function LeadsPage() {
     const phone = contactPhone.trim();
     const whatsapp = String(data.get('whatsapp') ?? '').trim();
     const telegram = String(data.get('telegram') ?? '').trim();
+    const matchingProfile = selectedOrganization?.contacts?.find((profile) =>
+      profile.email.trim().toLowerCase() === email.toLowerCase(),
+    );
+    const profileId = contactProfileId || matchingProfile?.id || `contact-${crypto.randomUUID()}`;
     const person = users.find((candidate) =>
       candidate.role === 'sales' && candidate.name.trim().toLowerCase() === selectedPersonName.toLowerCase(),
     );
@@ -382,6 +375,8 @@ export default function LeadsPage() {
       closeDate: expectedCloseDate,
       visibility: 'individual',
       contact: primaryContact,
+      contactProfileId: profileId,
+      contactRole,
       contactEmail: email,
       contactPhone: phone,
       whatsapp,
@@ -412,6 +407,32 @@ export default function LeadsPage() {
     setLeads((current) => editingLead
       ? current.map((existing) => existing.id === editingLead.id ? lead : existing)
       : [lead, ...current]);
+    setClients((current) => current.map((client) => {
+      if (client.id !== selectedOrganization.id) return client;
+      const currentContacts = client.contacts ?? [];
+      const existingContact = currentContacts.find((contact) => contact.id === contactProfileId)
+        ?? currentContacts.find((contact) => contact.email.trim().toLowerCase() === email.toLowerCase());
+      const profile = {
+        id: existingContact?.id ?? profileId,
+        name: primaryContact,
+        role: contactRole,
+        email,
+        phone,
+        whatsapp,
+        telegram,
+        linkedLeadIds: [...new Set([...(existingContact?.linkedLeadIds ?? []), lead.id])],
+        linkedDealIds: existingContact?.linkedDealIds ?? [],
+      };
+      return {
+        ...client,
+        contacts: existingContact
+          ? currentContacts.map((contact) => contact.id === existingContact.id ? profile : contact)
+          : [...currentContacts, profile],
+        contactPerson: client.contactPerson || primaryContact,
+        phone: client.phone || phone,
+        email: client.email || email,
+      };
+    }));
     if (editingLead && pendingLeadStageChange) {
       const from = pendingLeadStageChange.from;
       const to = pendingLeadStageChange.to;
@@ -499,11 +520,12 @@ export default function LeadsPage() {
                       <CompanyIcon size={15} className={lead.status === 'COMPLETED' ? 'shrink-0 text-emerald-400' : lead.temperature === 'HOT' ? 'shrink-0 text-hot' : 'shrink-0 text-brand-300'} aria-label={lead.status === 'COMPLETED' ? 'Completed' : lead.temperature === 'HOT' ? 'Hot lead' : 'Active lead'} />
                     </div>
                     <div className="truncate text-xs text-muted">{lead.client}</div>
-                    <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-ink-600 text-[9px] font-semibold text-white">{ownerName.slice(0, 1).toUpperCase()}</span><span className="truncate">Rep: {ownerName}</span></div>
+                    <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#1E2024] text-[9px] font-semibold text-[#8E95A2]">{avatarCode(ownerName)}</span><span className="truncate">Rep: {ownerName}</span></div>
                     <div className="mt-2 flex flex-wrap gap-1">
-                      <Badge variant="brand">{product?.category ?? lead.insuranceClass}</Badge>
-                      <Badge variant="muted">{product?.code ?? lead.productCode}</Badge>
-                      <Badge variant={lead.temperature === 'HOT' ? 'hot' : 'muted'}>{lead.temperature ?? 'WARM'}</Badge>
+                      <InsuranceBadge code={product?.code ?? lead.productCode} />
+                      <Badge variant={lead.temperature === 'HOT' ? 'hot' : lead.temperature === 'COLD' ? 'cold' : 'warm'}>{lead.temperature ?? 'WARM'}</Badge>
+                      <Badge variant={lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win'}>{lead.status}</Badge>
+                      <Badge variant={lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win'}>{lead.status}</Badge>
                     </div>
                     <div className="mt-2 flex items-center justify-between border-t border-ink-700/80 pt-2 text-[11px]">
                       <span className="text-muted">MVR value</span>
@@ -547,32 +569,51 @@ export default function LeadsPage() {
           <table className="w-full text-sm">
             <thead className="bg-ink-900/60 text-muted text-[11px] uppercase tracking-wider">
               <tr>
-                <th className="text-left px-4 py-3 font-medium">Title / Organization</th>
-                <th className="text-left px-4 py-3 font-medium">Person</th>
+                <th className="text-left px-4 py-3 font-medium">Lead Name</th>
+                <th className="text-left px-4 py-3 font-medium">Client</th>
+                <th className="text-left px-4 py-3 font-medium">Funnel Stage</th>
+                <th className="text-left px-4 py-3 font-medium">Insurance Type</th>
+                <th className="text-left px-4 py-3 font-medium">Lead Tag</th>
+                <th className="text-left px-4 py-3 font-medium">Activity Status</th>
                 <th className="text-left px-4 py-3 font-medium">Owner</th>
-                <th className="text-left px-4 py-3 font-medium">Product Class</th>
-                <th className="text-right px-4 py-3 font-medium">Lead Value</th>
-                <th className="text-left px-4 py-3 font-medium">Expected Close / Notes</th>
+                <th className="text-left px-4 py-3 font-medium">Expiry / Renewal</th>
+                <th className="text-left px-4 py-3 font-medium">Expected Closing Date</th>
                 {(user.role === 'admin' || user.role === 'sales') && <th className="text-right px-4 py-3 font-medium">Actions</th>}
               </tr>
             </thead>
             <tbody>
-              {searchedLeads.map((lead) => (
-                <tr key={lead.id} className="table-row">
-                  <td className="px-4 py-3"><div className="text-white font-medium">{lead.title ?? `${lead.client} lead`}</div><div className="text-[11px] text-muted">{lead.client}</div><div className="mt-1 text-[11px] text-brand-300">{boardStageForLead(lead, linkedDealIds)}</div></td>
-                  <td className="px-4 py-3 text-muted"><div>{lead.contact}</div><div className="text-[11px]">{lead.contactEmail} · {lead.contactPhone}</div></td>
-                  <td className="px-4 py-3 text-muted">{staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId}</td>
-                  <td className="px-4 py-3 text-muted">{PRODUCT_CODES.find((product) => product.code === lead.productCode)?.name ?? lead.insuranceClass}</td>
-                  <td className="px-4 py-3 text-right text-white"><div>{formatAmount(lead.value ?? lead.premium, lead.currency ?? 'MVR')}</div>{lead.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(lead.valueMvr ?? lead.premium, 'MVR')}</div>}<div className="text-[11px] text-brand-300">Brokerage budget: {formatAmount(lead.brokerageCommission ?? calculateBrokerageCommission(lead.value ?? lead.premium, PRODUCT_CODES.find((product) => product.code === lead.productCode)), lead.currency ?? 'MVR')} ({lead.brokerageRatePct ?? PRODUCT_CODES.find((product) => product.code === lead.productCode)?.standardBrokerageRatePct ?? 0}%)</div></td>
-                  <td className="px-4 py-3 text-muted"><div>{formatDate(lead.closeDate ?? lead.renewalDate)}</div>{lead.notes && <div className="max-w-48 truncate text-[11px]" title={lead.notes}>{lead.notes}</div>}</td>
+              {searchedLeads.map((lead) => {
+                const stage = boardStageForLead(lead, linkedDealIds);
+                const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId;
+                const statusVariant = lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win';
+                return <tr key={lead.id} draggable={!lead.dealId || !linkedDealIds.has(lead.dealId)} className="table-row"
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData('text/lead-id', lead.id);
+                    event.dataTransfer.effectAllowed = 'move';
+                  }}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const draggedLead = searchedLeads.find((item) => item.id === event.dataTransfer.getData('text/lead-id'));
+                    if (draggedLead) moveLeadToStage(draggedLead, stage);
+                  }}>
+                  <td className="px-4 py-3"><button type="button" onClick={() => setInspectedLeadId(lead.id)} className="text-left"><div className="font-medium text-white">{lead.title ?? `${lead.client} lead`}</div></button></td>
+                  <td className="px-4 py-3 text-muted">{lead.client}</td>
+                  <td className="px-4 py-3 text-muted">{stage}</td>
+                  <td className="px-4 py-3"><InsuranceBadge code={lead.productCode} /></td>
+                  <td className="px-4 py-3"><Badge variant={lead.temperature === 'HOT' ? 'hot' : lead.temperature === 'COLD' ? 'cold' : 'warm'}>{lead.temperature}</Badge></td>
+                  <td className="px-4 py-3"><Badge variant={statusVariant}>{lead.status}</Badge></td>
+                  <td className="px-4 py-3"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1E2024] text-[10px] font-semibold text-[#8E95A2]" title={ownerName}>{avatarCode(ownerName)}</span></td>
+                  <td className="px-4 py-3 text-muted">{formatDate(lead.renewalDate)}</td>
+                  <td className="px-4 py-3 text-muted">{formatDate(lead.closeDate ?? lead.renewalDate)}</td>
                   {(user.role === 'admin' || user.role === 'sales') && (
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-2"><button type="button" className="btn-ghost !py-1.5" onClick={() => openEditLead(lead)}><Pencil size={13} /> Edit Lead</button><button type="button" className="btn-ghost !py-1.5 text-hot" onClick={() => deleteLead(lead)}>Delete</button></div>
                     </td>
                   )}
-                </tr>
-              ))}
-              {searchedLeads.length === 0 && <tr><td colSpan={user.role === 'admin' || user.role === 'sales' ? 7 : 6} className="px-4 py-8 text-center text-muted">No leads found.</td></tr>}
+                </tr>;
+              })}
+              {searchedLeads.length === 0 && <tr><td colSpan={user.role === 'admin' || user.role === 'sales' ? 10 : 9} className="px-4 py-8 text-center text-muted">No leads found.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -617,7 +658,7 @@ export default function LeadsPage() {
               list="lead-organizations"
               required
               value={organizationQuery}
-              onChange={(event) => setOrganizationQuery(event.target.value)}
+              onChange={(event) => { setOrganizationQuery(event.target.value); setContactProfileId(''); }}
               onBlur={() => {
                 if (organizationQuery.trim() && !clients.some((client) => client.name.trim().toLowerCase() === organizationQuery.trim().toLowerCase())) {
                   setNewOrganizationOpen(true);
@@ -635,6 +676,29 @@ export default function LeadsPage() {
           <Field label="Primary Contact Name *">
             <input className={inputClass(fieldErrors.primaryContactName)} value={primaryContactName} onChange={(event) => setPrimaryContactName(event.target.value)} required placeholder="Contact full name" aria-invalid={Boolean(fieldErrors.primaryContactName)} />
             {fieldErrors.primaryContactName && <p className="mt-1 text-xs text-red-400">{fieldErrors.primaryContactName}</p>}
+          </Field>
+          <Field label="Company Contact Profile">
+            <select className="input" value={contactProfileId} onChange={(event) => {
+              const profile = selectedOrganization?.contacts?.find((contact) => contact.id === event.target.value);
+              setContactProfileId(profile?.id ?? '');
+              if (profile) {
+                setPrimaryContactName(profile.name);
+                setContactEmail(profile.email);
+                setContactPhone(profile.phone);
+                setContactRole(profile.role);
+              }
+            }}>
+              <option value="">Create or update a profile from this lead</option>
+              {(selectedOrganization?.contacts ?? []).map((profile) => <option key={profile.id} value={profile.id}>{profile.role} · {profile.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Contact Role">
+            <select className="input" value={contactRole} onChange={(event) => setContactRole(event.target.value)}>
+              <option>Decision Maker</option>
+              <option>Finance / Invoice</option>
+              <option>Risk Manager</option>
+              <option>Other</option>
+            </select>
           </Field>
           <Field label="Contact Email *">
             <input className={inputClass(fieldErrors.contactEmail)} type="email" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} required placeholder="name@company.com" aria-invalid={Boolean(fieldErrors.contactEmail)} />
@@ -754,9 +818,7 @@ export default function LeadsPage() {
         <form id="new-organization-form" onSubmit={createOrganization} className="space-y-3">
           <p className="text-xs text-warm">This quick-created company will be tagged “{INCOMPLETE_COMPANY_TAG}” until its remaining profile details are completed.</p>
           <Field label="Organization name *"><input className="input" name="name" value={organizationQuery} onChange={(event) => setOrganizationQuery(event.target.value)} required autoFocus /></Field>
-          <Field label="Primary contact name *"><input className="input" name="contactName" value={organizationContactName} onChange={(event) => setOrganizationContactName(event.target.value)} required /></Field>
-          <Field label="Contact email *"><input className="input" type="email" name="contactEmail" value={organizationContactEmail} onChange={(event) => setOrganizationContactEmail(event.target.value)} required /></Field>
-          <Field label="Contact phone *"><input className="input" type="tel" name="contactPhone" value={organizationContactPhone} onChange={(event) => setOrganizationContactPhone(event.target.value)} required /></Field>
+          <p className="text-xs text-muted">Contact details are captured and linked when the lead is saved.</p>
         </form>
       </Modal>
 
@@ -801,4 +863,21 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function SectionHeading({ title }: { title: string }) {
   return <div className="sm:col-span-2 border-b border-ink-700 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-brand-300">{title}</div>;
+}
+
+function InsuranceBadge({ code }: { code: string }) {
+  const normalizedCode = code.slice(0, 2).toUpperCase();
+  const colors = normalizedCode === 'CF' || normalizedCode === 'FY'
+    ? { backgroundColor: '#261414', color: '#D84C4C' }
+    : normalizedCode === 'SH'
+      ? { backgroundColor: '#0E2336', color: '#389FD6' }
+      : normalizedCode === 'TL'
+        ? { backgroundColor: '#10261A', color: '#3AA76D' }
+        : { backgroundColor: '#1A1D21', color: '#8E95A2' };
+  return <span className="pill border border-transparent !px-2 !py-0.5" style={colors}>{normalizedCode}</span>;
+}
+
+function avatarCode(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return (parts.length > 1 ? parts.map((part) => part[0]).slice(0, 2).join('') : (parts[0] ?? '').slice(0, 2)).toUpperCase();
 }

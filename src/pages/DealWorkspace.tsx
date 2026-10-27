@@ -73,7 +73,7 @@ export default function DealWorkspace({
   onClose?: () => void;
 }) {
   const {
-    activities, setActivities, clients, deals: allDeals, setDeals, leads, setLeads,
+    activities, setActivities, clients, setClients, deals: allDeals, setDeals, leads, setLeads,
     products, pipelines, pipelineStages, stageHistory, setStageHistory, invoices, setInvoices, user, users,
   } = useApp();
   const [selectedKey, setSelectedKey] = useState('');
@@ -298,6 +298,8 @@ export default function DealWorkspace({
       client: selectedLead.client,
       clientId: selectedLead.clientId,
       contactName: selectedLead.contact,
+      contactProfileId: selectedLead.contactProfileId,
+      contactRole: selectedLead.contactRole,
       contactEmail: selectedLead.contactEmail,
       contactPhone: selectedLead.contactPhone,
       whatsapp: selectedLead.whatsapp,
@@ -320,6 +322,16 @@ export default function DealWorkspace({
     };
     setDeals((current) => [deal, ...current]);
     setLeads((current) => current.map((lead) => lead.id === selectedLead.id ? { ...lead, dealId: deal.id } : lead));
+    if (selectedClient && selectedLead.contactProfileId) {
+      setClients((current) => current.map((client) => client.id === selectedClient.id
+        ? {
+          ...client,
+          contacts: (client.contacts ?? []).map((contact) => contact.id === selectedLead.contactProfileId
+            ? { ...contact, linkedDealIds: [...new Set([...(contact.linkedDealIds ?? []), deal.id])] }
+            : contact),
+        }
+        : client));
+    }
     setStageHistory((current) => [...current, {
       id: `stage-${crypto.randomUUID()}`,
       tenantId: TENANT_ID,
@@ -373,6 +385,8 @@ export default function DealWorkspace({
         return;
       }
     }
+    const contactProfileId = selectedDeal.contactProfileId
+      ?? (stageContactName.trim() && stageContactEmail.trim() ? `contact-${crypto.randomUUID()}` : undefined);
     setStageHistory((current) => {
       const hasOpenEntry = current.some((entry) => entry.dealId === selectedDeal.id && !entry.exitedAt);
       const next = current.map((entry) => {
@@ -419,6 +433,10 @@ export default function DealWorkspace({
           ...deal,
           stage: target.name,
           contactName: stageContactName.trim(),
+          ...(contactProfileId ? {
+            contactProfileId,
+            contactRole: selectedDeal.contactRole ?? 'Decision Maker',
+          } : {}),
           contactEmail: stageContactEmail.trim(),
           contactPhone: stageContactPhone.trim(),
           whatsapp: stageWhatsapp.trim(),
@@ -462,6 +480,34 @@ export default function DealWorkspace({
         nextActivityTitle: 'Start 90-day renewal retention review',
       }];
     });
+    if (selectedClient && contactProfileId && stageContactName.trim() && stageContactEmail.trim()) {
+      setClients((current) => current.map((client) => {
+        if (client.id !== selectedClient.id) return client;
+        const contacts = client.contacts ?? [];
+        const profile = {
+          id: contactProfileId,
+          name: stageContactName.trim(),
+          role: selectedDeal.contactRole ?? 'Decision Maker',
+          email: stageContactEmail.trim(),
+          phone: stageContactPhone.trim(),
+          whatsapp: stageWhatsapp.trim(),
+          telegram: stageTelegram.trim(),
+          linkedLeadIds: selectedDeal.leadId ? [selectedDeal.leadId] : [],
+          linkedDealIds: [selectedDeal.id],
+        };
+        const existing = contacts.some((contact) => contact.id === contactProfileId);
+        return {
+          ...client,
+          contacts: existing
+            ? contacts.map((contact) => contact.id === contactProfileId ? {
+              ...profile,
+              linkedLeadIds: [...new Set([...(contact.linkedLeadIds ?? []), ...(profile.linkedLeadIds ?? [])])],
+              linkedDealIds: [...new Set([...(contact.linkedDealIds ?? []), selectedDeal.id])],
+            } : contact)
+            : [...contacts, profile],
+        };
+      }));
+    }
     setActivities([{
       id: `activity-${crypto.randomUUID()}`,
       clientId: selectedClient?.id ?? selectedDeal.clientId ?? '',
@@ -518,6 +564,54 @@ export default function DealWorkspace({
     insurer: quote.insurer ?? quote.description.match(/Insurer:\s*([^;]+)/i)?.[1] ?? 'Insurer',
   }));
 
+  const assignContactProfile = (profileId: string) => {
+    const profile = selectedClient?.contacts?.find((contact) => contact.id === profileId);
+    if (!profile) return;
+    if (selectedDeal) {
+      setDeals((current) => current.map((deal) => deal.id === selectedDeal.id
+        ? {
+          ...deal,
+          contactProfileId: profile.id,
+          contactRole: profile.role,
+          contactName: profile.name,
+          contactEmail: profile.email,
+          contactPhone: profile.phone,
+          whatsapp: profile.whatsapp,
+          telegram: profile.telegram,
+        }
+        : deal));
+      setClients((current) => current.map((client) => client.id === selectedClient?.id
+        ? {
+          ...client,
+          contacts: (client.contacts ?? []).map((contact) => contact.id === profile.id
+            ? { ...contact, linkedDealIds: [...new Set([...(contact.linkedDealIds ?? []), selectedDeal.id])] }
+            : contact),
+        }
+        : client));
+    } else if (selectedLead) {
+      setLeads((current) => current.map((lead) => lead.id === selectedLead.id
+        ? {
+          ...lead,
+          contactProfileId: profile.id,
+          contactRole: profile.role,
+          contact: profile.name,
+          contactEmail: profile.email,
+          contactPhone: profile.phone,
+          whatsapp: profile.whatsapp,
+          telegram: profile.telegram,
+        }
+        : lead));
+      setClients((current) => current.map((client) => client.id === selectedClient?.id
+        ? {
+          ...client,
+          contacts: (client.contacts ?? []).map((contact) => contact.id === profile.id
+            ? { ...contact, linkedLeadIds: [...new Set([...(contact.linkedLeadIds ?? []), selectedLead.id])] }
+            : contact),
+        }
+        : client));
+    }
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -565,8 +659,8 @@ export default function DealWorkspace({
           </div> : <div className="glass rounded-xl p-6 text-center text-sm text-muted">Choose a pipeline with configured stages to view its Kanban board.</div>}
         </div>
       ) : (
-    <div className="grid min-h-[calc(100vh-8rem)] grid-cols-1 gap-3 xl:h-[calc(100vh-8rem)] xl:min-h-0 xl:grid-cols-[280px_minmax(350px,1fr)_360px]">
-      <aside className="glass flex min-h-[320px] flex-col overflow-hidden rounded-2xl xl:min-h-0">
+    <div className={`grid min-h-[calc(100vh-8rem)] grid-cols-1 gap-3 xl:h-[calc(100vh-8rem)] xl:min-h-0 ${selectedLead ? 'xl:grid-cols-[minmax(0,1.8fr)_minmax(280px,0.8fr)]' : 'xl:grid-cols-[280px_minmax(350px,1fr)_360px]'}`}>
+      {!selectedLead && <aside className="glass flex min-h-[320px] flex-col overflow-hidden rounded-2xl xl:min-h-0">
         <div className="border-b border-ink-600 p-4">
           <div className="flex items-center justify-between">
             <div><h2 className="font-semibold text-white">Deals & Leads</h2><p className="mt-1 text-xs text-muted">{records.length} records</p></div>
@@ -603,7 +697,7 @@ export default function DealWorkspace({
           {records.length === 0 && <div className="p-5 text-center text-sm text-muted">No matching deals or leads.</div>}
         </div>
         {onCreateDeal && <button type="button" className="btn-ghost m-3" onClick={onCreateDeal}><Plus size={14} /> New deal</button>}
-      </aside>
+      </aside>}
 
       <main className="glass min-h-[460px] overflow-y-auto rounded-2xl p-5 xl:min-h-0">
         {!selectedItem ? (
@@ -616,20 +710,74 @@ export default function DealWorkspace({
             <div className="flex items-start gap-3">
               <div className="rounded-xl bg-brand-400/10 p-3 text-brand-300"><Building2 size={20} /></div>
               <div>
-                <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-semibold text-white">{selectedItem.client}</h1><Badge variant={selectedDeal ? 'brand' : 'muted'}>{selectedDeal ? 'Deal' : 'Lead'}</Badge><Badge variant={stageBadgeTone(selectedDeal?.stage ?? selectedLead?.funnelStage ?? '')}>{selectedDeal?.stage ?? selectedLead?.funnelStage}</Badge></div>
+                <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-semibold text-white">{selectedItem.client}</h1><Badge variant={selectedDeal ? 'brand' : 'muted'}>{selectedDeal ? 'Deal' : 'Lead'}</Badge><Badge variant={stageBadgeTone(selectedDeal?.stage ?? selectedLead?.funnelStage ?? '')}>{selectedDeal?.stage ?? selectedLead?.funnelStage}</Badge>{selectedLead && <><Badge variant={selectedLead.temperature === 'HOT' ? 'hot' : selectedLead.temperature === 'COLD' ? 'cold' : 'warm'}>{selectedLead.temperature}</Badge><span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1E2024] text-[10px] font-semibold text-[#8E95A2]" title={users.find((person) => person.id === selectedLead.ownerId)?.name}>{avatarCode(users.find((person) => person.id === selectedLead.ownerId)?.name ?? '')}</span></>}</div>
                 <p className="mt-1 text-sm text-muted">{selectedDeal?.product ?? selectedProduct?.name ?? selectedLead?.productCode} · {selectedPipeline?.name ?? 'No pipeline'} · Ref {selectedItem.id}</p>
               </div>
             </div>
             {selectedDeal && onEditDeal && <button type="button" className="btn-ghost !py-1.5" onClick={() => onEditDeal(selectedDeal)}>Edit deal</button>}
           </div>
 
+          {selectedLead ? (
+            <div className="mt-5 grid gap-x-8 gap-y-7 sm:grid-cols-2">
+              <section>
+                <h2 className="mb-4 text-base font-semibold text-white">Client Details</h2>
+                <div className="grid grid-cols-2 gap-x-5 gap-y-4">
+                  <DetailValue label="Name" value={selectedClient?.name ?? selectedLead.client} />
+                  <DetailValue label="Identification" value={selectedClient?.tin || '—'} />
+                  <DetailValue label="Email" value={selectedLead.contactEmail ?? selectedClient?.email ?? '—'} />
+                  <DetailValue label="Phone" value={selectedLead.contactPhone ?? selectedClient?.phone ?? '—'} />
+                  <DetailValue label="Address" value={selectedClient?.address || '—'} />
+                  <DetailValue label="Country" value={selectedClient?.country || selectedLead.country || '—'} />
+                </div>
+              </section>
+              <section>
+                <h2 className="mb-4 text-base font-semibold text-white">Policy Details</h2>
+                <div className="grid grid-cols-2 gap-x-5 gap-y-4">
+                  <DetailValue label="Probability Percentage" value="—" />
+                  <DetailValue label="Insurance Type" value={selectedProduct?.name ?? selectedLead.insuranceClass} />
+                  <DetailValue label="Current Insurer" value={selectedClient?.insurer || '—'} />
+                  <DetailValue label="Current Broker" value="—" />
+                  <DetailValue label="Sum Insured" value={formatAmount(selectedLead.sumInsured, selectedLead.currency ?? 'MVR')} />
+                  <DetailValue label="Premium Value" value={formatAmount(selectedLead.premium, selectedLead.currency ?? 'MVR')} />
+                  <DetailValue label="Currency" value={selectedLead.currency ?? 'MVR'} />
+                  <DetailValue label="Expiry / Renewal Date" value={formatDate(selectedLead.renewalDate)} />
+                </div>
+              </section>
+              <section className="sm:col-span-2">
+                <h2 className="mb-4 text-base font-semibold text-white">Deal Information</h2>
+                <div className="grid grid-cols-2 gap-x-5 gap-y-4">
+                  <DetailValue label="Deal Owner" value={users.find((person) => person.id === selectedLead.ownerId)?.name ?? selectedLead.ownerId} />
+                  <DetailValue label="Contact Role" value={selectedLead.contactRole ?? 'Decision Maker'} />
+                  <DetailValue label="Lead Stage" value={selectedLead.funnelStage} />
+                  <DetailValue label="Expected Closing Date" value={formatDate(selectedLead.closeDate ?? selectedLead.renewalDate)} />
+                  <DetailValue label="Remarks / Notes" value={selectedLead.notes || '—'} />
+                  <Field label="Assign company contact">
+                    <select className="input" value={selectedLead.contactProfileId ?? ''} onChange={(event) => assignContactProfile(event.target.value)}>
+                      <option value="">Current lead contact</option>
+                      {(selectedClient?.contacts ?? []).map((profile) => <option key={profile.id} value={profile.id}>{profile.role} · {profile.name}</option>)}
+                    </select>
+                  </Field>
+                </div>
+              </section>
+              <section className="sm:col-span-2 rounded-xl border border-ink-700 bg-ink-900/30 p-4">
+                <h2 className="mb-3 text-sm font-semibold text-white">Company Contact Profiles</h2>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {(selectedClient?.contacts ?? []).map((profile) => <div key={profile.id} className="rounded-lg border border-ink-700 bg-ink-950/50 p-3 text-xs">
+                    <div className="flex items-center justify-between gap-2"><span className="font-medium text-white">{profile.name}</span><Badge variant="muted">{profile.role}</Badge></div>
+                    <p className="mt-2 text-muted">{profile.email} · {profile.phone}</p>
+                  </div>)}
+                  {!(selectedClient?.contacts?.length) && <p className="text-xs text-muted">Contact profiles added through Lead creation will be available here for deal progression.</p>}
+                </div>
+              </section>
+            </div>
+          ) : <>
           <section className="mt-5">
             <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><FileText size={15} className="text-brand-300" /> Placement overview</h2>
             <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-              <OverviewStat label="Insured value" value={formatAmount(selectedDeal?.value ?? selectedLead?.value ?? selectedLead?.sumInsured ?? 0, selectedDeal?.currency ?? selectedLead?.currency ?? 'MVR')} />
+              <OverviewStat label="Insured value" value={formatAmount(selectedDeal?.value ?? 0, selectedDeal?.currency ?? 'MVR')} />
               <OverviewStat label="Win probability" value={`${selectedDeal?.probability ?? '—'}%`} />
-              <OverviewStat label="Expected close" value={formatDate(selectedDeal?.closeDate ?? selectedLead?.closeDate ?? selectedLead?.renewalDate)} />
-              <OverviewStat label="Brokerage estimate" value={formatAmount(selectedDeal?.brokerageCommission ?? selectedLead?.brokerageCommission ?? 0, selectedDeal?.currency ?? selectedLead?.currency ?? 'MVR')} />
+              <OverviewStat label="Expected close" value={formatDate(selectedDeal?.closeDate ?? '')} />
+              <OverviewStat label="Brokerage estimate" value={formatAmount(selectedDeal?.brokerageCommission ?? 0, selectedDeal?.currency ?? 'MVR')} />
               <OverviewStat label="Owner / representative" value={users.find((person) => person.id === selectedItem.ownerId)?.name ?? selectedItem.ownerId} />
             </div>
             {selectedProduct && <div className="mt-3 rounded-xl border border-ink-600 bg-ink-900/40 p-3">
@@ -644,12 +792,18 @@ export default function DealWorkspace({
           <section className="mt-5 grid gap-4 lg:grid-cols-2">
             <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
               <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><UserRound size={15} className="text-brand-300" /> Contact details</h2>
+              {selectedClient?.contacts?.length ? <Field label="Assign company contact">
+                <select className="input mb-3" value={selectedDeal?.contactProfileId ?? ''} onChange={(event) => assignContactProfile(event.target.value)}>
+                  <option value="">Current contact</option>
+                  {selectedClient.contacts.map((profile) => <option key={profile.id} value={profile.id}>{profile.role} · {profile.name}</option>)}
+                </select>
+              </Field> : null}
               <div className="space-y-2 text-sm">
-                <p className="text-white">{selectedDeal?.contactName ?? selectedLead?.contact ?? selectedClient?.contactPerson ?? 'Contact not set'}</p>
-                <p className="flex items-center gap-2 text-muted"><Phone size={13} /> {selectedDeal?.contactPhone ?? selectedLead?.contactPhone ?? selectedClient?.phone ?? 'Phone missing'}</p>
-                <p className="flex items-center gap-2 text-muted"><MessageSquare size={13} /> WhatsApp: {selectedDeal?.whatsapp ?? selectedLead?.whatsapp ?? 'Missing'}</p>
-                <p className="text-muted">Telegram: {selectedDeal?.telegram ?? selectedLead?.telegram ?? 'Missing'}</p>
-                <p className="text-muted">{selectedDeal?.contactEmail ?? selectedLead?.contactEmail ?? selectedClient?.email ?? 'Email not set'}</p>
+                <p className="text-white">{selectedDeal?.contactName ?? selectedClient?.contactPerson ?? 'Contact not set'}</p>
+                <p className="flex items-center gap-2 text-muted"><Phone size={13} /> {selectedDeal?.contactPhone ?? selectedClient?.phone ?? 'Phone missing'}</p>
+                <p className="flex items-center gap-2 text-muted"><MessageSquare size={13} /> WhatsApp: {selectedDeal?.whatsapp ?? 'Missing'}</p>
+                <p className="text-muted">Telegram: {selectedDeal?.telegram ?? 'Missing'}</p>
+                <p className="text-muted">{selectedDeal?.contactEmail ?? selectedClient?.email ?? 'Email not set'}</p>
               </div>
             </div>
             <form className="rounded-xl border border-ink-600 bg-ink-900/30 p-4" onSubmit={saveContactChannels}>
@@ -683,10 +837,21 @@ export default function DealWorkspace({
               {!timelineEntries.length && <p className="text-sm text-muted">No activity has been recorded yet.</p>}
             </div>
           </section>
+          </>}
         </>}
       </main>
 
-      <aside className="space-y-3">
+      {selectedLead ? <aside className="glass min-h-[320px] overflow-y-auto rounded-2xl p-4 xl:min-h-0">
+        <h2 className="mb-4 text-sm font-semibold text-white">Activity Timeline</h2>
+        <div className="space-y-3">
+          {timelineEntries.map((entry) => <div key={entry.key} className="rounded-lg border border-ink-700 bg-ink-800 p-3">
+            <div className="text-[10px] text-muted">{formatDate(entry.date)}</div>
+            <div className="mt-1 text-xs font-medium text-white">{entry.title}</div>
+            {entry.description && <p className="mt-1 text-[11px] leading-relaxed text-muted">{entry.description}</p>}
+          </div>)}
+          {!timelineEntries.length && <p className="py-8 text-center text-sm text-muted">No activity has been recorded yet.</p>}
+        </div>
+      </aside> : <aside className="space-y-3">
         <section className="glass rounded-2xl p-4">
           <div className="flex items-start justify-between gap-2">
             <div><h2 className="text-sm font-semibold text-white">Placement pipeline</h2><p className="mt-1 text-xs text-muted">{selectedPipeline?.name ?? 'Pipeline not configured'}</p></div>
@@ -746,7 +911,7 @@ export default function DealWorkspace({
           </div>
           {selectedDeal?.linkedInvoiceId && <p className="mt-2 text-xs text-win">Invoice generated for this bound deal.</p>}
         </section>
-      </aside>
+      </aside>}
     </div>
       )}
       <Modal open={Boolean(activityModal)} onClose={() => setActivityModal(null)}
@@ -807,6 +972,15 @@ export default function DealWorkspace({
 
 function OverviewStat({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg border border-ink-600 bg-ink-900/40 p-3"><div className="text-[10px] uppercase tracking-wide text-muted">{label}</div><div className="mt-1 truncate text-sm font-semibold text-white">{value}</div></div>;
+}
+
+function DetailValue({ label, value }: { label: string; value: string }) {
+  return <div className="min-w-0"><div className="text-xs text-muted">{label}</div><div className="mt-1 break-words text-sm text-white">{value}</div></div>;
+}
+
+function avatarCode(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return (parts.length > 1 ? parts.map((part) => part[0]).slice(0, 2).join('') : (parts[0] ?? '').slice(0, 2)).toUpperCase();
 }
 
 function localDateTimeInput() {

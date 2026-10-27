@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import {
   LayoutDashboard, CalendarDays, Users, FileText, Receipt, Wallet,
-  ShieldCheck, Settings, BarChart3, FolderKanban, Target, ScrollText,
-  FileCheck2, FileSliders, Percent, BookUser, Briefcase, Files,
+  ShieldCheck, Settings, BarChart3, FolderKanban, Target,
+  FileSliders, Percent, BookUser, Briefcase, Files,
   CreditCard, Send, RefreshCcw, Info, ChevronRight, LogOut,
 } from 'lucide-react';
 import type { Role } from '../types';
@@ -33,14 +33,12 @@ const GROUPS: NavGroup[] = [
     label: 'Broker Portal', icon: Briefcase,
     items: [
       { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'sales', 'finance'] },
-      { key: 'plans', label: 'My Plans', icon: Target, roles: ['admin', 'sales'] },
+      { key: 'plans', label: 'My Plan', icon: Target, roles: ['admin', 'sales'] },
       { key: 'leads', label: 'Leads', icon: FolderKanban, roles: ['admin', 'sales'] },
       { key: 'deals', label: 'Deals', icon: Wallet, roles: ['admin', 'sales'] },
       { key: 'clients', label: 'Clients', icon: Users, roles: ['admin', 'sales', 'finance', 'client'] },
       { key: 'calendar', label: 'Calendar', icon: CalendarDays, roles: ['admin', 'sales'] },
       { key: 'reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'finance'] },
-      { key: 'funnels', label: 'Funnels', icon: BarChart3, roles: ['admin', 'sales', 'finance'] },
-      { key: 'pipelines', label: 'Pipelines', icon: FileSliders, roles: ['admin', 'sales'] },
       { key: 'documents', label: 'Documents', icon: Files, roles: ['admin', 'sales', 'finance', 'client'] },
     ],
   },
@@ -50,26 +48,20 @@ const GROUPS: NavGroup[] = [
       { key: 'qslips', label: 'Quotation Slips', icon: FileSliders, roles: ['admin', 'sales'] },
       { key: 'quotations', label: 'Quotations', icon: FileText, roles: ['admin', 'sales'] },
       { key: 'internal-slips', label: 'Internal Slips', icon: BookUser, roles: ['admin', 'sales'] },
-      { key: 'invoices', label: 'Invoices', icon: Receipt, roles: ['admin', 'finance', 'client'] },
+      { key: 'invoices', label: 'Invoice', icon: Receipt, roles: ['admin', 'finance', 'client'] },
       { key: 'payments', label: 'Payments', icon: CreditCard, roles: ['admin', 'finance', 'client'] },
       { key: 'pay-requests', label: 'Payment Requests', icon: Send, roles: ['admin', 'finance'] },
       { key: 'renewals', label: 'Renewals', icon: RefreshCcw, roles: ['admin', 'sales'] },
       { key: 'info-requests', label: 'Info Requests', icon: Info, roles: ['admin', 'sales'] },
-      { key: 'rate-cards', label: '% Rate Cards', icon: Percent, roles: ['admin', 'sales'] },
+      { key: 'rate-cards', label: 'Rate Cards', icon: Percent, roles: ['admin', 'sales'] },
     ],
   },
   {
     label: 'Admin Portal', icon: Settings,
     items: [
       { key: 'settings', label: 'Settings', icon: Settings, roles: ['admin'] },
-      { key: 'targets', label: 'Targets', icon: Target, roles: ['admin'] },
-      { key: 'audit-log', label: 'Audit Log', icon: ScrollText, roles: ['admin'] },
-    ],
-  },
-  {
-    label: 'Regulatory', icon: FileCheck2,
-    items: [
-      { key: 'mira', label: 'MIRA Form 1', icon: FileCheck2, roles: ['admin', 'finance'] },
+      { key: 'funnels', label: 'Funnels', icon: BarChart3, roles: ['admin', 'sales', 'finance'] },
+      { key: 'pipelines', label: 'Pipelines', icon: FileSliders, roles: ['admin', 'sales'] },
     ],
   },
 ];
@@ -96,26 +88,20 @@ export default function Sidebar({
     <>
       {open && <div className="fixed inset-0 bg-black/60 z-30 lg:hidden" onClick={onClose} />}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-40 w-[260px] bg-ink-900 border-r border-ink-600 flex flex-col transition-transform duration-200 ${
+        className={`fixed lg:static inset-y-0 left-0 z-40 w-[190px] bg-ink-900 border-r border-ink-600 flex flex-col transition-transform duration-200 ${
           open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
-        {/* Brand */}
-        <div className="px-4 py-4 border-b border-ink-600">
-          <div className="flex items-center gap-2.5">
-            <img
-              src="/logo.jpeg"
-              alt="Premier"
-              className="w-24 h-12 shrink-0 rounded-[18px] bg-white object-contain ring-1 ring-ink-600 shadow-glow"
-            />
-            <div className="min-w-0 text-[11px] leading-[1.05]">
-              <div><span className="font-semibold text-white">I</span><span className="text-muted">nsurance</span></div>
-              <div><span className="font-semibold text-white">B</span><span className="text-muted">rokers</span></div>
-              <div><span className="font-semibold text-white">M</span><span className="text-muted">anagement</span></div>
-              <div><span className="font-semibold text-white">S</span><span className="text-muted">ystem</span></div>
+        <div className="border-b border-ink-700 px-3 py-4">
+          <div className="flex items-center gap-2.5 rounded-lg px-2 py-2">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#1E2024] text-[10px] font-semibold text-[#8E95A2]">
+              {avatarCode(user.name)}
+            </div>
+            <div className="min-w-0 flex-1 leading-tight">
+              <div className="truncate text-xs font-semibold text-white">{user.name}</div>
+              <div className="truncate text-[10px] text-muted">{user.email || company.legalName}</div>
             </div>
           </div>
-          <div className="mt-3 text-[11px] text-muted/80 truncate">{company.legalName}</div>
         </div>
 
         {/* Nav */}
@@ -144,7 +130,7 @@ export default function Sidebar({
                         href={`#/${item.key}`}
                         onClick={onClose}
                         aria-current={isActive ? 'page' : undefined}
-                        className={`nav-item w-full no-underline ${isActive ? 'nav-item-active' : ''}`}
+                        className={`nav-item w-full !px-2 !text-xs no-underline ${isActive ? 'nav-item-active' : ''}`}
                       >
                         <Icon size={16} />
                         <span className="flex-1 text-left">{item.label}</span>
@@ -160,19 +146,7 @@ export default function Sidebar({
 
         {/* Profile */}
         <div className="p-3 border-t border-ink-600">
-          <div className="text-[10px] uppercase tracking-wider text-muted/70 mb-2 px-1">Signed in as</div>
-          <div className="flex items-center gap-2 px-2 py-2 rounded-lg bg-ink-800/60">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-xs font-bold text-white">
-              {user.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
-            </div>
-            <div className="flex-1 leading-tight min-w-0">
-              <div className="text-sm text-white truncate">{user.name}</div>
-              {viewAsRole && <div className="text-[10px] text-warm truncate">Viewing as {roleLabel[viewAsRole]}</div>}
-            </div>
-            <span className="pill bg-brand-400/10 text-brand-400 border border-brand-400/30 !px-1.5 !py-0.5 !text-[9px]">
-              {roleLabel[activeRole]}
-            </span>
-          </div>
+          {viewAsRole && <div className="mb-2 px-2 text-[10px] text-warm">Viewing as {roleLabel[viewAsRole]}</div>}
           {user.role === 'admin' && (
             <div className="mt-2 grid grid-cols-2 gap-1" role="group" aria-label="Preview role">
               {([
@@ -218,4 +192,9 @@ export default function Sidebar({
       </aside>
     </>
   );
+}
+
+function avatarCode(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return (parts.length > 1 ? parts.map((part) => part[0]).slice(0, 2).join('') : (parts[0] ?? '').slice(0, 2)).toUpperCase();
 }

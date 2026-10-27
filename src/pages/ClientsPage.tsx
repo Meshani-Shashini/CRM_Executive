@@ -2,7 +2,6 @@ import { useState, type FormEvent } from 'react';
 import { INSURERS, PRODUCT_CODES } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
-import NewCustomerAccountModal from '../components/clients/NewCustomerAccountModal';
 import { useApp } from '../store/AppContext';
 import { supabase } from '../lib/supabase';
 import {
@@ -28,7 +27,6 @@ export default function ClientsPage() {
   const [pendingDeletion, setPendingDeletion] = useState<Client | null>(null);
   const [isPortalEdit, setIsPortalEdit] = useState(false);
   const [profileError, setProfileError] = useState('');
-  const [clientOpen, setClientOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [quoteOpen, setQuoteOpen] = useState(false);
   const [quoteCurrency, setQuoteCurrency] = useState<Currency | ''>('');
@@ -274,7 +272,7 @@ export default function ClientsPage() {
             />
           </div>
           {(user.role === 'admin' || user.role === 'sales') && (
-            <button className="btn-primary w-full mt-2 !py-2" onClick={() => setClientOpen(true)}><Plus size={14} /> Add Client</button>
+            <a className="btn-primary w-full mt-2 !py-2 no-underline" href="#/leads"><Plus size={14} /> Add through Lead</a>
           )}
         </div>
         <div className="flex-1 overflow-y-auto">
@@ -382,6 +380,15 @@ export default function ClientsPage() {
                 )}
                 <InfoRow icon={Briefcase} label="Account Owner" value={owner?.name ?? '—'} />
               </div>
+              {selected.contacts?.length ? <div className="mt-4 border-t border-ink-700 pt-4">
+                <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Company Contacts</h4>
+                <div className="space-y-2">
+                  {selected.contacts.map((contact) => <div key={contact.id} className="rounded-lg border border-ink-700 bg-ink-900/40 p-3">
+                    <div className="flex items-center justify-between gap-2 text-sm"><span className="font-medium text-white">{contact.name}</span><Badge variant="muted">{contact.role}</Badge></div>
+                    <div className="mt-1 text-xs text-muted">{contact.email} · {contact.phone}</div>
+                  </div>)}
+                </div>
+              </div> : null}
             </div>
 
             <div className="glass rounded-2xl p-5">
@@ -436,15 +443,6 @@ export default function ClientsPage() {
         {user.role === 'client' ? 'No client account is linked to this login.' : 'No clients found.'}
       </div>}
 
-            {clientOpen && (
-              <NewCustomerAccountModal
-                onClose={() => setClientOpen(false)}
-                onCreated={(clientId) => {
-                  setSelectedId(clientId);
-                  setClientOpen(false);
-                }}
-              />
-            )}
             <Modal
               open={Boolean(editingClient)}
               onClose={() => { setEditingClient(null); setProfileError(''); }}

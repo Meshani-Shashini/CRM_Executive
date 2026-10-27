@@ -101,8 +101,8 @@ export default function Topbar({
             aria-label={`Account menu for ${user.name}`}
             className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-ink-700 transition"
           >
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-xs font-bold text-white">
-              {user.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
+            <div className="w-8 h-8 rounded-full bg-[#1E2024] flex items-center justify-center text-xs font-bold text-[#8E95A2]">
+              {avatarCode(user.name)}
             </div>
             <div className="hidden sm:block leading-tight text-left">
               <div className="text-sm text-white">{user.name}</div>
@@ -170,4 +170,9 @@ export default function Topbar({
       </div>
     </header>
   );
+}
+
+function avatarCode(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return (parts.length > 1 ? parts.map((part) => part[0]).slice(0, 2).join('') : (parts[0] ?? '').slice(0, 2)).toUpperCase();
 }

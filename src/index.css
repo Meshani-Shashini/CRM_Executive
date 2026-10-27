@@ -13,7 +13,7 @@ html, body, #root {
 }
 
 body {
-  background: #000000;
+  background: #090A0B;
   color: #FFFFFF;
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -21,13 +21,13 @@ body {
 }
 
 * {
-  border-color: #23232A;
+  border-color: #1B1E22;
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #23232A; border-radius: 8px; border: 2px solid #000; }
-::-webkit-scrollbar-thumb:hover { background: #3A3A45; }
+::-webkit-scrollbar-thumb { background: #2A2E35; border-radius: 8px; border: 2px solid #090A0B; }
+::-webkit-scrollbar-thumb:hover { background: #454B55; }
 
 @layer components {
   .glass {
@@ -40,10 +40,10 @@ body {
     @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide uppercase;
   }
   .nav-item {
-    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted hover:text-white hover:bg-ink-700/60 transition-all duration-150 cursor-pointer;
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted hover:text-white hover:bg-ink-750 transition-all duration-150 cursor-pointer;
   }
   .nav-item-active {
-    @apply bg-ink-700/80 text-white shadow-glow;
+    @apply bg-ink-750 text-white;
   }
   .input {
     @apply w-full bg-ink-900/80 border border-ink-600 rounded-lg px-3 py-2 text-sm text-white placeholder:text-muted/70 focus:outline-none focus:border-brand-400/70 focus:ring-2 focus:ring-brand-400/20 transition;
@@ -52,10 +52,10 @@ body {
     @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .btn-primary {
-    @apply btn bg-brand-500 hover:bg-brand-600 text-white shadow-glow;
+    @apply btn bg-[#1A1D21] hover:bg-[#24282E] text-white border border-[#2A2E35] shadow-none;
   }
   .btn-ghost {
-    @apply btn bg-ink-700/70 hover:bg-ink-600 text-white border border-ink-600;
+    @apply btn bg-[#1A1D21] hover:bg-ink-700 text-white border border-[#2A2E35];
   }
   .btn-danger {
     @apply btn bg-hot/90 hover:bg-hot text-white;
