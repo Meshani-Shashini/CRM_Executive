@@ -398,7 +398,9 @@ export default function LeadsPage() {
       lastActivity: editingLead?.lastActivity ?? 'Just now',
       ...(leadBoardStage === 'Qualified to Deals' ? { leadFunnelStage: 'L3: Qualified Opportunity' as const } : { leadFunnelStage: undefined }),
       ...(editingLead?.dealId ? { dealId: editingLead.dealId } : {}),
-      routedAt: editingLead?.routedAt ?? new Date().toISOString(),
+      routedAt: editingLead && leadBoardStage !== boardStageForLead(editingLead, linkedDealIds)
+        ? new Date().toISOString()
+        : editingLead?.routedAt ?? new Date().toISOString(),
     };
     if (!personOptions.some((name) => name.toLowerCase() === selectedPersonName.toLowerCase())) {
       setCustomerLookups((current) => ({
@@ -441,6 +443,7 @@ export default function LeadsPage() {
       setActivities([{
         id: `activity-${crypto.randomUUID()}`,
         clientId: selectedOrganization.id,
+        leadId: editingLead.id,
         type: 'note',
         title: `Lead stage changed: ${from} → ${to}`,
         description: stageChangeRemarks.trim() || `Lead moved from ${from} to ${to}.`,

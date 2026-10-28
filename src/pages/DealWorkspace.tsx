@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertTriangle, ArrowRight, Building2, CalendarDays, Check, Clock3, FileText,
-  MessageSquare, Phone, Plus, ShieldCheck, UserRound, Wallet, Trash2,
+  Plus, ShieldCheck, Wallet, Trash2,
 } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
@@ -29,7 +29,17 @@ interface TimelineEntry {
   description: string;
   date: string;
   durationMinutes?: number;
+  category: 'stage' | 'activity' | 'appointment' | 'proposal' | 'note' | 'task';
 }
+
+const LEAD_PROGRESS_STAGES = [
+  'Lead Identified',
+  'Contact Made',
+  'Key Person Identified',
+  'Intro Email Sent',
+  'Meetings Ongoing',
+  'Qualified to Deals',
+] as const;
 
 function isLostStage(name: string) {
   return name.toLowerCase().includes('lost') || name.toLowerCase().includes('declined');
@@ -59,6 +69,23 @@ function dateBefore(date: string, days: number) {
   return value.toISOString().slice(0, 10);
 }
 
+function progressStageForLead(lead: Lead) {
+  const stage = lead.funnelStage.toLowerCase();
+  if (stage.includes('qualified') || stage.includes('bound') || stage.includes('won') || stage.includes('l3:')) return LEAD_PROGRESS_STAGES[5];
+  if (stage.includes('meeting') || stage.includes('negotiat') || stage.includes('underwriter')) return LEAD_PROGRESS_STAGES[4];
+  if (stage.includes('intro') || stage.includes('email') || stage.includes('quoted')) return LEAD_PROGRESS_STAGES[3];
+  if (stage.includes('key person') || stage.includes('comparative') || stage.includes('presentation') || stage.includes('l2:')) return LEAD_PROGRESS_STAGES[2];
+  if (stage.includes('contact') || stage.includes('market') || stage.includes('tender') || stage.includes('slip') || stage.includes('kyc') || stage.includes('l1:')) return LEAD_PROGRESS_STAGES[1];
+  return LEAD_PROGRESS_STAGES[0];
+}
+
+function formatStageDuration(milliseconds: number) {
+  const totalHours = Math.floor(milliseconds / 3_600_000);
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return `${days} ${days === 1 ? 'day' : 'days'} / ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+}
+
 export default function DealWorkspace({
   deals,
   onCreateDeal,
@@ -85,7 +112,7 @@ export default function DealWorkspace({
   const [kanbanPipelineId, setKanbanPipelineId] = useState('');
   const [query, setQuery] = useState('');
   const [productFilter, setProductFilter] = useState('');
-  const [activityModal, setActivityModal] = useState<'meeting' | 'note' | 'quote' | null>(null);
+  const [activityModal, setActivityModal] = useState<'meeting' | 'note' | 'quote' | 'task' | null>(null);
   const [moveStage, setMoveStage] = useState<PipelineStage | null>(null);
   const [lossReason, setLossReason] = useState('');
   const [moveError, setMoveError] = useState('');
@@ -102,6 +129,8 @@ export default function DealWorkspace({
   const [contactPhone, setContactPhone] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
   const [telegram, setTelegram] = useState('');
+  const [timelineFilter, setTimelineFilter] = useState<'all' | TimelineEntry['category']>('all');
+  const [clockNow, setClockNow] = useState(Date.now());
 
   const records = useMemo(() => [
     ...deals.map((deal) => ({ kind: 'deal' as const, item: deal, key: `deal:${deal.id}` })),
@@ -118,6 +147,12 @@ export default function DealWorkspace({
   const selectedDeal = selected?.kind === 'deal' ? selected.item as Deal : undefined;
   const selectedLead = selected?.kind === 'lead' ? selected.item as Lead : undefined;
   const selectedItem = selectedDeal ?? selectedLead;
+  const progressDeal = selectedDeal ?? (selectedLead
+    ? allDeals.find((deal) => deal.id === selectedLead.dealId || deal.leadId === selectedLead.id)
+    : undefined);
+  const linkedLead = selectedLead ?? (selectedDeal
+    ? leads.find((lead) => lead.id === selectedDeal.leadId || lead.dealId === selectedDeal.id)
+    : undefined);
   const activeRole = viewAsRole ?? user.role;
   const dealHasInvoice = Boolean(selectedDeal && (selectedDeal.linkedInvoiceId
     || invoices.some((invoice) => invoice.linkedDealId === selectedDeal.id)));
@@ -125,25 +160,47 @@ export default function DealWorkspace({
   const selectedProduct = products.find((product) => product.code === selectedItem?.productCode)
     ?? products.find((product) => product.name === (selectedDeal?.product ?? ''));
   const selectedPipeline = pipelines.find((pipeline) => pipeline.id === selectedItem?.pipelineId);
-  const stages = pipelineStages.filter((stage) => stage.pipelineId === selectedDeal?.pipelineId)
+  const stages = pipelineStages.filter((stage) => stage.pipelineId === progressDeal?.pipelineId)
     .sort((left, right) => left.stageOrder - right.stageOrder);
-  const currentStage = stages.find((stage) => stage.name === selectedDeal?.stage);
+  const currentStage = stages.find((stage) => stage.name === progressDeal?.stage);
   const relatedLeadId = selectedDeal?.leadId ?? selectedLead?.id;
-  const relatedDealId = selectedDeal?.id ?? selectedLead?.dealId;
+  const relatedDealId = selectedDeal?.id ?? selectedLead?.dealId ?? progressDeal?.id;
   const selectedActivities = activities
     .filter((activity) => (Boolean(relatedDealId) && activity.dealId === relatedDealId)
       || (Boolean(relatedLeadId) && activity.leadId === relatedLeadId)
       || (!activity.dealId && !activity.leadId && Boolean(selectedClient) && activity.clientId === selectedClient?.id))
     .sort((left, right) => Date.parse(right.date) - Date.parse(left.date));
   const quotes = selectedActivities.filter((activity) => activity.type === 'quote' && activity.quoteAmount !== undefined);
-  const selectedHistory = selectedDeal
-    ? stageHistory.filter((entry) => entry.dealId === selectedDeal.id).sort((left, right) => right.enteredAt.localeCompare(left.enteredAt))
+  const selectedHistory = progressDeal
+    ? stageHistory.filter((entry) => entry.dealId === progressDeal.id).sort((left, right) => right.enteredAt.localeCompare(left.enteredAt))
     : [];
   const stageEntry = selectedHistory.find((entry) => !entry.exitedAt);
-  const enteredAt = stageEntry?.enteredAt ?? selectedDeal?.createdAt;
-  const elapsedDays = enteredAt ? Math.max(0, Math.floor((Date.now() - Date.parse(enteredAt)) / 86400000)) : null;
+  const enteredAt = stageEntry?.enteredAt ?? progressDeal?.createdAt ?? selectedLead?.routedAt;
+  const elapsedMilliseconds = enteredAt && Number.isFinite(Date.parse(enteredAt))
+    ? Math.max(0, clockNow - Date.parse(enteredAt))
+    : null;
+  const elapsedDays = elapsedMilliseconds === null ? null : Math.floor(elapsedMilliseconds / 86400000);
   const isStagnant = Boolean(currentStage && currentStage.stagnationDaysThreshold > 0
     && elapsedDays !== null && elapsedDays >= currentStage.stagnationDaysThreshold);
+  const activeProgressStage = progressDeal
+    ? progressDeal.stage
+    : selectedLead ? progressStageForLead(selectedLead) : '';
+  const progressStages: readonly (PipelineStage | string)[] = progressDeal ? stages : LEAD_PROGRESS_STAGES;
+  const activeProgressIndex = progressStages.findIndex((stage) => (typeof stage === 'string' ? stage : stage.name) === activeProgressStage);
+  const progressionEvents = [
+    ...selectedHistory.map((entry) => entry.enteredAt),
+    ...selectedActivities
+      .filter((activity) => activity.title.startsWith('Lead stage changed:'))
+      .map((activity) => activity.date),
+  ].filter((date) => Number.isFinite(Date.parse(date)));
+  const lastWeekProgressions = progressionEvents.filter((date) => {
+    const age = clockNow - Date.parse(date);
+    return age >= 0 && age <= 7 * 86400000;
+  }).length;
+  const lastMonthProgressions = progressionEvents.filter((date) => {
+    const age = clockNow - Date.parse(date);
+    return age >= 0 && age <= 30 * 86400000;
+  }).length;
   const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
   const kanbanPipeline = activePipelines.find((pipeline) => pipeline.id === kanbanPipelineId)
     ?? activePipelines.find((pipeline) => deals.some((deal) => deal.pipelineId === pipeline.id))
@@ -156,18 +213,14 @@ export default function DealWorkspace({
       title: 'Deal created',
       description: `${selectedDeal.product} · ${selectedDeal.stage}`,
       date: selectedDeal.createdAt,
+      category: 'stage' as const,
     }] : []),
     ...(selectedDeal?.nextActivityAt ? [{
       key: `deal-follow-up-${selectedDeal.id}`,
       title: selectedDeal.nextActivityTitle ?? 'Scheduled follow-up',
-      description: 'Scheduled activity',
+      description: 'Scheduled task',
       date: selectedDeal.nextActivityAt,
-    }] : []),
-    ...(selectedLead?.lastActivity ? [{
-      key: `lead-last-activity-${selectedLead.id}`,
-      title: 'Lead activity',
-      description: `${selectedLead.lastActivity}${selectedLead.notes ? ` · ${selectedLead.notes}` : ''}`,
-      date: selectedLead.closeDate ?? selectedLead.renewalDate,
+      category: 'task' as const,
     }] : []),
     ...selectedHistory.map((entry) => {
       const target = pipelineStages.find((stage) => stage.id === entry.toStageId)?.name ?? 'Pipeline stage';
@@ -176,6 +229,7 @@ export default function DealWorkspace({
         title: `Stage: ${target}`,
         description: entry.lossReason ? `Loss reason: ${entry.lossReason}` : entry.details ?? '',
         date: entry.enteredAt,
+        category: 'stage' as const,
       };
     }),
     ...selectedActivities.map((activity) => {
@@ -194,15 +248,32 @@ export default function DealWorkspace({
         title: activity.title,
         description: details,
         date: activity.date,
+        category: activity.type === 'meeting' ? 'appointment' as const
+          : activity.type === 'quote' ? 'proposal' as const
+            : activity.type === 'task' ? 'task' as const
+              : activity.title.startsWith('Lead stage changed:') ? 'stage' as const
+                : activity.type === 'note' ? 'note' as const : 'activity' as const,
         ...(activity.durationMinutes !== undefined ? { durationMinutes: activity.durationMinutes } : {}),
       };
     }),
-  ].sort((left, right) => Date.parse(right.date) - Date.parse(left.date));
+  ].sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
+  const filteredTimelineEntries = timelineFilter === 'all'
+    ? timelineEntries
+    : timelineEntries.filter((entry) => entry.category === timelineFilter);
 
   useEffect(() => {
     if (!kanbanPipeline || kanbanPipelineId === kanbanPipeline.id) return;
     setKanbanPipelineId(kanbanPipeline.id);
   }, [kanbanPipeline, kanbanPipelineId]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    setTimelineFilter('all');
+  }, [selectedKey]);
 
   useEffect(() => {
     if (!initialSelectedKey) return;
@@ -241,7 +312,9 @@ export default function DealWorkspace({
     event.preventDefault();
     if (!selectedItem) return;
     const data = new FormData(event.currentTarget);
-    const type = activityModal === 'meeting' ? 'meeting' : activityModal === 'quote' ? 'quote' : 'note';
+    const type = activityModal === 'meeting' ? 'meeting'
+      : activityModal === 'quote' ? 'quote'
+        : activityModal === 'task' ? 'task' : 'note';
     const amount = type === 'quote' ? Number(data.get('quoteAmount')) : undefined;
     const currency = type === 'quote' ? String(data.get('quoteCurrency')) as 'MVR' | 'USD' : undefined;
     const insurer = String(data.get('insurer') ?? '').trim();
@@ -666,7 +739,7 @@ export default function DealWorkspace({
           </div> : <div className="glass rounded-xl p-6 text-center text-sm text-muted">Choose a pipeline with configured stages to view its Kanban board.</div>}
         </div>
       ) : (
-    <div className={`grid min-h-[calc(100vh-8rem)] grid-cols-1 gap-3 xl:h-[calc(100vh-8rem)] xl:min-h-0 ${selectedLead ? 'xl:grid-cols-[minmax(0,1.8fr)_minmax(280px,0.8fr)]' : 'xl:grid-cols-[280px_minmax(350px,1fr)_360px]'}`}>
+    <div className={`grid min-h-[calc(100vh-8rem)] grid-cols-1 gap-3 xl:h-[calc(100vh-8rem)] xl:min-h-0 ${selectedLead ? 'xl:grid-cols-1' : 'xl:grid-cols-[280px_minmax(0,1fr)]'}`}>
       {!selectedLead && <aside className="glass flex min-h-[320px] flex-col overflow-hidden rounded-2xl xl:min-h-0">
         <div className="border-b border-ink-600 p-4">
           <div className="flex items-center justify-between">
@@ -719,6 +792,8 @@ export default function DealWorkspace({
               <div>
                 <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-semibold text-white">{selectedItem.client}</h1><Badge variant={selectedDeal ? 'brand' : 'muted'}>{selectedDeal ? 'Deal' : 'Lead'}</Badge><Badge variant={stageBadgeTone(selectedDeal?.stage ?? selectedLead?.funnelStage ?? '')}>{selectedDeal?.stage ?? selectedLead?.funnelStage}</Badge>{selectedLead && <><Badge variant={selectedLead.temperature === 'HOT' ? 'hot' : selectedLead.temperature === 'COLD' ? 'cold' : 'warm'}>{selectedLead.temperature}</Badge><span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1E2024] text-[10px] font-semibold text-[#8E95A2]" title={users.find((person) => person.id === selectedLead.ownerId)?.name}>{avatarCode(users.find((person) => person.id === selectedLead.ownerId)?.name ?? '')}</span></>}</div>
                 <p className="mt-1 text-sm text-muted">{selectedDeal?.product ?? selectedProduct?.name ?? selectedLead?.productCode} · {selectedPipeline?.name ?? 'No pipeline'} · Ref {selectedItem.id}</p>
+                {progressDeal && selectedLead && <button type="button" className="mt-2 text-xs text-brand-300 hover:text-white" onClick={() => setSelectedKey(`deal:${progressDeal.id}`)}>Open linked deal</button>}
+                {selectedDeal && linkedLead && <button type="button" className="mt-2 text-xs text-brand-300 hover:text-white" onClick={() => setSelectedKey(`lead:${linkedLead.id}`)}>Open linked lead · {linkedLead.title ?? linkedLead.client}</button>}
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -728,21 +803,95 @@ export default function DealWorkspace({
             </div>
           </div>
 
+          <section aria-label="Stage progress" className="mt-4 rounded-xl border border-ink-600 bg-ink-900/50 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0 flex-1">
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <h2 className="text-sm font-semibold text-white">{progressDeal ? 'Placement stage progress' : 'Lead stage progress'}</h2>
+                  {progressDeal && <span className="text-xs text-muted">{selectedPipeline?.name ?? 'Pipeline'}</span>}
+                </div>
+                {progressStages.length ? <ol className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1">
+                  {progressStages.map((stage, index) => {
+                    const name = typeof stage === 'string' ? stage : stage.name;
+                    const active = name === activeProgressStage;
+                    const done = activeProgressIndex >= 0 && index < activeProgressIndex;
+                    const pipelineStage = typeof stage === 'string' ? undefined : stage;
+                    return <li key={pipelineStage?.id ?? name} className="flex shrink-0 items-center gap-2">
+                      <button type="button" disabled={!progressDeal || active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
+                        onClick={() => pipelineStage && progressDeal && requestStageChange(pipelineStage, progressDeal)}
+                        className={`rounded-lg border px-2.5 py-2 text-left text-xs transition ${active ? 'border-brand-400 bg-brand-400/15 font-semibold text-white' : done ? 'border-win/40 bg-win/5 text-win' : 'border-ink-700 text-muted'} disabled:cursor-default`}>
+                        <span className="mr-1.5">{done ? '✓' : index + 1}</span>{name}
+                      </button>
+                      {index < progressStages.length - 1 && <span className="text-ink-500">→</span>}
+                    </li>;
+                  })}
+                </ol> : <p className="text-xs text-muted">No stages are configured for this pipeline.</p>}
+              </div>
+              <div className="min-w-56 rounded-lg border border-brand-400/30 bg-brand-400/10 px-3 py-2 text-right">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-300">Current stage duration</p>
+                <p className="mt-1 text-sm font-semibold text-white">{elapsedMilliseconds === null ? 'Duration unavailable' : `Been in this stage for ${formatStageDuration(elapsedMilliseconds)}`}</p>
+              </div>
+            </div>
+          </section>
+
           {selectedLead ? (
-            <div className="mt-5 grid gap-x-8 gap-y-7 sm:grid-cols-2">
-              <section>
-                <h2 className="mb-4 text-base font-semibold text-white">Client Details</h2>
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <section className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
+                <h2 className="mb-4 text-sm font-semibold text-white">Client Details</h2>
                 <div className="grid grid-cols-2 gap-x-5 gap-y-4">
                   <DetailValue label="Name" value={selectedClient?.name ?? selectedLead.client} />
                   <DetailValue label="Identification" value={selectedClient?.tin || '—'} />
-                  <DetailValue label="Email" value={selectedLead.contactEmail ?? selectedClient?.email ?? '—'} />
-                  <DetailValue label="Phone" value={selectedLead.contactPhone ?? selectedClient?.phone ?? '—'} />
                   <DetailValue label="Address" value={selectedClient?.address || '—'} />
                   <DetailValue label="Country" value={selectedClient?.country || selectedLead.country || '—'} />
+                  <DetailValue label="Email" value={selectedClient?.email || '—'} />
+                  <DetailValue label="Phone" value={selectedClient?.phone || '—'} />
+                </div>
+                <div className="mt-5 rounded-xl border border-brand-400/30 bg-brand-400/10 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-300">Primary contact · Key person</p>
+                      <p className="mt-1 text-base font-semibold text-white">{selectedLead.contact || 'Contact not set'}</p>
+                      <p className="mt-1 text-xs text-muted">{selectedLead.contactRole ?? 'Decision Maker'}</p>
+                    </div>
+                    {selectedClient?.contacts?.length ? <Field label="Assign company contact">
+                      <select className="input min-w-48" value={selectedLead.contactProfileId ?? ''} onChange={(event) => assignContactProfile(event.target.value)}>
+                        <option value="">Current lead contact</option>
+                        {selectedClient.contacts.map((profile) => <option key={profile.id} value={profile.id}>{profile.role} · {profile.name}</option>)}
+                      </select>
+                    </Field> : null}
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                    <DetailValue label="Email" value={selectedLead.contactEmail || '—'} />
+                    <DetailValue label="Phone" value={selectedLead.contactPhone || '—'} />
+                    <DetailValue label="WhatsApp" value={selectedLead.whatsapp || '—'} />
+                    <DetailValue label="Telegram" value={selectedLead.telegram || '—'} />
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <h3 className="mb-2 text-xs font-semibold text-white">Key persons</h3>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {(selectedClient?.contacts ?? []).map((profile) => {
+                      const primary = profile.id === selectedLead.contactProfileId;
+                      return <div key={profile.id} className={`rounded-lg border p-3 text-xs ${primary ? 'border-brand-400/40 bg-brand-400/10' : 'border-ink-700 bg-ink-950/50'}`}>
+                        <div className="flex items-center justify-between gap-2"><span className="font-medium text-white">{profile.name}</span><Badge variant={primary ? 'brand' : 'muted'}>{profile.role}{primary ? ' · Primary' : ''}</Badge></div>
+                        <p className="mt-2 text-muted">{profile.email || 'Email missing'} · {profile.phone || 'Phone missing'}</p>
+                      </div>;
+                    })}
+                    {!(selectedClient?.contacts?.length) && <p className="text-xs text-muted">No additional company key persons are linked.</p>}
+                  </div>
+                </div>
+                <div className="mt-4 border-t border-ink-700 pt-4">
+                  <h3 className="mb-3 text-xs font-semibold text-white">Lead Details</h3>
+                  <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2">
+                    <DetailValue label="Lead Owner" value={users.find((person) => person.id === selectedLead.ownerId)?.name ?? selectedLead.ownerId} />
+                    <DetailValue label="Lead Stage" value={selectedLead.funnelStage} />
+                    <DetailValue label="Expected Closing Date" value={formatDate(selectedLead.closeDate ?? selectedLead.renewalDate)} />
+                    <DetailValue label="Remarks / Notes" value={selectedLead.notes || '—'} />
+                  </div>
                 </div>
               </section>
-              <section>
-                <h2 className="mb-4 text-base font-semibold text-white">Policy Details</h2>
+              <section className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
+                <h2 className="mb-4 text-sm font-semibold text-white">Policy Details</h2>
                 <div className="grid grid-cols-2 gap-x-5 gap-y-4">
                   <DetailValue label="Probability Percentage" value="—" />
                   <DetailValue label="Insurance Type" value={selectedProduct?.name ?? selectedLead.insuranceClass} />
@@ -754,183 +903,196 @@ export default function DealWorkspace({
                   <DetailValue label="Expiry / Renewal Date" value={formatDate(selectedLead.renewalDate)} />
                 </div>
               </section>
-              <section className="sm:col-span-2">
-                <h2 className="mb-4 text-base font-semibold text-white">Deal Information</h2>
-                <div className="grid grid-cols-2 gap-x-5 gap-y-4">
-                  <DetailValue label="Deal Owner" value={users.find((person) => person.id === selectedLead.ownerId)?.name ?? selectedLead.ownerId} />
-                  <DetailValue label="Contact Role" value={selectedLead.contactRole ?? 'Decision Maker'} />
-                  <DetailValue label="Lead Stage" value={selectedLead.funnelStage} />
-                  <DetailValue label="Expected Closing Date" value={formatDate(selectedLead.closeDate ?? selectedLead.renewalDate)} />
-                  <DetailValue label="Remarks / Notes" value={selectedLead.notes || '—'} />
-                  <Field label="Assign company contact">
-                    <select className="input" value={selectedLead.contactProfileId ?? ''} onChange={(event) => assignContactProfile(event.target.value)}>
-                      <option value="">Current lead contact</option>
-                      {(selectedClient?.contacts ?? []).map((profile) => <option key={profile.id} value={profile.id}>{profile.role} · {profile.name}</option>)}
-                    </select>
-                  </Field>
-                </div>
-              </section>
-              <section className="sm:col-span-2 rounded-xl border border-ink-700 bg-ink-900/30 p-4">
-                <h2 className="mb-3 text-sm font-semibold text-white">Company Contact Profiles</h2>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {(selectedClient?.contacts ?? []).map((profile) => <div key={profile.id} className="rounded-lg border border-ink-700 bg-ink-950/50 p-3 text-xs">
-                    <div className="flex items-center justify-between gap-2"><span className="font-medium text-white">{profile.name}</span><Badge variant="muted">{profile.role}</Badge></div>
-                    <p className="mt-2 text-muted">{profile.email} · {profile.phone}</p>
-                  </div>)}
-                  {!(selectedClient?.contacts?.length) && <p className="text-xs text-muted">Contact profiles added through Lead creation will be available here for deal progression.</p>}
-                </div>
-              </section>
             </div>
           ) : <>
-          <section className="mt-5">
-            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><FileText size={15} className="text-brand-300" /> Placement overview</h2>
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-              <OverviewStat label="Insured value" value={formatAmount(selectedDeal?.value ?? 0, selectedDeal?.currency ?? 'MVR')} />
-              <OverviewStat label="Win probability" value={`${selectedDeal?.probability ?? '—'}%`} />
-              <OverviewStat label="Expected close" value={formatDate(selectedDeal?.closeDate ?? '')} />
-              <OverviewStat label="Brokerage estimate" value={formatAmount(selectedDeal?.brokerageCommission ?? 0, selectedDeal?.currency ?? 'MVR')} />
-              <OverviewStat label="Owner / representative" value={users.find((person) => person.id === selectedItem.ownerId)?.name ?? selectedItem.ownerId} />
-            </div>
-            {selectedProduct && <div className="mt-3 rounded-xl border border-ink-600 bg-ink-900/40 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div><div className="text-sm font-medium text-white">{selectedProduct.code} · {selectedProduct.name}</div><div className="mt-1 text-xs text-muted">{selectedProduct.category} · {selectedProduct.classType} · {selectedProduct.salesCycleVelocity ?? '14–30 Days'} cycle</div></div>
-                <Badge variant={selectedProduct.riskLevel === 'Very High' || selectedProduct.riskLevel === 'High' ? 'hot' : 'muted'}>{selectedProduct.riskLevel ?? 'Medium'} risk</Badge>
+          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+            <section className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
+              <h2 className="mb-4 text-sm font-semibold text-white">Client & Contact Details</h2>
+              <div className="grid grid-cols-2 gap-x-5 gap-y-4">
+                <DetailValue label="Client" value={selectedClient?.name ?? selectedDeal?.client ?? '—'} />
+                <DetailValue label="Identification" value={selectedClient?.tin || '—'} />
+                <DetailValue label="Address" value={selectedClient?.address || '—'} />
+                <DetailValue label="Country" value={selectedClient?.country || '—'} />
+                <DetailValue label="Client email" value={selectedClient?.email || '—'} />
+                <DetailValue label="Client phone" value={selectedClient?.phone || '—'} />
               </div>
-              <div className="mt-2 text-xs text-muted"><span className="text-white">Underwriting intake:</span> {selectedProduct.keyUnderwritingIntakeArtifacts ?? 'Completed proposal form, asset/risk schedule and prior claims history'}</div>
-            </div>}
-          </section>
+              <div className="mt-5 rounded-xl border border-brand-400/30 bg-brand-400/10 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-300">Primary contact · Key person</p>
+                    <p className="mt-1 text-base font-semibold text-white">{selectedDeal?.contactName ?? selectedClient?.contactPerson ?? 'Contact not set'}</p>
+                    <p className="mt-1 text-xs text-muted">{selectedDeal?.contactRole ?? 'Decision Maker'}</p>
+                  </div>
+                  {selectedClient?.contacts?.length ? <Field label="Assign company contact">
+                    <select className="input min-w-48" value={selectedDeal?.contactProfileId ?? ''} onChange={(event) => assignContactProfile(event.target.value)}>
+                      <option value="">Current contact</option>
+                      {selectedClient.contacts.map((profile) => <option key={profile.id} value={profile.id}>{profile.role} · {profile.name}</option>)}
+                    </select>
+                  </Field> : null}
+                </div>
+                <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                  <DetailValue label="Email" value={selectedDeal?.contactEmail ?? selectedClient?.email ?? '—'} />
+                  <DetailValue label="Phone" value={selectedDeal?.contactPhone ?? selectedClient?.phone ?? '—'} />
+                  <DetailValue label="WhatsApp" value={selectedDeal?.whatsapp ?? '—'} />
+                  <DetailValue label="Telegram" value={selectedDeal?.telegram ?? '—'} />
+                </div>
+              </div>
+              {selectedClient?.contacts?.length ? <div className="mt-4">
+                <h3 className="mb-2 text-xs font-semibold text-white">Key persons</h3>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {selectedClient.contacts.map((profile) => {
+                    const primary = profile.id === selectedDeal?.contactProfileId;
+                    return <div key={profile.id} className={`rounded-lg border p-3 text-xs ${primary ? 'border-brand-400/40 bg-brand-400/10' : 'border-ink-700 bg-ink-950/50'}`}>
+                      <div className="flex items-center justify-between gap-2"><span className="font-medium text-white">{profile.name}</span><Badge variant={primary ? 'brand' : 'muted'}>{profile.role}{primary ? ' · Primary' : ''}</Badge></div>
+                      <p className="mt-2 text-muted">{profile.email || 'Email missing'} · {profile.phone || 'Phone missing'}</p>
+                    </div>;
+                  })}
+                </div>
+              </div> : null}
+              <form className="mt-4 rounded-xl border border-ink-600 bg-ink-950/40 p-4" onSubmit={saveContactChannels}>
+                <h3 className="mb-3 text-xs font-semibold text-white">Update communication channels</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  <input className="input col-span-2" aria-label="Contact name" placeholder="Contact name" value={contactName} onChange={(event) => setContactName(event.target.value)} />
+                  <input className="input" aria-label="Phone" placeholder="Phone *" type="tel" value={contactPhone} onChange={(event) => setContactPhone(event.target.value)} />
+                  <input className="input" aria-label="WhatsApp" placeholder="WhatsApp *" type="tel" value={whatsapp} onChange={(event) => setWhatsapp(event.target.value)} />
+                  <input className="input col-span-2" aria-label="Telegram" placeholder="Telegram / @username *" value={telegram} onChange={(event) => setTelegram(event.target.value)} />
+                </div>
+                {contactError && <p role="alert" className="mt-2 text-xs text-hot">{contactError}</p>}
+                <button type="submit" className="btn-ghost mt-3 !py-1.5"><Check size={13} /> Save contact channels</button>
+              </form>
+            </section>
 
-          <section className="mt-5 grid gap-4 lg:grid-cols-2">
-            <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
-              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><UserRound size={15} className="text-brand-300" /> Contact details</h2>
-              {selectedClient?.contacts?.length ? <Field label="Assign company contact">
-                <select className="input mb-3" value={selectedDeal?.contactProfileId ?? ''} onChange={(event) => assignContactProfile(event.target.value)}>
-                  <option value="">Current contact</option>
-                  {selectedClient.contacts.map((profile) => <option key={profile.id} value={profile.id}>{profile.role} · {profile.name}</option>)}
-                </select>
-              </Field> : null}
-              <div className="space-y-2 text-sm">
-                <p className="text-white">{selectedDeal?.contactName ?? selectedClient?.contactPerson ?? 'Contact not set'}</p>
-                <p className="flex items-center gap-2 text-muted"><Phone size={13} /> {selectedDeal?.contactPhone ?? selectedClient?.phone ?? 'Phone missing'}</p>
-                <p className="flex items-center gap-2 text-muted"><MessageSquare size={13} /> WhatsApp: {selectedDeal?.whatsapp ?? 'Missing'}</p>
-                <p className="text-muted">Telegram: {selectedDeal?.telegram ?? 'Missing'}</p>
-                <p className="text-muted">{selectedDeal?.contactEmail ?? selectedClient?.email ?? 'Email not set'}</p>
+            <section className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
+              <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-white"><FileText size={15} className="text-brand-300" /> Policy Details</h2>
+              <div className="grid grid-cols-2 gap-x-5 gap-y-4">
+                <DetailValue label="Insurance Type" value={selectedProduct?.name ?? selectedDeal?.product ?? '—'} />
+                <DetailValue label="Current Insurer" value={selectedDeal?.insurer || selectedClient?.insurer || '—'} />
+                <DetailValue label="Sum Insured" value={formatAmount(selectedClient?.sumInsured ?? selectedDeal?.value ?? 0, selectedDeal?.currency ?? 'MVR')} />
+                <DetailValue label="Premium" value={formatAmount(selectedClient?.premium ?? selectedDeal?.value ?? 0, selectedDeal?.currency ?? 'MVR')} />
+                <DetailValue label="Probability" value={`${selectedDeal?.probability ?? '—'}%`} />
+                <DetailValue label="Expected Close" value={formatDate(selectedDeal?.closeDate ?? '')} />
+                <DetailValue label="Policy Expiry" value={formatDate(selectedDeal?.policyExpiry ?? selectedClient?.expiry ?? '')} />
+                <DetailValue label="Brokerage Estimate" value={formatAmount(selectedDeal?.brokerageCommission ?? 0, selectedDeal?.currency ?? 'MVR')} />
+                <DetailValue label="Owner / Representative" value={users.find((person) => person.id === selectedItem.ownerId)?.name ?? selectedItem.ownerId} />
               </div>
-            </div>
-            <form className="rounded-xl border border-ink-600 bg-ink-900/30 p-4" onSubmit={saveContactChannels}>
-              <h2 className="mb-3 text-sm font-semibold text-white">Update communication channels</h2>
-              <div className="grid grid-cols-2 gap-2">
-                <input className="input col-span-2" aria-label="Contact name" placeholder="Contact name" value={contactName} onChange={(event) => setContactName(event.target.value)} />
-                <input className="input" aria-label="Phone" placeholder="Phone *" type="tel" value={contactPhone} onChange={(event) => setContactPhone(event.target.value)} />
-                <input className="input" aria-label="WhatsApp" placeholder="WhatsApp *" type="tel" value={whatsapp} onChange={(event) => setWhatsapp(event.target.value)} />
-                <input className="input col-span-2" aria-label="Telegram" placeholder="Telegram / @username *" value={telegram} onChange={(event) => setTelegram(event.target.value)} />
-              </div>
-              {contactError && <p role="alert" className="mt-2 text-xs text-hot">{contactError}</p>}
-              <button type="submit" className="btn-ghost mt-3 !py-1.5"><Check size={13} /> Save contact channels</button>
-            </form>
-          </section>
-
-          <section className="mt-5">
-            <div className="mb-3 flex items-center justify-between gap-2"><h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Clock3 size={15} className="text-brand-300" /> History & activity</h2>
-              <div className="flex gap-2">
-                <button type="button" className="btn-ghost !px-2.5 !py-1.5" onClick={() => setActivityModal('meeting')}><CalendarDays size={13} /> Schedule / Log Meeting</button>
-                <button type="button" className="btn-ghost !px-2.5 !py-1.5" onClick={() => setActivityModal('note')}><Plus size={13} /> Note</button>
-              </div>
-            </div>
-            <div className="relative space-y-3 border-l border-ink-600 pl-4">
-              {timelineEntries.map((entry) => <TimelineItem
-                key={entry.key}
-                title={entry.title}
-                description={entry.description}
-                date={entry.date}
-                durationMinutes={entry.durationMinutes}
-              />)}
-              {!timelineEntries.length && <p className="text-sm text-muted">No activity has been recorded yet.</p>}
-            </div>
-          </section>
+              {selectedProduct && <div className="mt-4 rounded-xl border border-ink-600 bg-ink-950/40 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div><div className="text-sm font-medium text-white">{selectedProduct.code} · {selectedProduct.name}</div><div className="mt-1 text-xs text-muted">{selectedProduct.category} · {selectedProduct.classType} · {selectedProduct.salesCycleVelocity ?? '14–30 Days'} cycle</div></div>
+                  <Badge variant={selectedProduct.riskLevel === 'Very High' || selectedProduct.riskLevel === 'High' ? 'hot' : 'muted'}>{selectedProduct.riskLevel ?? 'Medium'} risk</Badge>
+                </div>
+                <div className="mt-2 text-xs text-muted"><span className="text-white">Underwriting intake:</span> {selectedProduct.keyUnderwritingIntakeArtifacts ?? 'Completed proposal form, asset/risk schedule and prior claims history'}</div>
+              </div>}
+            </section>
+          </div>
           </>}
+          <section className="mt-7 border-t border-ink-600 pt-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Clock3 size={15} className="text-brand-300" /> Activity Timeline</h2>
+                <p className="mt-1 text-xs text-muted">Stage movement and client touchpoints, grouped by activity type.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('meeting')}><CalendarDays size={13} /> Appointment</button>
+                <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('quote')}><FileText size={13} /> Proposal</button>
+                <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('note')}><Plus size={13} /> Note</button>
+                <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('task')}><Check size={13} /> Task</button>
+              </div>
+            </div>
+            <div className="mb-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-ink-700 bg-ink-900/40 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Weekly stage progression</p>
+                <p className="mt-1 text-lg font-semibold text-white">{lastWeekProgressions}<span className="ml-1 text-xs font-normal text-muted">stage changes · last 7 days</span></p>
+              </div>
+              <div className="rounded-lg border border-ink-700 bg-ink-900/40 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Monthly stage progression</p>
+                <p className="mt-1 text-lg font-semibold text-white">{lastMonthProgressions}<span className="ml-1 text-xs font-normal text-muted">stage changes · last 30 days</span></p>
+              </div>
+            </div>
+            <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filter timeline entries">
+              {([
+                ['all', 'All'],
+                ['stage', 'Stage changes'],
+                ['activity', 'Activity'],
+                ['appointment', 'Appointments'],
+                ['proposal', 'Proposals'],
+                ['note', 'Notes'],
+                ['task', 'Tasks'],
+              ] as const).map(([category, label]) => (
+                <button key={category} type="button" aria-pressed={timelineFilter === category}
+                  onClick={() => setTimelineFilter(category)}
+                  className={`rounded-full border px-3 py-1 text-xs transition ${timelineFilter === category ? 'border-brand-400 bg-brand-400/15 text-white' : 'border-ink-700 text-muted hover:text-white'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="-mx-1 overflow-x-auto px-1 pb-3">
+              <div className="flex min-w-full items-stretch gap-3">
+                {filteredTimelineEntries.map((entry) => <TimelineItem
+                  key={entry.key}
+                  title={entry.title}
+                  description={entry.description}
+                  date={entry.date}
+                  durationMinutes={entry.durationMinutes}
+                  category={entry.category}
+                />)}
+                {!filteredTimelineEntries.length && <p className="min-w-full rounded-xl border border-ink-700 bg-ink-900/40 p-5 text-center text-sm text-muted">{timelineEntries.length ? 'No entries match this filter.' : 'No activity has been recorded yet.'}</p>}
+              </div>
+            </div>
+          </section>
+          {selectedLead ? <section className="mt-4 rounded-xl border border-ink-600 bg-ink-900/30 p-4">
+            <h2 className="text-sm font-semibold text-white">Lead progression</h2>
+            {progressDeal ? <p className="mt-3 text-xs text-win">This lead is linked to deal {progressDeal.id} and follows its placement stages.</p> : <>
+              <p className="mt-3 text-xs text-muted">Convert this lead to begin the placement stage workflow.</p>
+              {!hasCompleteCommunicationChannels(selectedLead) && <p className="mt-2 text-xs text-warm">Complete valid phone, WhatsApp, and Telegram details first.</p>}
+              <button type="button" className="btn-primary mt-3 !py-1.5" onClick={convertLead}><ArrowRight size={13} /> Convert to deal</button>
+            </>}
+          </section> : <section className="mt-4 grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+            <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><ShieldCheck size={15} className="text-brand-300" /> Compliance alerts</h2>
+              <div className="mt-3 space-y-2 text-xs">
+                {selectedItem && !hasCompleteCommunicationChannels(selectedItem)
+                  ? <p className="flex gap-2 text-warm"><AlertTriangle size={14} className="shrink-0" /> Phone, WhatsApp and Telegram must be complete before tender or quotation.</p>
+                  : <p className="flex gap-2 text-win"><Check size={14} /> Communication details are complete.</p>}
+                {selectedClient?.accountStatus === 'draft' && <p className="flex gap-2 text-warm"><AlertTriangle size={14} /> Customer profile is still a draft.</p>}
+                {selectedProduct?.isStatutoryMandatory && <p className="flex gap-2 text-warm"><AlertTriangle size={14} /> Statutory mandatory cover: confirm compliance evidence.</p>}
+                {selectedProduct && <p className="text-muted">Required intake: {selectedProduct.keyUnderwritingIntakeArtifacts}</p>}
+                {isStagnant && <p className="flex items-start gap-2 rounded-lg border border-hot/30 bg-hot/10 p-2 text-hot"><AlertTriangle size={14} className="shrink-0" /> This deal exceeded the {currentStage?.stagnationDaysThreshold}-day stage SLA.</p>}
+              </div>
+            </div>
+            <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
+              <div className="mb-3 flex items-center justify-between gap-2"><h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Wallet size={15} className="text-brand-300" /> Quotes comparison</h2>
+                <button type="button" className="btn-ghost !px-2 !py-1" onClick={() => setActivityModal('quote')}><Plus size={12} /> Quote</button>
+              </div>
+              {visibleQuotes.length ? <div className="overflow-x-auto"><table className="w-full min-w-52 text-left text-xs">
+                <thead className="text-[10px] uppercase text-muted"><tr><th className="pb-2 font-medium">Insurer</th><th className="pb-2 text-right font-medium">Premium</th><th className="pb-2 text-right font-medium">Date</th></tr></thead>
+                <tbody>{visibleQuotes.map((quote) => <tr key={quote.id} className="border-t border-ink-700/60"><td className="py-2 text-white">{quote.insurer}</td><td className="py-2 text-right text-brand-300">{formatAmount(quote.quoteAmount ?? 0, quote.quoteCurrency ?? 'MVR')}</td><td className="py-2 text-right text-muted">{formatDate(quote.date)}</td></tr>)}</tbody>
+              </table></div> : <p className="text-xs text-muted">No insurer quotes recorded. Add quotes to compare premium and terms.</p>}
+            </div>
+            <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
+              <h2 className="text-sm font-semibold text-white">Binding actions</h2>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button type="button" className="btn-ghost !px-2 !py-2 text-xs" disabled={!selectedDeal} onClick={() => setActivityModal('quote')}><FileText size={13} /> Add quote</button>
+                <button type="button" className="btn-primary !px-2 !py-2 text-xs" disabled={!selectedDeal || !stages.find((stage) => isBoundStage(stage.name))} onClick={() => {
+                  const finalStage = stages.find((stage) => isBoundStage(stage.name));
+                  if (finalStage) requestStageChange(finalStage);
+                }}><ShieldCheck size={13} /> Bind policy</button>
+              </div>
+              {selectedDeal?.linkedInvoiceId && <p className="mt-2 text-xs text-win">Invoice generated for this bound deal.</p>}
+            </div>
+          </section>}
         </>}
       </main>
 
-      {selectedLead ? <aside className="glass min-h-[320px] overflow-y-auto rounded-2xl p-4 xl:min-h-0">
-        <h2 className="mb-4 text-sm font-semibold text-white">Activity Timeline</h2>
-        <div className="space-y-3">
-          {timelineEntries.map((entry) => <div key={entry.key} className="rounded-lg border border-ink-700 bg-ink-800 p-3">
-            <div className="text-[10px] text-muted">{formatDate(entry.date)}</div>
-            <div className="mt-1 text-xs font-medium text-white">{entry.title}</div>
-            {entry.description && <p className="mt-1 text-[11px] leading-relaxed text-muted">{entry.description}</p>}
-          </div>)}
-          {!timelineEntries.length && <p className="py-8 text-center text-sm text-muted">No activity has been recorded yet.</p>}
-        </div>
-      </aside> : <aside className="space-y-3">
-        <section className="glass rounded-2xl p-4">
-          <div className="flex items-start justify-between gap-2">
-            <div><h2 className="text-sm font-semibold text-white">Placement pipeline</h2><p className="mt-1 text-xs text-muted">{selectedPipeline?.name ?? 'Pipeline not configured'}</p></div>
-            {selectedDeal && <Badge variant={selectedDeal.disposition === 'won' ? 'win' : selectedDeal.disposition === 'lost' ? 'hot' : 'brand'}>{selectedDeal.probability}%</Badge>}
-          </div>
-          {selectedDeal ? stages.length > 0 ? <ol className="mt-4 space-y-1">
-            {stages.map((stage) => {
-              const done = Boolean(currentStage && stage.stageOrder < currentStage.stageOrder);
-              const active = currentStage?.id === stage.id;
-              return <li key={stage.id}>
-                <button type="button" onClick={() => requestStageChange(stage)} disabled={active || selectedDeal.disposition === 'won' || selectedDeal.disposition === 'lost'}
-                  className={`flex w-full items-center gap-3 rounded-lg p-2 text-left transition disabled:cursor-default ${active ? 'border border-brand-400/40 bg-brand-400/10' : 'hover:bg-ink-800'}`}>
-                  <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] ${active ? 'border-brand-400 bg-brand-400 text-black' : done ? 'border-win bg-win/10 text-win' : 'border-ink-600 text-muted'}`}>{done ? <Check size={12} /> : stage.stageOrder}</span>
-                  <span className="min-w-0 flex-1"><span className={`block text-xs ${active ? 'font-semibold text-white' : 'text-muted'}`}>{stage.name}</span><span className="text-[10px] text-muted">{stage.winProbabilityPct}% · SLA {stage.stagnationDaysThreshold ? `${stage.stagnationDaysThreshold}d` : '—'}</span></span>
-                  {active && <ArrowRight size={13} className="text-brand-300" />}
-                </button>
-              </li>;
-            })}
-          </ol> : <p className="mt-3 text-xs text-muted">This deal’s pipeline has no configured stages.</p> : selectedLead ? <div className="mt-3 rounded-lg border border-ink-600 bg-ink-900/40 p-3">
-            <p className="text-xs text-muted">Convert a qualified lead into a deal to begin the placement stage workflow.</p>
-            {!hasCompleteCommunicationChannels(selectedLead) && <p className="mt-2 text-xs text-warm">Complete valid phone, WhatsApp, and Telegram details first.</p>}
-            <button type="button" className="btn-primary mt-3 w-full !py-1.5" onClick={convertLead}><ArrowRight size={13} /> Convert to deal</button>
-          </div> : <p className="mt-3 text-xs text-muted">Select a lead or deal.</p>}
-          {isStagnant && <p className="mt-3 flex items-start gap-2 rounded-lg border border-hot/30 bg-hot/10 p-2 text-xs text-hot"><AlertTriangle size={14} className="shrink-0" /> This deal exceeded the {currentStage?.stagnationDaysThreshold}-day stage SLA.</p>}
-        </section>
-
-        <section className="glass rounded-2xl p-4">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><ShieldCheck size={15} className="text-brand-300" /> Compliance alerts</h2>
-          <div className="mt-3 space-y-2 text-xs">
-            {selectedItem && !hasCompleteCommunicationChannels(selectedItem)
-              ? <p className="flex gap-2 text-warm"><AlertTriangle size={14} className="shrink-0" /> Phone, WhatsApp and Telegram must be complete before tender or quotation.</p>
-              : <p className="flex gap-2 text-win"><Check size={14} /> Communication details are complete.</p>}
-            {selectedClient?.accountStatus === 'draft' && <p className="flex gap-2 text-warm"><AlertTriangle size={14} /> Customer profile is still a draft.</p>}
-            {selectedProduct?.isStatutoryMandatory && <p className="flex gap-2 text-warm"><AlertTriangle size={14} /> Statutory mandatory cover: confirm compliance evidence.</p>}
-            {selectedProduct && <p className="text-muted">Required intake: {selectedProduct.keyUnderwritingIntakeArtifacts}</p>}
-          </div>
-        </section>
-
-        <section className="glass rounded-2xl p-4">
-          <div className="mb-3 flex items-center justify-between gap-2"><h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Wallet size={15} className="text-brand-300" /> Quotes comparison</h2>
-            <button type="button" className="btn-ghost !px-2 !py-1" disabled={!selectedItem} onClick={() => setActivityModal('quote')}><Plus size={12} /> Quote</button>
-          </div>
-          {visibleQuotes.length ? <div className="overflow-x-auto"><table className="w-full min-w-52 text-left text-xs">
-            <thead className="text-[10px] uppercase text-muted"><tr><th className="pb-2 font-medium">Insurer</th><th className="pb-2 text-right font-medium">Premium</th><th className="pb-2 text-right font-medium">Date</th></tr></thead>
-            <tbody>{visibleQuotes.map((quote) => <tr key={quote.id} className="border-t border-ink-700/60"><td className="py-2 text-white">{quote.insurer}</td><td className="py-2 text-right text-brand-300">{formatAmount(quote.quoteAmount ?? 0, quote.quoteCurrency ?? 'MVR')}</td><td className="py-2 text-right text-muted">{formatDate(quote.date)}</td></tr>)}</tbody>
-          </table></div> : <p className="text-xs text-muted">No insurer quotes recorded. Add quotes to compare premium and terms.</p>}
-        </section>
-
-        <section className="glass rounded-2xl p-4">
-          <h2 className="text-sm font-semibold text-white">Binding actions</h2>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <button type="button" className="btn-ghost !px-2 !py-2 text-xs" disabled={!selectedDeal} onClick={() => setActivityModal('quote')}><FileText size={13} /> Add quote</button>
-            <button type="button" className="btn-primary !px-2 !py-2 text-xs" disabled={!selectedDeal || !stages.find((stage) => isBoundStage(stage.name))} onClick={() => {
-              const finalStage = stages.find((stage) => isBoundStage(stage.name));
-              if (finalStage) requestStageChange(finalStage);
-            }}><ShieldCheck size={13} /> Bind policy</button>
-          </div>
-          {selectedDeal?.linkedInvoiceId && <p className="mt-2 text-xs text-win">Invoice generated for this bound deal.</p>}
-        </section>
-      </aside>}
     </div>
       )}
       <Modal open={Boolean(activityModal)} onClose={() => setActivityModal(null)}
-        title={activityModal === 'meeting' ? 'Schedule / Log Meeting' : activityModal === 'quote' ? 'Add insurer quote' : 'Add note'}
+        title={activityModal === 'meeting' ? 'Schedule / Log Meeting'
+          : activityModal === 'quote' ? 'Add insurer quote'
+            : activityModal === 'task' ? 'Schedule task' : 'Add note'}
         subtitle={selectedItem?.client}
-        footer={<><button type="button" className="btn-ghost" onClick={() => setActivityModal(null)}>Cancel</button><button type="submit" form="workspace-activity-form" className="btn-primary">{activityModal === 'meeting' ? 'Save Meeting' : 'Save activity'}</button></>}>
+        footer={<><button type="button" className="btn-ghost" onClick={() => setActivityModal(null)}>Cancel</button><button type="submit" form="workspace-activity-form" className="btn-primary">{activityModal === 'meeting' ? 'Save Meeting' : activityModal === 'task' ? 'Save task' : 'Save activity'}</button></>}>
         <form id="workspace-activity-form" onSubmit={addActivity} className="space-y-3">
-          <Field label="Title"><input className="input" name="title" required maxLength={120} placeholder={activityModal === 'meeting' ? 'Client placement review' : activityModal === 'quote' ? 'Commercial terms' : 'Activity note'} /></Field>
+          <Field label={activityModal === 'task' ? 'Task title' : 'Title'}><input className="input" name="title" required maxLength={120} placeholder={activityModal === 'meeting' ? 'Client placement review' : activityModal === 'quote' ? 'Commercial terms' : activityModal === 'task' ? 'Follow up with client' : 'Activity note'} /></Field>
           {activityModal === 'meeting' && <>
             <Field label="Date & Time *"><input className="input" name="activityDate" type="datetime-local" required defaultValue={localDateTimeInput()} /></Field>
             <Field label="Mode *"><select className="input" name="meetingMode" required defaultValue=""><option value="" disabled>Select meeting mode</option><option>Call</option><option>Online</option><option>Site Visit</option><option>Physical Meeting</option></select></Field>
@@ -941,11 +1103,15 @@ export default function DealWorkspace({
             <Field label="Outcome *"><textarea className="input min-h-20" name="outcome" required placeholder="Record decisions or results." /></Field>
             <Field label="Follow-up action *"><textarea className="input min-h-20" name="followUpAction" required placeholder="Record the next action and owner." /></Field>
           </>}
+          {activityModal === 'task' && <>
+            <Field label="Due date & time *"><input className="input" name="activityDate" type="datetime-local" required defaultValue={localDateTimeInput()} /></Field>
+            <Field label="Task details"><textarea className="input min-h-24" name="description" required placeholder="Describe the action, owner, or expected outcome." /></Field>
+          </>}
           {activityModal === 'quote' && <>
             <Field label="Insurer"><input className="input" name="insurer" required placeholder="Insurer name" /></Field>
             <div className="grid grid-cols-2 gap-3"><Field label="Premium"><input className="input" name="quoteAmount" type="number" min="0" step="0.01" required /></Field><Field label="Currency"><select className="input" name="quoteCurrency" defaultValue="MVR"><option>MVR</option><option>USD</option></select></Field></div>
           </>}
-          {activityModal !== 'meeting' && <Field label={activityModal === 'quote' ? 'Terms / coverage notes' : 'Note'}><textarea className="input min-h-24" name="description" required placeholder="Record the terms, coverage, or next steps." /></Field>}
+          {activityModal !== 'meeting' && activityModal !== 'task' && <Field label={activityModal === 'quote' ? 'Terms / coverage notes' : 'Note'}><textarea className="input min-h-24" name="description" required placeholder="Record the terms, coverage, or next steps." /></Field>}
         </form>
       </Modal>
 
@@ -981,10 +1147,6 @@ export default function DealWorkspace({
   );
 }
 
-function OverviewStat({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-lg border border-ink-600 bg-ink-900/40 p-3"><div className="text-[10px] uppercase tracking-wide text-muted">{label}</div><div className="mt-1 truncate text-sm font-semibold text-white">{value}</div></div>;
-}
-
 function DetailValue({ label, value }: { label: string; value: string }) {
   return <div className="min-w-0"><div className="text-xs text-muted">{label}</div><div className="mt-1 break-words text-sm text-white">{value}</div></div>;
 }
@@ -1000,12 +1162,30 @@ function localDateTimeInput() {
   return date.toISOString().slice(0, 16);
 }
 
-function TimelineItem({ title, description, date, durationMinutes }: { title: string; description: string; date?: string; durationMinutes?: number }) {
+function TimelineItem({ title, description, date, durationMinutes, category }: {
+  title: string;
+  description: string;
+  date?: string;
+  durationMinutes?: number;
+  category: TimelineEntry['category'];
+}) {
   const timestamp = date ? new Date(date) : null;
   const formattedTimestamp = timestamp && Number.isFinite(timestamp.getTime())
     ? `${formatDate(timestamp)} · ${timestamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
     : '';
-  return <div className="relative"><span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-brand-400 bg-ink-950" /><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-medium text-white">{title}</span><span className="text-[10px] text-muted">{formattedTimestamp}</span></div>{description && <p className="mt-1 text-xs leading-relaxed text-muted">{description}</p>}{durationMinutes !== undefined && <p className="mt-1 text-[10px] text-muted">Duration: {durationMinutes} minutes</p>}</div>;
+  const categoryLabel = category === 'appointment' ? 'Appointment'
+    : category === 'proposal' ? 'Proposal'
+      : category === 'stage' ? 'Stage change'
+        : category === 'note' ? 'Note' : category === 'task' ? 'Task' : 'Activity';
+  return <article className="flex w-72 shrink-0 flex-col rounded-xl border border-ink-700 bg-ink-900/50 p-4">
+    <div className="flex items-center justify-between gap-2">
+      <Badge variant={category === 'task' ? 'warm' : 'muted'}>{categoryLabel}</Badge>
+      <time className="text-right text-[10px] text-muted">{formattedTimestamp}</time>
+    </div>
+    <h3 className="mt-3 min-h-10 text-sm font-medium text-white">{title}</h3>
+    {description && <p className="mt-2 flex-1 text-xs leading-relaxed text-muted">{description}</p>}
+    {durationMinutes !== undefined && <p className="mt-3 border-t border-ink-700 pt-2 text-[10px] text-muted">Duration: {durationMinutes} minutes</p>}
+  </article>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

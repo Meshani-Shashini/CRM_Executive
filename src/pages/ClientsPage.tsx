@@ -6,7 +6,7 @@ import { useApp } from '../store/AppContext';
 import { supabase } from '../lib/supabase';
 import {
   Phone, Mail, MapPin, Calendar, FileText, MessageSquare, Upload,
-  Building2, Briefcase, ShieldCheck, Plus, Search, Pencil, Trash2,
+  Building2, Briefcase, ShieldCheck, Plus, Search, Pencil, Trash2, CheckCircle2,
 } from 'lucide-react';
 import type { Activity, Client } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
@@ -14,8 +14,8 @@ import { formatDate } from '../utils/date';
 import DateInput from '../components/ui/DateInput';
 import { hasCompleteClientProfile, INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
 
-const activityIcon = {
-  call: Phone, meeting: Calendar, email: Mail, upload: Upload, note: MessageSquare, quote: FileText,
+const activityIcon: Record<Activity['type'], typeof Phone> = {
+  call: Phone, meeting: Calendar, email: Mail, upload: Upload, note: MessageSquare, quote: FileText, task: CheckCircle2,
 };
 
 export default function ClientsPage() {
@@ -514,7 +514,7 @@ export default function ClientsPage() {
             </Modal>
             <Modal open={activityOpen} onClose={() => setActivityOpen(false)} title="Log Activity" subtitle={selected?.name} footer={<><button type="button" className="btn-ghost" onClick={() => setActivityOpen(false)}>Cancel</button><button type="submit" form="new-activity-form" className="btn-primary">Save Activity</button></>}>
               <form id="new-activity-form" onSubmit={(event) => addActivity(event, (new FormData(event.currentTarget).get('type') as Activity['type']))} className="space-y-3">
-                <Field label="Activity type"><select className="input" name="type"><option value="call">Call</option><option value="meeting">Meeting</option><option value="email">Email</option><option value="note">Note</option><option value="upload">Upload</option></select></Field>
+                <Field label="Activity type"><select className="input" name="type"><option value="call">Call</option><option value="meeting">Meeting</option><option value="email">Email</option><option value="note">Note</option><option value="task">Task</option><option value="upload">Upload</option></select></Field>
                 <Field label="Title"><input className="input" name="title" required /></Field>
                 <Field label="Details"><textarea className="input min-h-24" name="description" required /></Field>
               </form>

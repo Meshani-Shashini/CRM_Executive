@@ -136,7 +136,7 @@ export interface Activity {
   leadId?: string;
   dealId?: string;
   insurer?: string;
-  type: 'call' | 'meeting' | 'email' | 'upload' | 'note' | 'quote';
+  type: 'call' | 'meeting' | 'email' | 'upload' | 'note' | 'quote' | 'task';
   title: string;
   description: string;
   date: string;
