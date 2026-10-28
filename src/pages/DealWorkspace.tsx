@@ -40,8 +40,8 @@ const LEAD_PROGRESS_STAGES = [
   'Key Person Identified',
   'Intro Email Sent',
   'Meetings Ongoing',
-  'Qualified to Deals',
 ] as const;
+type LeadProgressStage = (typeof LEAD_PROGRESS_STAGES)[number];
 
 function isLostStage(name: string) {
   return name.toLowerCase().includes('lost') || name.toLowerCase().includes('declined');
@@ -72,8 +72,12 @@ function dateBefore(date: string, days: number) {
 }
 
 function progressStageForLead(lead: Lead) {
-  const stage = lead.funnelStage.toLowerCase();
-  if (stage.includes('qualified') || stage.includes('bound') || stage.includes('won') || stage.includes('l3:')) return LEAD_PROGRESS_STAGES[5];
+  return progressStageForLeadName(lead.funnelStage);
+}
+
+function progressStageForLeadName(stageName: string): LeadProgressStage {
+  const stage = stageName.toLowerCase();
+  if (stage.includes('qualified') || stage.includes('bound') || stage.includes('won') || stage.includes('l3:')) return LEAD_PROGRESS_STAGES[4];
   if (stage.includes('meeting') || stage.includes('negotiat') || stage.includes('underwriter')) return LEAD_PROGRESS_STAGES[4];
   if (stage.includes('intro') || stage.includes('email') || stage.includes('quoted')) return LEAD_PROGRESS_STAGES[3];
   if (stage.includes('key person') || stage.includes('comparative') || stage.includes('presentation') || stage.includes('l2:')) return LEAD_PROGRESS_STAGES[2];
@@ -81,11 +85,59 @@ function progressStageForLead(lead: Lead) {
   return LEAD_PROGRESS_STAGES[0];
 }
 
+function pipelineStageIndexForLead(lead: Lead) {
+  const stage = lead.funnelStage.toLowerCase();
+  if (stage.includes('qualified') || stage.includes('bound') || stage.includes('won') || stage.includes('l3:')) return 5;
+  return LEAD_PROGRESS_STAGES.indexOf(progressStageForLead(lead));
+}
+
 function formatStageDuration(milliseconds: number) {
   const totalHours = Math.floor(milliseconds / 3_600_000);
   const days = Math.floor(totalHours / 24);
   const hours = totalHours % 24;
   return `${days} ${days === 1 ? 'day' : 'days'} / ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+}
+
+function formatStageDate(value: string | number) {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).replace(' ', '-').toUpperCase()
+    : '—';
+}
+
+function formatDays(milliseconds: number | undefined) {
+  return milliseconds === undefined ? '—' : `${Math.floor(milliseconds / 86400000)}d`;
+}
+
+function stageSlaHealth(durationMilliseconds: number | undefined, targetDays: number) {
+  if (!Number.isFinite(targetDays) || targetDays <= 0 || durationMilliseconds === undefined || !Number.isFinite(durationMilliseconds)) {
+    return 'unconfigured' as const;
+  }
+  const targetMilliseconds = targetDays * 86400000;
+  if (durationMilliseconds > targetMilliseconds) return 'overdue' as const;
+  if (durationMilliseconds > targetMilliseconds * 0.75) return 'warning' as const;
+  return 'healthy' as const;
+}
+
+function getTelemetryTimestampOverride(targetDays: number, now: number) {
+  if (!import.meta.env.DEV || typeof window === 'undefined') return undefined;
+  const parameters = new URLSearchParams(window.location.search);
+  const testState = parameters.get('telemetry')?.toLowerCase();
+  const testDurationRatio = testState === 'healthy' ? 0.5
+    : testState === 'warning' ? 0.85
+      : testState === 'overdue' ? 1.05 : undefined;
+
+  if (testDurationRatio !== undefined && targetDays > 0) {
+    return { timestamp: now - targetDays * 86400000 * testDurationRatio, label: testState?.toUpperCase() ?? 'TEST' };
+  }
+
+  const timestampOverride = parameters.get('stageEnteredAt');
+  if (timestampOverride) {
+    const parsedTimestamp = Date.parse(timestampOverride);
+    if (Number.isFinite(parsedTimestamp)) return { timestamp: parsedTimestamp, label: 'TIMESTAMP' };
+  }
+
+  return undefined;
 }
 
 function formatElapsedInterval(milliseconds: number) {
@@ -191,20 +243,90 @@ export default function DealWorkspace({
   const stageEntry = selectedHistory.find((entry) => !entry.exitedAt);
   const enteredAt = [stageEntry?.enteredAt, progressDeal?.stageChangedAt, selectedLead?.stageChangedAt, selectedLead?.routedAt, progressDeal?.createdAt, selectedLead?.createdAt]
     .find((timestamp): timestamp is string => Boolean(timestamp && Number.isFinite(Date.parse(timestamp))));
-  const stageEnteredAt = enteredAt ? Date.parse(enteredAt) : Number.NaN;
-  const hasStageTimestamp = Number.isFinite(stageEnteredAt);
-  const elapsedMilliseconds = hasStageTimestamp ? Math.max(0, clockNow - stageEnteredAt) : 0;
   const activeProgressStage = progressDeal
     ? progressDeal.stage
     : selectedLead ? progressStageForLead(selectedLead) : '';
   const progressStages: readonly (PipelineStage | string)[] = progressDeal ? stages : LEAD_PROGRESS_STAGES;
   const activeProgressIndex = progressStages.findIndex((stage) => (typeof stage === 'string' ? stage : stage.name) === activeProgressStage);
-  const activeTargetStage = currentStage ?? (!progressDeal && activeProgressIndex >= 0
-    ? leadPipelineStages[activeProgressIndex]
+  const activeTargetStage = currentStage ?? (!progressDeal && selectedLead
+    ? leadPipelineStages[pipelineStageIndexForLead(selectedLead)]
     : undefined);
   const targetDays = activeTargetStage?.stagnationDaysThreshold ?? 0;
-  const isStagnant = isStageSlaOverdue(enteredAt, targetDays, clockNow);
+  const telemetryOverride = getTelemetryTimestampOverride(targetDays, clockNow);
+  const stageEnteredAt = telemetryOverride?.timestamp ?? (enteredAt ? Date.parse(enteredAt) : Number.NaN);
+  const hasStageTimestamp = Number.isFinite(stageEnteredAt);
+  const elapsedMilliseconds = hasStageTimestamp ? Math.max(0, clockNow - stageEnteredAt) : 0;
+  const activeSlaHealth = stageSlaHealth(elapsedMilliseconds, targetDays);
+  const isStagnant = activeSlaHealth === 'overdue';
   const stageTargetProgress = targetDays > 0 ? Math.min(100, (elapsedMilliseconds / (targetDays * 86400000)) * 100) : 0;
+  const leadStageHistory = selectedActivities
+    .filter((activity) => activity.title.startsWith('Lead stage changed:'))
+    .map((activity) => {
+      const transition = /^Lead stage changed:\s*(.*?)\s*→\s*(.*?)\s*$/.exec(activity.title);
+      return transition
+        ? { from: progressStageForLeadName(transition[1]), to: progressStageForLeadName(transition[2]), date: activity.date }
+        : undefined;
+    })
+    .filter((transition): transition is { from: LeadProgressStage; to: LeadProgressStage; date: string } => Boolean(transition))
+    .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
+  const progressStartDate = progressDeal
+    ? selectedHistory[selectedHistory.length - 1]?.enteredAt ?? progressDeal.createdAt ?? enteredAt
+    : selectedLead?.createdAt ?? leadStageHistory[0]?.date ?? selectedLead?.routedAt ?? enteredAt;
+  const progressStartMilliseconds = progressStartDate ? Date.parse(progressStartDate) : Number.NaN;
+  const stageTimeline = progressStages.map((stage, index) => {
+    const name = typeof stage === 'string' ? stage : stage.name;
+    const pipelineStage = typeof stage === 'string' ? undefined : stage;
+    if (progressDeal) {
+      const history = pipelineStage
+        ? selectedHistory.find((entry) => entry.toStageId === pipelineStage.id)
+        : undefined;
+      const stageStart = history?.enteredAt
+        ?? (index === 0 ? progressDeal.createdAt : undefined)
+        ?? (name === progressDeal.stage ? progressDeal.stageChangedAt ?? progressDeal.createdAt : undefined);
+      const isCurrent = name === progressDeal.stage;
+      const stageEnd = history?.exitedAt ?? (isCurrent && stageStart ? new Date(clockNow).toISOString() : undefined);
+      const startMs = stageStart ? Date.parse(stageStart) : Number.NaN;
+      const endMs = stageEnd ? Date.parse(stageEnd) : Number.NaN;
+      const cumulative = Number.isFinite(startMs) && Number.isFinite(progressStartMilliseconds)
+        ? Math.max(0, (isCurrent ? clockNow : Number.isFinite(endMs) ? endMs : startMs) - progressStartMilliseconds)
+        : undefined;
+      return {
+        key: pipelineStage?.id ?? name,
+        name,
+        index,
+        active: isCurrent,
+        done: activeProgressIndex >= 0 && index < activeProgressIndex,
+        enteredAt: stageStart,
+        duration: Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : undefined,
+        cumulative,
+        targetDays: pipelineStage?.stagnationDaysThreshold ?? leadPipelineStages[index]?.stagnationDaysThreshold ?? 0,
+      };
+    }
+
+    const transitionIn = leadStageHistory.find((transition) => transition.to === name);
+    const transitionOut = leadStageHistory.find((transition) => transition.from === name);
+    const isCurrent = name === activeProgressStage;
+    const stageStart = transitionIn?.date
+      ?? (index === 0 || !leadStageHistory.length ? selectedLead?.createdAt ?? selectedLead?.routedAt : undefined)
+      ?? (isCurrent ? selectedLead?.stageChangedAt ?? selectedLead?.routedAt ?? selectedLead?.createdAt : undefined);
+    const stageEnd = transitionOut?.date ?? (isCurrent && stageStart ? new Date(clockNow).toISOString() : undefined);
+    const startMs = stageStart ? Date.parse(stageStart) : Number.NaN;
+    const endMs = stageEnd ? Date.parse(stageEnd) : Number.NaN;
+    const cumulative = Number.isFinite(startMs) && Number.isFinite(progressStartMilliseconds)
+      ? Math.max(0, (isCurrent ? clockNow : Number.isFinite(endMs) ? endMs : startMs) - progressStartMilliseconds)
+      : undefined;
+    return {
+      key: name,
+      name,
+      index,
+      active: isCurrent,
+      done: activeProgressIndex >= 0 && index < activeProgressIndex,
+      enteredAt: stageStart,
+      duration: Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : undefined,
+      cumulative,
+      targetDays: leadPipelineStages[index]?.stagnationDaysThreshold ?? 0,
+    };
+  });
   const recordSlaStatus = (record: typeof records[number]) => {
     const recordDeal = record.kind === 'deal'
       ? record.item as Deal
@@ -218,7 +340,7 @@ export default function DealWorkspace({
     const recordStage = recordDeal
       ? recordStages.find((stage) => stage.name === recordDeal.stage)
       : recordLead
-        ? recordStages[LEAD_PROGRESS_STAGES.indexOf(progressStageForLead(recordLead))]
+        ? recordStages[pipelineStageIndexForLead(recordLead)]
         : undefined;
     if (!recordStage) return { overdue: false, targetDays: 0 };
     const activeHistory = recordDeal && stageHistory.find((entry) =>
@@ -870,50 +992,104 @@ export default function DealWorkspace({
             </div>
           </div>
 
-          <section aria-label="Stage progress" className="mt-4 rounded-xl border border-ink-600 bg-ink-900/50 p-4">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
-                <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <h2 className="text-sm font-semibold text-white">{progressDeal ? 'Placement stage progress' : 'Lead stage progress'}</h2>
-                  {progressDeal && <span className="text-xs text-muted">{selectedPipeline?.name ?? 'Pipeline'}</span>}
-                </div>
-                {progressStages.length ? <ol className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1">
-                  {progressStages.map((stage, index) => {
-                    const name = typeof stage === 'string' ? stage : stage.name;
-                    const active = name === activeProgressStage;
-                    const done = activeProgressIndex >= 0 && index < activeProgressIndex;
-                    const pipelineStage = typeof stage === 'string' ? undefined : stage;
-                    return <li key={pipelineStage?.id ?? name} className="flex shrink-0 items-center gap-2">
-                      <button type="button" disabled={!progressDeal || active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
-                        onClick={() => pipelineStage && progressDeal && requestStageChange(pipelineStage, progressDeal)}
-                        title={active && isStagnant ? `SLA overdue: current stage exceeded its ${targetDays}-day target` : name}
-                        aria-label={active && isStagnant ? `${name}, SLA overdue by stage target of ${targetDays} days` : name}
-                        className={`rounded-lg border px-2.5 py-2 text-left text-xs transition ${active ? isStagnant ? 'border-hot/60 bg-hot/10 font-semibold text-white' : 'border-brand-400 bg-brand-400/15 font-semibold text-white' : done ? 'border-win/40 bg-win/5 text-win' : 'border-ink-700 text-muted'} disabled:cursor-default`}>
-                        <span className="mr-1.5">{done ? '✓' : index + 1}</span>{name}
-                        {active && isStagnant && <Clock3 size={12} className="ml-1 inline text-hot" aria-hidden="true" />}
-                      </button>
-                      {index < progressStages.length - 1 && <span className="text-ink-500">→</span>}
-                    </li>;
-                  })}
-                </ol> : <p className="text-xs text-muted">No stages are configured for this pipeline.</p>}
+          <section aria-label="Stage progress" className="telemetry-panel mt-4 rounded-2xl p-4 sm:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#DCE5E0]">
+                  {progressDeal ? 'Placement telemetry' : 'Lead telemetry'}
+                </h2>
+                {progressDeal && <p className="mt-1 text-[10px] tracking-wide text-[#6C727F]">{selectedPipeline?.name ?? 'Pipeline'} · stage sequence</p>}
               </div>
-              <div className={`min-w-56 rounded-lg border px-3 py-2 text-right ${isStagnant ? 'border-hot/40 bg-hot/10' : 'border-brand-400/30 bg-brand-400/10'}`} aria-label={isStagnant ? 'Current stage SLA overdue' : 'Current stage duration'}>
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-300">Current stage duration</p>
-                <p className="mt-1 text-sm font-semibold text-white">{hasStageTimestamp ? `Been in this stage for ${formatStageDuration(elapsedMilliseconds)}` : 'Just now'}</p>
-                {targetDays > 0 && <>
-                  <div className="mt-2 flex items-center justify-between gap-3 text-[10px]">
-                    <span className="text-muted">Target: {targetDays} {targetDays === 1 ? 'day' : 'days'}</span>
-                    <span className={isStagnant ? 'font-semibold text-hot' : 'text-muted'}>
-                      {isStagnant ? 'Target exceeded' : `${Math.floor(stageTargetProgress)}% of target`}
+              <span className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-[#27C272]">
+                {telemetryOverride && <span className="text-[#E09228]">Test · {telemetryOverride.label}</span>}
+                <span className="telemetry-live-dot" aria-hidden="true" /> Live tracking
+              </span>
+            </div>
+            <div className="mt-5 flex min-w-0 flex-col gap-5 xl:flex-row xl:items-center">
+              <div className="min-w-0 flex-1">
+                {stageTimeline.length ? <div className="-mx-1 max-w-full overflow-x-auto px-1 pb-2 stage-stepper-scroll">
+                  <ol className="telemetry-track flex w-max min-w-full items-start">
+                    {stageTimeline.map((stage) => {
+                      const pipelineStage = typeof progressStages[stage.index] === 'string'
+                        ? undefined
+                        : progressStages[stage.index] as PipelineStage;
+                      const durationMilliseconds = stage.active ? elapsedMilliseconds : stage.duration;
+                      const health = stageSlaHealth(durationMilliseconds, stage.targetDays);
+                      const stageOverdue = health === 'overdue';
+                      const healthLabel = health === 'overdue' ? 'DRAGGED'
+                        : health === 'warning' ? 'AT RISK'
+                          : health === 'healthy' ? 'ON TRACK' : 'NO SLA';
+                      const metricColor = health === 'overdue' ? 'text-[#FF3366]'
+                        : health === 'warning' ? 'text-[#E09228]'
+                          : health === 'healthy' ? 'text-[#27C272]'
+                            : stage.done ? 'text-[#74C999]' : 'text-[#69717D]';
+                      const healthColor = health === 'overdue' ? '#FF3366'
+                        : health === 'warning' ? '#E09228'
+                          : health === 'healthy' ? '#27C272' : '#A7F2C5';
+                      return <li key={stage.key} className="telemetry-step relative w-36 shrink-0 sm:w-40">
+                        {stage.index < stageTimeline.length - 1 && <span
+                          className={`telemetry-connector ${stage.done ? 'is-complete' : ''} ${health !== 'unconfigured' ? `is-${health}` : ''}`}
+                          aria-hidden="true" />}
+                        <div className="flex h-5 items-center justify-between px-1 font-mono text-[9px] uppercase tracking-[0.12em]">
+                          {stage.index === 0 && progressStartDate
+                            ? <span className="text-[#69717D]">Start: {formatStageDate(progressStartDate)}</span>
+                            : <span />}
+                          {stage.active && <span style={{ color: healthColor }}>Now {formatStageDate(clockNow)}</span>}
+                        </div>
+                        <button type="button" disabled={!progressDeal || stage.active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
+                          onClick={() => pipelineStage && progressDeal && requestStageChange(pipelineStage, progressDeal)}
+                          title={stageOverdue ? `SLA overdue: stage exceeded its ${stage.targetDays}-day target` : health === 'warning' ? `SLA warning: stage is approaching its ${stage.targetDays}-day target` : stage.name}
+                          aria-label={`${stage.name}; stage duration ${stage.active ? formatStageDuration(elapsedMilliseconds) : formatDays(stage.duration)}; total ${formatDays(stage.cumulative)}${stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
+                          aria-current={stage.active ? 'step' : undefined}
+                          className={`telemetry-stage relative z-[1] flex w-full flex-col items-center border-0 bg-transparent px-2 py-0 text-center disabled:cursor-default ${stage.active ? 'is-active' : stage.done ? 'is-complete' : 'is-pending'}`}>
+                          <span className={`telemetry-node ${stage.active || health === 'warning' || health === 'overdue' ? `is-${health}` : stage.done ? 'is-complete' : ''}`}>
+                            {health === 'overdue' || health === 'warning' ? <Clock3 size={12} aria-hidden="true" /> : stage.done ? <Check size={12} aria-hidden="true" /> : <span className="telemetry-node-core" />}
+                          </span>
+                          <span className={`mt-2 min-h-7 text-[10px] font-semibold leading-4 sm:text-[11px] ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#808896]'}`}>
+                            {stage.name}
+                          </span>
+                          <span className={`telemetry-metric mt-1 flex w-full items-center justify-center gap-2 font-mono text-[9px] ${metricColor}`}>
+                            <span>{formatDays(durationMilliseconds)}</span>
+                            <span className="text-[#424954]">/</span>
+                            <span>{formatDays(stage.cumulative)} total</span>
+                          </span>
+                          <span className={`telemetry-sla-label mt-1 font-mono text-[8px] tracking-[0.12em] is-${health}`}>
+                            {healthLabel}{stage.targetDays > 0 ? ` · ${stage.targetDays}D` : ''}
+                          </span>
+                        </button>
+                      </li>;
+                    })}
+                  </ol>
+                </div> : <p className="py-4 text-xs text-muted">No stages are configured for this pipeline.</p>}
+              </div>
+              <div className={`telemetry-hud flex min-w-0 items-center gap-3 rounded-xl p-3 sm:gap-4 sm:p-4 xl:w-[270px] xl:shrink-0 is-${activeSlaHealth}`}
+                aria-label={isStagnant ? 'Current stage SLA overdue' : 'Current stage duration'}>
+                <div className="telemetry-ring relative grid h-14 w-14 shrink-0 place-items-center sm:h-16 sm:w-16">
+                  <svg viewBox="0 0 40 40" className="h-full w-full -rotate-90" role="progressbar"
+                    aria-label="Stage target duration progress" aria-valuemin={0} aria-valuemax={100}
+                    aria-valuenow={targetDays > 0 ? Math.floor(stageTargetProgress) : 0}>
+                    <circle cx="20" cy="20" r="16" fill="none" stroke="#252B32" strokeWidth="2.5" />
+                    {targetDays > 0 && <circle cx="20" cy="20" r="16" fill="none"
+                      stroke={activeSlaHealth === 'overdue' ? '#FF3366' : activeSlaHealth === 'warning' ? '#E09228' : '#27C272'} strokeWidth="2.5" strokeLinecap="round"
+                      strokeDasharray="100.53" strokeDashoffset={100.53 * (1 - stageTargetProgress / 100)}
+                      className="telemetry-ring-progress" />}
+                  </svg>
+                  <span className="absolute font-mono text-[10px] font-semibold" style={{ color: activeSlaHealth === 'overdue' ? '#FF3366' : activeSlaHealth === 'warning' ? '#E09228' : '#27C272' }}>
+                    {targetDays > 0 ? `${Math.floor(stageTargetProgress)}%` : '—'}
+                  </span>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-[#7F8995]">Current stage duration</p>
+                  <p className="mt-1 text-sm font-semibold leading-5 text-white sm:text-base">
+                    {hasStageTimestamp ? formatStageDuration(elapsedMilliseconds) : 'Just now'}
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 font-mono text-[9px]">
+                    <span className="text-[#7F8995]">Target: {targetDays > 0 ? `${targetDays} days` : 'Not set'}</span>
+                    <span className={`telemetry-status-badge is-${activeSlaHealth}`}>
+                      {targetDays > 0 ? isStagnant ? 'OVERDUE / DRAGGED' : activeSlaHealth === 'warning' ? 'WARNING / AT RISK' : 'HEALTHY / ON TRACK' : 'NO SLA'}
                     </span>
                   </div>
-                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-ink-700" role="progressbar"
-                    aria-label="Stage target duration progress" aria-valuemin={0} aria-valuemax={100}
-                    aria-valuenow={Math.floor(stageTargetProgress)}>
-                    <div className={`h-full rounded-full transition-all ${isStagnant ? 'bg-hot' : 'bg-brand-400'}`}
-                      style={{ width: `${stageTargetProgress}%` }} />
-                  </div>
-                </>}
+                </div>
               </div>
             </div>
           </section>
