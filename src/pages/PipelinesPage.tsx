@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { ArrowDown, ArrowUp, CalendarClock, Check, Plus, Settings2, Zap } from 'lucide-react';
+import { ArrowDown, ArrowUp, CalendarClock, Check, Clock3, Plus, Settings2, Zap } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { TENANT_ID } from '../lib/supabase';
 import Modal from '../components/ui/Modal';
@@ -9,6 +9,7 @@ import { formatAmount, toMvr } from '../utils/currency';
 import { formatDate } from '../utils/date';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile } from '../utils/customerProfile';
+import { getStageSlaElapsedDays, isStageSlaOverdue } from '../utils/stageSla';
 
 const LOSS_REASONS = [
   'Price / premium',
@@ -133,6 +134,7 @@ function buildRenewalDeal(client: Client, pipeline: Pipeline, firstStage: Pipeli
     id: `renewal-${crypto.randomUUID()}`,
     pipelineId: pipeline.id,
     createdAt: today.toISOString(),
+    stageChangedAt: today.toISOString(),
     renewalForClientId: client.id,
     renewalExpiry: expiry,
     policyExpiry: expiry,
@@ -148,6 +150,7 @@ function buildRenewalDeal(client: Client, pipeline: Pipeline, firstStage: Pipeli
     insurer: client.insurer || 'Not assigned',
     nextActivityAt: expiry ? new Date(`${expiry}T00:00:00`).toISOString() : undefined,
     nextActivityTitle: 'Review renewal requirements',
+    nextActivityCreatedAt: today.toISOString(),
   };
 }
 
@@ -393,6 +396,7 @@ export default function PipelinesPage() {
           id: renewalDealId,
           pipelineId: renewalPipeline.id,
           createdAt: now,
+          stageChangedAt: now,
           renewalForClientId: boundClient?.id,
           renewalForDealId: movingDeal.id,
           renewalExpiry: policyExpiry,
@@ -410,6 +414,7 @@ export default function PipelinesPage() {
           insurer: movingDeal.insurer,
           nextActivityAt: renewalCloseDate,
           nextActivityTitle: 'Start 90-day renewal retention review',
+          nextActivityCreatedAt: now,
         }]);
       }
     }
@@ -453,6 +458,7 @@ export default function PipelinesPage() {
         ...deal,
         pipelineId,
         stage: to.name,
+        stageChangedAt: now,
         probability: disposition === 'lost' || isLostStage(to.name) ? 0 : disposition === 'won' ? 100 : to.winProbabilityPct,
         weighted: disposition === 'lost' || isLostStage(to.name) ? 0 : Math.round(deal.value * (disposition === 'won' ? 100 : to.winProbabilityPct)) / 100,
         disposition,
@@ -608,12 +614,12 @@ export default function PipelinesPage() {
 
   const stageElapsedDays = (dealId: string, currentStage: PipelineStage) => {
     const currentEntry = historyForDeal(dealId).find((entry) => entry.toStageId === currentStage.id && !entry.exitedAt);
+    const deal = deals.find((item) => item.id === dealId);
     const enteredAt = currentEntry?.enteredAt
-      ?? deals.find((deal) => deal.id === dealId)?.createdAt;
+      ?? deal?.stageChangedAt
+      ?? deal?.createdAt;
     if (!enteredAt) return null;
-    const enteredAtTime = Date.parse(enteredAt);
-    if (!Number.isFinite(enteredAtTime)) return null;
-    return Math.max(0, Math.floor((now - enteredAtTime) / 86400000));
+    return getStageSlaElapsedDays(enteredAt, now);
   };
 
   const visibleDealsForStage = (stage: PipelineStage) => pipelineDeals
@@ -675,7 +681,7 @@ export default function PipelinesPage() {
                 <span className="w-7 text-center text-xs text-muted">{index + 1}</span>
                 <div className="min-w-48 flex-1">
                   <div className="text-sm font-medium text-white">{stage.name}</div>
-                  <div className="text-xs text-muted">{stage.winProbabilityPct}% win probability · {stage.stagnationDaysThreshold ? `${stage.stagnationDaysThreshold} day rotting alert` : 'No rotting alert'}</div>
+                  <div className="text-xs text-muted">{stage.winProbabilityPct}% win probability · {stage.stagnationDaysThreshold ? `${stage.stagnationDaysThreshold}-day target SLA` : 'No target SLA'}</div>
                 </div>
                 <div className="flex items-center gap-1">
                   <button aria-label={`Move ${stage.name} up`} disabled={index === 0} onClick={() => reorderStage(stage, -1)} className="p-2 rounded hover:bg-ink-700 disabled:opacity-30"><ArrowUp size={14} /></button>
@@ -745,6 +751,9 @@ export default function PipelinesPage() {
                   {stageDeals.map((deal) => {
                     const elapsed = stageElapsedDays(deal.id, stage);
                     const health = dealHealth(elapsed, stage.stagnationDaysThreshold);
+                    const activeHistory = historyForDeal(deal.id).find((entry) => entry.toStageId === stage.id && !entry.exitedAt);
+                    const enteredAt = activeHistory?.enteredAt ?? deal.stageChangedAt ?? deal.createdAt;
+                    const slaOverdue = isStageSlaOverdue(enteredAt, stage.stagnationDaysThreshold, now);
                     const momentum = dealMomentum(elapsed, stage.stagnationDaysThreshold);
                     const intent = intentForDeal(deal);
                     const score = dealHealthScore(elapsed, stage.stagnationDaysThreshold, deal.probability);
@@ -770,6 +779,7 @@ export default function PipelinesPage() {
                           <Badge variant={momentumVariants[momentum]} dot>{momentum}</Badge>
                           <Badge variant={intentVariants[intent]}>{intent}: {intentLabels[intent]}</Badge>
                           <Badge variant={healthVariants[health]}>{health === 'At Risk' ? 'At Risk' : health}</Badge>
+                          {slaOverdue && <Badge variant="hot"><Clock3 size={11} /> SLA overdue</Badge>}
                           <Badge variant={nextActivity.tone} dot><CalendarClock size={11} /> {nextActivity.label}</Badge>
                         </div>
                         <div className="mt-3 flex justify-between text-xs">
@@ -806,7 +816,7 @@ export default function PipelinesPage() {
         <form id="pipeline-stage-form" onSubmit={saveStage} className="space-y-3">
           <Field label="Stage name"><input className="input" name="name" defaultValue={editingStage?.name ?? ''} required /></Field>
           <Field label="Win probability (%)"><input className="input" name="winProbabilityPct" type="number" min="0" max="100" step="1" defaultValue={editingStage?.winProbabilityPct ?? ''} required /></Field>
-          <Field label="Stagnation threshold (days)"><input className="input" name="stagnationDaysThreshold" type="number" min="0" step="1" defaultValue={editingStage?.stagnationDaysThreshold ?? ''} required /></Field>
+          <Field label="Target stage duration / SLA (days)"><input className="input" name="stagnationDaysThreshold" type="number" min="0" step="1" defaultValue={editingStage?.stagnationDaysThreshold ?? ''} required /></Field>
         </form>
       </Modal>
       <Modal open={pipelineModalOpen} onClose={() => { setPipelineModalOpen(false); setPipelineError(''); }} title="Create Pipeline" subtitle="Choose a business-line template, then adjust its stage configuration." size="sm" footer={<><button type="button" className="btn-ghost" onClick={() => { setPipelineModalOpen(false); setPipelineError(''); }}>Cancel</button><button type="submit" form="new-pipeline-form" className="btn-primary"><Plus size={14} /> Create Pipeline</button></>}>

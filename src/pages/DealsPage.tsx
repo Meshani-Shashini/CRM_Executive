@@ -12,9 +12,10 @@ import { calculateBrokerageCommission } from '../utils/insurance';
 import { normalizeDateInput } from '../utils/date';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
 import DealWorkspace from './DealWorkspace';
+import { TENANT_ID } from '../lib/supabase';
 
 export default function DealsPage() {
-  const { deals, setDeals, setLeads, clients, user, viewAsRole, pipelines, pipelineStages, products, invoices } = useApp();
+  const { deals, setDeals, setLeads, clients, user, viewAsRole, pipelines, pipelineStages, products, invoices, setStageHistory } = useApp();
   const [createOpen, setCreateOpen] = useState(false);
   const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
   const [createPipelineId, setCreatePipelineId] = useState('');
@@ -181,11 +182,24 @@ export default function DealsPage() {
       setCreateError('Enter a valid expected close date in DD-MMM-YYYY format.');
       return;
     }
+    const now = new Date().toISOString();
+    const stage = availableStages.find((item) => item.id === selectedStageId);
+    const nextActivityAt = dealNextActivityAt || undefined;
+    const nextActivityTitle = dealNextActivityTitle.trim() || undefined;
+    const hasNextActivity = Boolean(nextActivityAt || nextActivityTitle);
+    const sameNextActivity = editingDeal?.nextActivityAt === nextActivityAt
+      && editingDeal?.nextActivityTitle === nextActivityTitle;
+    const nextActivityCreatedAt = hasNextActivity
+      ? sameNextActivity ? editingDeal?.nextActivityCreatedAt ?? now : now
+      : undefined;
     const deal: Deal = {
       ...(editingDeal ?? {}),
       id: editingDeal?.id ?? `d-${Date.now()}`,
       pipelineId: String(data.get('pipelineId')),
-      createdAt: editingDeal?.createdAt ?? new Date().toISOString(),
+      createdAt: editingDeal?.createdAt ?? now,
+      stageChangedAt: !editingDeal || (stage && editingDeal.stage !== stage.name)
+        ? now
+        : editingDeal.stageChangedAt ?? editingDeal.createdAt ?? now,
       client: dealClient.trim(),
       clientId: clients.find((client) => client.name === dealClient.trim())?.id,
       product: selectedProduct.name,
@@ -196,7 +210,7 @@ export default function DealsPage() {
       brokerageCommission: calculateBrokerageCommission(value, selectedProduct),
       currency,
       ...(rate ? { exchangeRate: rate } : {}),
-      stage: availableStages.find((stage) => stage.id === selectedStageId)?.name ?? '',
+      stage: stage?.name ?? '',
       probability,
       ownerId: user.id,
       closeDate: normalizedCloseDate,
@@ -210,10 +224,39 @@ export default function DealsPage() {
       source: dealSource.trim(),
       notes: dealNotes.trim(),
       proposalSummary: dealNotes.trim(),
-      nextActivityAt: dealNextActivityAt || undefined,
-      nextActivityTitle: dealNextActivityTitle.trim() || undefined,
+      nextActivityAt,
+      nextActivityTitle,
+      nextActivityCreatedAt,
     };
     setDeals(editingDeal ? deals.map((item) => item.id === editingDeal.id ? deal : item) : [deal, ...deals]);
+    if (stage && (!editingDeal || editingDeal.stage !== stage.name)) {
+      const previousStage = editingDeal
+        ? pipelineStages.find((item) => item.pipelineId === editingDeal.pipelineId && item.name === editingDeal.stage)
+        : undefined;
+      setStageHistory((current) => [
+        ...current.map((entry) => {
+          if (entry.dealId !== deal.id || entry.exitedAt) return entry;
+          const enteredAt = Date.parse(entry.enteredAt);
+          return {
+            ...entry,
+            exitedAt: now,
+            durationSeconds: Number.isFinite(enteredAt)
+              ? Math.max(0, Math.floor((Date.now() - enteredAt) / 1000))
+              : 0,
+          };
+        }),
+        {
+          id: `stage-${crypto.randomUUID()}`,
+          tenantId: TENANT_ID,
+          dealId: deal.id,
+          fromStageId: previousStage?.id ?? null,
+          toStageId: stage.id,
+          enteredAt: now,
+          exitedAt: null,
+          durationSeconds: null,
+        },
+      ]);
+    }
     setCreateOpen(false);
     setEditingDeal(null);
   };

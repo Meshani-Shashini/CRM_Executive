@@ -14,6 +14,7 @@ import {
   initializeSampleLeads as persistSampleLeads,
   SAMPLE_LEAD_IDS,
 } from '../lib/sampleLeads';
+import { createSampleWorkspace } from '../lib/sampleWorkspace';
 
 interface AppState {
   user: User;
@@ -267,6 +268,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ) {
         throw new Error('Invalid demo username or password.');
       }
+      const sampleWorkspace = createSampleWorkspace(DEMO_USER);
+      setUsers([DEMO_USER]);
+      setLeads(sampleWorkspace.leads);
+      setDeals(sampleWorkspace.deals);
+      setClients(sampleWorkspace.clients);
+      setActivities(sampleWorkspace.activities);
+      setPipelines(sampleWorkspace.pipelines);
+      setPipelineStages(sampleWorkspace.pipelineStages);
+      setStageHistory(sampleWorkspace.stageHistory);
       setUser(DEMO_USER);
       setAuthError(null);
       setDataReady(true);

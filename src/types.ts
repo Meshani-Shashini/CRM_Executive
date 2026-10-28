@@ -18,6 +18,8 @@ export type LeadFunnelStage = 'L0: Capture' | 'L1: KYC/AML Triage' | 'L2: LOB Sc
 
 export interface Lead {
   id: string;
+  createdAt?: string;
+  stageChangedAt?: string;
   personId?: string;
   contactProfileId?: string;
   contactRole?: string;
@@ -132,6 +134,7 @@ export interface InsuredEntityDetails {
 
 export interface Activity {
   id: string;
+  createdAt?: string;
   clientId: string;
   leadId?: string;
   dealId?: string;
@@ -235,6 +238,7 @@ export interface Deal {
   id: string;
   pipelineId?: string;
   createdAt?: string;
+  stageChangedAt?: string;
   renewalForClientId?: string;
   renewalExpiry?: string;
   renewalForDealId?: string;
@@ -270,6 +274,7 @@ export interface Deal {
   lossReason?: string;
   nextActivityAt?: string;
   nextActivityTitle?: string;
+  nextActivityCreatedAt?: string;
   source?: string;
   notes?: string;
   intakeCompleted?: boolean;

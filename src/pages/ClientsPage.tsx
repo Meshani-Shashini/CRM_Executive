@@ -236,6 +236,7 @@ export default function ClientsPage() {
     const quoteSummary = currency === 'USD'
       ? `Premium ${formatAmount(amount ?? 0, 'USD')} (equivalent ${formatAmount(toMvr(amount ?? 0, 'USD', exchangeRate), 'MVR')} at ${exchangeRate} MVR per USD).`
       : currency === 'MVR' ? `Premium ${formatAmount(amount ?? 0, 'MVR')}.` : '';
+    const now = new Date().toISOString();
     const activity: Activity = {
       id: `a-${Date.now()}`,
       clientId: selected.id,
@@ -244,7 +245,8 @@ export default function ClientsPage() {
       description: type === 'quote'
         ? `Insurer: ${String(data.get('insurer'))}; ${quoteSummary} ${description}`
         : description,
-      date: new Date().toLocaleString('sv-SE').slice(0, 16),
+      date: now,
+      createdAt: now,
       userId: user.id,
       ...(type === 'quote' && currency ? {
         quoteAmount: amount,

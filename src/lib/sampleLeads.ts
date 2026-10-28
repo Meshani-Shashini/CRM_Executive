@@ -39,9 +39,12 @@ function lead(input: {
     ? Math.round(input.value * USD_TO_MVR)
     : input.value;
   const closeDate = dateFromToday(input.closeInDays, input.today);
+  const createdAt = (input.today ?? new Date()).toISOString();
 
   return {
     id: input.id,
+    createdAt,
+    stageChangedAt: createdAt,
     person: input.person,
     client: input.client,
     title: input.title,

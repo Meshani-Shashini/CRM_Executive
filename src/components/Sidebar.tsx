@@ -105,7 +105,7 @@ export default function Sidebar({
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 overflow-y-auto no-scrollbar px-3 py-4 space-y-6">
+        <nav className="flex-1 overflow-y-auto no-scrollbar px-3 py-4 space-y-7">
           {GROUPS.map((g) => {
             const visibleItems = g.items.filter((i) => i.roles.includes(activeRole));
             if (visibleItems.length === 0) return null;

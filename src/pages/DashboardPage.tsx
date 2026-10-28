@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import {
-  TrendingUp, Target, Users, AlertTriangle, CheckCircle2,
+  TrendingUp, Target, Users, AlertTriangle, CheckCircle2, Clock3,
 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import Badge from '../components/ui/Badge';
 import { formatAmount, toMvr } from '../utils/currency';
 import { dashboardHref } from '../utils/navigation';
 import { formatDate } from '../utils/date';
+import { isStageSlaOverdue } from '../utils/stageSla';
 
 const tabs = ['Company', 'Leads', 'Deals', 'Staff'] as const;
 type DashboardTab = typeof tabs[number];
@@ -144,7 +145,12 @@ export default function DashboardPage() {
 }
 
 function LeadsDashboard() {
-  const { leads } = useApp();
+  const { leads, deals, pipelineStages, stageHistory } = useApp();
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const activeLeads = leads.filter((lead) => lead.status !== 'COMPLETED');
   const hotLeads = leads.filter((lead) => lead.temperature === 'HOT');
   const stages = [...new Set(leads.map((lead) => lead.funnelStage))].map((stage) => ({
@@ -152,6 +158,32 @@ function LeadsDashboard() {
     count: leads.filter((lead) => lead.funnelStage === stage).length,
   }));
   const maxStageCount = Math.max(1, ...stages.map((stage) => stage.count));
+  const leadSlaOverdue = (lead: typeof leads[number]) => {
+    const deal = deals.find((item) => item.id === lead.dealId || item.leadId === lead.id);
+    const configuredStages = pipelineStages
+      .filter((stage) => stage.pipelineId === (deal?.pipelineId ?? lead.pipelineId))
+      .sort((left, right) => left.stageOrder - right.stageOrder);
+    const currentLeadStage = lead.funnelStage.toLowerCase();
+    const leadStageOrder = currentLeadStage.includes('qualified') || currentLeadStage.includes('l3:')
+      ? 5
+      : currentLeadStage.includes('meeting') || currentLeadStage.includes('negotiat') ? 4
+        : currentLeadStage.includes('intro') || currentLeadStage.includes('email') ? 3
+          : currentLeadStage.includes('key person') || currentLeadStage.includes('l2:') ? 2
+            : currentLeadStage.includes('contact') || currentLeadStage.includes('l1:') ? 1 : 0;
+    const stage = deal
+      ? configuredStages.find((item) => item.name === deal.stage)
+      : configuredStages[leadStageOrder];
+    if (!stage) return false;
+    const activeHistory = deal && stageHistory.find((entry) =>
+      entry.dealId === deal.id && entry.toStageId === stage.id && !entry.exitedAt);
+    const enteredAt = activeHistory?.enteredAt
+      ?? deal?.stageChangedAt
+      ?? lead.stageChangedAt
+      ?? lead.routedAt
+      ?? deal?.createdAt
+      ?? lead.createdAt;
+    return isStageSlaOverdue(enteredAt, stage.stagnationDaysThreshold, now);
+  };
 
   return (
     <>
@@ -187,7 +219,10 @@ function LeadsDashboard() {
                   <div className="text-sm text-white truncate">{lead.client}</div>
                   <div className="text-[11px] text-muted">{lead.funnelStage} · {lead.lastActivity}</div>
                 </div>
-                <Badge variant={lead.temperature === 'HOT' ? 'hot' : lead.temperature === 'WARM' ? 'warm' : 'cold'}>{lead.temperature}</Badge>
+                <div className="flex shrink-0 items-center gap-2">
+                  {leadSlaOverdue(lead) && <Badge variant="hot"><Clock3 size={11} /> SLA overdue</Badge>}
+                  <Badge variant={lead.temperature === 'HOT' ? 'hot' : lead.temperature === 'WARM' ? 'warm' : 'cold'}>{lead.temperature}</Badge>
+                </div>
               </a>
             ))}
           </div>}
@@ -198,7 +233,12 @@ function LeadsDashboard() {
 }
 
 function DealsDashboard() {
-  const { deals } = useApp();
+  const { deals, pipelineStages, stageHistory } = useApp();
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const totalValue = deals.reduce((total, deal) => total + toMvr(deal.value, deal.currency, deal.exchangeRate), 0);
   const weightedValue = deals.reduce((total, deal) => total + toMvr(deal.weighted, deal.currency, deal.exchangeRate), 0);
   const stages = [...new Set(deals.map((deal) => deal.stage))].map((stage) => ({
@@ -211,6 +251,14 @@ function DealsDashboard() {
   const averageProbability = deals.length
     ? Math.round(deals.reduce((sum, deal) => sum + deal.probability, 0) / deals.length)
     : 0;
+  const dealSlaOverdue = (deal: typeof deals[number]) => {
+    const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
+    if (!stage) return false;
+    const activeHistory = stageHistory.find((entry) =>
+      entry.dealId === deal.id && entry.toStageId === stage.id && !entry.exitedAt);
+    const enteredAt = activeHistory?.enteredAt ?? deal.stageChangedAt ?? deal.createdAt;
+    return isStageSlaOverdue(enteredAt, stage.stagnationDaysThreshold, now);
+  };
 
   return (
     <>
@@ -247,6 +295,7 @@ function DealsDashboard() {
                   <div className="text-[11px] text-muted truncate">{deal.product} · {deal.stage}</div>
                 </div>
                 <div className="text-right shrink-0">
+                  {dealSlaOverdue(deal) && <div className="mb-1 flex justify-end"><Badge variant="hot"><Clock3 size={11} /> SLA overdue</Badge></div>}
                   <div className="text-sm text-white">{formatAmount(deal.value, deal.currency)}</div>
                   {deal.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(toMvr(deal.value, deal.currency, deal.exchangeRate), 'MVR')}</div>}
                   <div className="text-[11px] text-muted">{deal.probability}% probability</div>

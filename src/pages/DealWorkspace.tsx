@@ -13,6 +13,7 @@ import { formatDate } from '../utils/date';
 import { calculateBrokerageCommission } from '../utils/insurance';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile } from '../utils/customerProfile';
+import { isStageSlaOverdue } from '../utils/stageSla';
 
 const LOSS_REASONS = [
   'Price / premium',
@@ -28,6 +29,7 @@ interface TimelineEntry {
   title: string;
   description: string;
   date: string;
+  createdAt?: string;
   durationMinutes?: number;
   category: 'stage' | 'activity' | 'appointment' | 'proposal' | 'note' | 'task';
 }
@@ -84,6 +86,16 @@ function formatStageDuration(milliseconds: number) {
   const days = Math.floor(totalHours / 24);
   const hours = totalHours % 24;
   return `${days} ${days === 1 ? 'day' : 'days'} / ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+}
+
+function formatElapsedInterval(milliseconds: number) {
+  const totalMinutes = Math.floor(milliseconds / 60_000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days) return `${days} ${days === 1 ? 'day' : 'days'} ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  if (hours) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+  return minutes ? `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}` : 'Less than a minute';
 }
 
 export default function DealWorkspace({
@@ -162,6 +174,8 @@ export default function DealWorkspace({
   const selectedPipeline = pipelines.find((pipeline) => pipeline.id === selectedItem?.pipelineId);
   const stages = pipelineStages.filter((stage) => stage.pipelineId === progressDeal?.pipelineId)
     .sort((left, right) => left.stageOrder - right.stageOrder);
+  const leadPipelineStages = pipelineStages.filter((stage) => stage.pipelineId === selectedLead?.pipelineId)
+    .sort((left, right) => left.stageOrder - right.stageOrder);
   const currentStage = stages.find((stage) => stage.name === progressDeal?.stage);
   const relatedLeadId = selectedDeal?.leadId ?? selectedLead?.id;
   const relatedDealId = selectedDeal?.id ?? selectedLead?.dealId ?? progressDeal?.id;
@@ -175,18 +189,51 @@ export default function DealWorkspace({
     ? stageHistory.filter((entry) => entry.dealId === progressDeal.id).sort((left, right) => right.enteredAt.localeCompare(left.enteredAt))
     : [];
   const stageEntry = selectedHistory.find((entry) => !entry.exitedAt);
-  const enteredAt = stageEntry?.enteredAt ?? progressDeal?.createdAt ?? selectedLead?.routedAt;
-  const elapsedMilliseconds = enteredAt && Number.isFinite(Date.parse(enteredAt))
-    ? Math.max(0, clockNow - Date.parse(enteredAt))
-    : null;
-  const elapsedDays = elapsedMilliseconds === null ? null : Math.floor(elapsedMilliseconds / 86400000);
-  const isStagnant = Boolean(currentStage && currentStage.stagnationDaysThreshold > 0
-    && elapsedDays !== null && elapsedDays >= currentStage.stagnationDaysThreshold);
+  const enteredAt = [stageEntry?.enteredAt, progressDeal?.stageChangedAt, selectedLead?.stageChangedAt, selectedLead?.routedAt, progressDeal?.createdAt, selectedLead?.createdAt]
+    .find((timestamp): timestamp is string => Boolean(timestamp && Number.isFinite(Date.parse(timestamp))));
+  const stageEnteredAt = enteredAt ? Date.parse(enteredAt) : Number.NaN;
+  const hasStageTimestamp = Number.isFinite(stageEnteredAt);
+  const elapsedMilliseconds = hasStageTimestamp ? Math.max(0, clockNow - stageEnteredAt) : 0;
   const activeProgressStage = progressDeal
     ? progressDeal.stage
     : selectedLead ? progressStageForLead(selectedLead) : '';
   const progressStages: readonly (PipelineStage | string)[] = progressDeal ? stages : LEAD_PROGRESS_STAGES;
   const activeProgressIndex = progressStages.findIndex((stage) => (typeof stage === 'string' ? stage : stage.name) === activeProgressStage);
+  const activeTargetStage = currentStage ?? (!progressDeal && activeProgressIndex >= 0
+    ? leadPipelineStages[activeProgressIndex]
+    : undefined);
+  const targetDays = activeTargetStage?.stagnationDaysThreshold ?? 0;
+  const isStagnant = isStageSlaOverdue(enteredAt, targetDays, clockNow);
+  const stageTargetProgress = targetDays > 0 ? Math.min(100, (elapsedMilliseconds / (targetDays * 86400000)) * 100) : 0;
+  const recordSlaStatus = (record: typeof records[number]) => {
+    const recordDeal = record.kind === 'deal'
+      ? record.item as Deal
+      : allDeals.find((deal) => deal.id === (record.item as Lead).dealId || deal.leadId === record.item.id);
+    const recordLead = record.kind === 'lead'
+      ? record.item as Lead
+      : leads.find((lead) => lead.id === recordDeal?.leadId || lead.dealId === recordDeal?.id);
+    const recordStages = pipelineStages
+      .filter((stage) => stage.pipelineId === (recordDeal?.pipelineId ?? recordLead?.pipelineId))
+      .sort((left, right) => left.stageOrder - right.stageOrder);
+    const recordStage = recordDeal
+      ? recordStages.find((stage) => stage.name === recordDeal.stage)
+      : recordLead
+        ? recordStages[LEAD_PROGRESS_STAGES.indexOf(progressStageForLead(recordLead))]
+        : undefined;
+    if (!recordStage) return { overdue: false, targetDays: 0 };
+    const activeHistory = recordDeal && stageHistory.find((entry) =>
+      entry.dealId === recordDeal.id && entry.toStageId === recordStage.id && !entry.exitedAt);
+    const recordEnteredAt = activeHistory?.enteredAt
+      ?? recordDeal?.stageChangedAt
+      ?? recordLead?.stageChangedAt
+      ?? recordLead?.routedAt
+      ?? recordDeal?.createdAt
+      ?? recordLead?.createdAt;
+    return {
+      overdue: isStageSlaOverdue(recordEnteredAt, recordStage.stagnationDaysThreshold, clockNow),
+      targetDays: recordStage.stagnationDaysThreshold,
+    };
+  };
   const progressionEvents = [
     ...selectedHistory.map((entry) => entry.enteredAt),
     ...selectedActivities
@@ -213,6 +260,7 @@ export default function DealWorkspace({
       title: 'Deal created',
       description: `${selectedDeal.product} · ${selectedDeal.stage}`,
       date: selectedDeal.createdAt,
+      createdAt: selectedDeal.createdAt,
       category: 'stage' as const,
     }] : []),
     ...(selectedDeal?.nextActivityAt ? [{
@@ -220,6 +268,7 @@ export default function DealWorkspace({
       title: selectedDeal.nextActivityTitle ?? 'Scheduled follow-up',
       description: 'Scheduled task',
       date: selectedDeal.nextActivityAt,
+      createdAt: selectedDeal.nextActivityCreatedAt,
       category: 'task' as const,
     }] : []),
     ...selectedHistory.map((entry) => {
@@ -229,6 +278,7 @@ export default function DealWorkspace({
         title: `Stage: ${target}`,
         description: entry.lossReason ? `Loss reason: ${entry.lossReason}` : entry.details ?? '',
         date: entry.enteredAt,
+        createdAt: entry.enteredAt,
         category: 'stage' as const,
       };
     }),
@@ -248,6 +298,7 @@ export default function DealWorkspace({
         title: activity.title,
         description: details,
         date: activity.date,
+        createdAt: activity.createdAt,
         category: activity.type === 'meeting' ? 'appointment' as const
           : activity.type === 'quote' ? 'proposal' as const
             : activity.type === 'task' ? 'task' as const
@@ -321,6 +372,7 @@ export default function DealWorkspace({
     const activityDate = String(data.get('activityDate') ?? '');
     const meetingMode = String(data.get('meetingMode') ?? '') as Activity['meetingMode'];
     const durationMinutes = type === 'meeting' ? Number(data.get('durationMinutes')) : undefined;
+    const createdAt = new Date().toISOString();
     const activity: Activity = {
       id: `activity-${crypto.randomUUID()}`,
       clientId: selectedClient?.id ?? selectedItem.clientId ?? '',
@@ -330,7 +382,8 @@ export default function DealWorkspace({
       type,
       title: String(data.get('title') ?? '').trim(),
       description: String(data.get('description') ?? '').trim(),
-      date: activityDate ? new Date(activityDate).toISOString() : new Date().toISOString(),
+      date: activityDate ? new Date(activityDate).toISOString() : createdAt,
+      createdAt,
       userId: user.id,
       ...(type === 'meeting' ? {
         meetingMode,
@@ -369,12 +422,14 @@ export default function DealWorkspace({
       setContactError('The lead needs a valid product, active pipeline, and configured first stage before conversion.');
       return;
     }
+    const enteredAt = new Date().toISOString();
     const value = selectedLead.value ?? selectedLead.sumInsured ?? selectedLead.premium;
     const deal: Deal = {
       id: `deal-${crypto.randomUUID()}`,
       leadId: selectedLead.id,
       pipelineId: pipeline.id,
-      createdAt: new Date().toISOString(),
+      createdAt: enteredAt,
+      stageChangedAt: enteredAt,
       client: selectedLead.client,
       clientId: selectedLead.clientId,
       contactName: selectedLead.contact,
@@ -418,7 +473,7 @@ export default function DealWorkspace({
       dealId: deal.id,
       fromStageId: null,
       toStageId: firstStage.id,
-      enteredAt: new Date().toISOString(),
+      enteredAt,
       exitedAt: null,
       durationSeconds: null,
     }]);
@@ -471,7 +526,10 @@ export default function DealWorkspace({
       const hasOpenEntry = current.some((entry) => entry.dealId === selectedDeal.id && !entry.exitedAt);
       const next = current.map((entry) => {
         if (entry.dealId !== selectedDeal.id || entry.exitedAt) return entry;
-        const durationSeconds = Math.max(0, Math.floor((Date.now() - Date.parse(entry.enteredAt)) / 1000));
+        const enteredAt = Date.parse(entry.enteredAt);
+        const durationSeconds = Number.isFinite(enteredAt)
+          ? Math.max(0, Math.floor((Date.now() - enteredAt) / 1000))
+          : 0;
         return { ...entry, exitedAt: now, durationSeconds };
       });
       if (!hasOpenEntry) {
@@ -512,6 +570,7 @@ export default function DealWorkspace({
         ? {
           ...deal,
           stage: target.name,
+          stageChangedAt: now,
           contactName: stageContactName.trim(),
           ...(contactProfileId ? {
             contactProfileId,
@@ -540,6 +599,7 @@ export default function DealWorkspace({
         id: renewalDealId,
         pipelineId: renewalPipeline.id,
         createdAt: now,
+        stageChangedAt: now,
         renewalForClientId: selectedClient?.id,
         renewalForDealId: selectedDeal.id,
         renewalExpiry: policyExpiry,
@@ -558,6 +618,7 @@ export default function DealWorkspace({
         insurer: selectedDeal.insurer,
         nextActivityAt: dateBefore(policyExpiry, 90),
         nextActivityTitle: 'Start 90-day renewal retention review',
+        nextActivityCreatedAt: now,
       }];
     });
     if (selectedClient && contactProfileId && stageContactName.trim() && stageContactEmail.trim()) {
@@ -596,6 +657,7 @@ export default function DealWorkspace({
       title: `Stage changed: ${currentStage?.name ?? selectedDeal.stage} → ${target.name}`,
       description: stageChangeRemarks.trim() || `Deal moved from ${currentStage?.name ?? selectedDeal.stage} to ${target.name}.`,
       date: now,
+      createdAt: now,
       userId: user.id,
     }, ...activities]);
     if (bound && !invoices.some((invoice) => invoice.linkedDealId === selectedDeal.id)) {
@@ -753,7 +815,10 @@ export default function DealWorkspace({
           </select>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {records.map(({ kind, item, key }) => (
+          {records.map((record) => {
+            const { kind, item, key } = record;
+            const slaStatus = recordSlaStatus(record);
+            return (
             <button key={key} type="button" onClick={() => setSelectedKey(key)}
               className={`w-full border-b border-ink-700/60 p-3 text-left transition ${selected?.key === key ? 'border-l-2 border-l-brand-400 bg-brand-500/10' : 'hover:bg-ink-750/40'}`}>
               <div className="flex items-start justify-between gap-2">
@@ -768,18 +833,20 @@ export default function DealWorkspace({
                 <Badge variant={stageBadgeTone(kind === 'deal' ? (item as Deal).stage : (item as Lead).funnelStage)}>
                   {kind === 'deal' ? (item as Deal).stage : (item as Lead).funnelStage}
                 </Badge>
+                {slaStatus.overdue && <Badge variant="hot"><Clock3 size={11} /> SLA overdue</Badge>}
               </div>
               <div className="mt-2 text-xs text-brand-300">
                 {formatAmount(kind === 'deal' ? (item as Deal).value : (item as Lead).value ?? (item as Lead).premium, kind === 'deal' ? (item as Deal).currency : (item as Lead).currency ?? 'MVR')}
               </div>
             </button>
-          ))}
+            );
+          })}
           {records.length === 0 && <div className="p-5 text-center text-sm text-muted">No matching deals or leads.</div>}
         </div>
         {onCreateDeal && <button type="button" className="btn-ghost m-3 !text-xs" onClick={onCreateDeal}>+ Deal</button>}
       </aside>}
 
-      <main className="glass min-h-[460px] overflow-y-auto rounded-2xl p-5 xl:min-h-0">
+      <main className="glass min-h-[460px] min-w-0 overflow-y-auto rounded-2xl p-5 xl:min-h-0">
         {!selectedItem ? (
           <div className="flex h-full min-h-64 flex-col items-center justify-center text-center">
             <ShieldCheck size={30} className="text-brand-400" /><h2 className="mt-3 font-semibold text-white">Your placement workspace</h2>
@@ -819,17 +886,34 @@ export default function DealWorkspace({
                     return <li key={pipelineStage?.id ?? name} className="flex shrink-0 items-center gap-2">
                       <button type="button" disabled={!progressDeal || active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
                         onClick={() => pipelineStage && progressDeal && requestStageChange(pipelineStage, progressDeal)}
-                        className={`rounded-lg border px-2.5 py-2 text-left text-xs transition ${active ? 'border-brand-400 bg-brand-400/15 font-semibold text-white' : done ? 'border-win/40 bg-win/5 text-win' : 'border-ink-700 text-muted'} disabled:cursor-default`}>
+                        title={active && isStagnant ? `SLA overdue: current stage exceeded its ${targetDays}-day target` : name}
+                        aria-label={active && isStagnant ? `${name}, SLA overdue by stage target of ${targetDays} days` : name}
+                        className={`rounded-lg border px-2.5 py-2 text-left text-xs transition ${active ? isStagnant ? 'border-hot/60 bg-hot/10 font-semibold text-white' : 'border-brand-400 bg-brand-400/15 font-semibold text-white' : done ? 'border-win/40 bg-win/5 text-win' : 'border-ink-700 text-muted'} disabled:cursor-default`}>
                         <span className="mr-1.5">{done ? '✓' : index + 1}</span>{name}
+                        {active && isStagnant && <Clock3 size={12} className="ml-1 inline text-hot" aria-hidden="true" />}
                       </button>
                       {index < progressStages.length - 1 && <span className="text-ink-500">→</span>}
                     </li>;
                   })}
                 </ol> : <p className="text-xs text-muted">No stages are configured for this pipeline.</p>}
               </div>
-              <div className="min-w-56 rounded-lg border border-brand-400/30 bg-brand-400/10 px-3 py-2 text-right">
+              <div className={`min-w-56 rounded-lg border px-3 py-2 text-right ${isStagnant ? 'border-hot/40 bg-hot/10' : 'border-brand-400/30 bg-brand-400/10'}`} aria-label={isStagnant ? 'Current stage SLA overdue' : 'Current stage duration'}>
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-300">Current stage duration</p>
-                <p className="mt-1 text-sm font-semibold text-white">{elapsedMilliseconds === null ? 'Duration unavailable' : `Been in this stage for ${formatStageDuration(elapsedMilliseconds)}`}</p>
+                <p className="mt-1 text-sm font-semibold text-white">{hasStageTimestamp ? `Been in this stage for ${formatStageDuration(elapsedMilliseconds)}` : 'Just now'}</p>
+                {targetDays > 0 && <>
+                  <div className="mt-2 flex items-center justify-between gap-3 text-[10px]">
+                    <span className="text-muted">Target: {targetDays} {targetDays === 1 ? 'day' : 'days'}</span>
+                    <span className={isStagnant ? 'font-semibold text-hot' : 'text-muted'}>
+                      {isStagnant ? 'Target exceeded' : `${Math.floor(stageTargetProgress)}% of target`}
+                    </span>
+                  </div>
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-ink-700" role="progressbar"
+                    aria-label="Stage target duration progress" aria-valuemin={0} aria-valuemax={100}
+                    aria-valuenow={Math.floor(stageTargetProgress)}>
+                    <div className={`h-full rounded-full transition-all ${isStagnant ? 'bg-hot' : 'bg-brand-400'}`}
+                      style={{ width: `${stageTargetProgress}%` }} />
+                  </div>
+                </>}
               </div>
             </div>
           </section>
@@ -846,7 +930,8 @@ export default function DealWorkspace({
                   <DetailValue label="Email" value={selectedClient?.email || '—'} />
                   <DetailValue label="Phone" value={selectedClient?.phone || '—'} />
                 </div>
-                <div className="mt-5 rounded-xl border border-brand-400/30 bg-brand-400/10 p-4">
+                <div className="mt-5 max-h-60 space-y-4 overflow-y-auto pr-2">
+                <div className="rounded-xl border border-brand-400/30 bg-brand-400/10 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-300">Primary contact · Key person</p>
@@ -867,7 +952,7 @@ export default function DealWorkspace({
                     <DetailValue label="Telegram" value={selectedLead.telegram || '—'} />
                   </div>
                 </div>
-                <div className="mt-4">
+                <div>
                   <h3 className="mb-2 text-xs font-semibold text-white">Key persons</h3>
                   <div className="grid gap-2 sm:grid-cols-2">
                     {(selectedClient?.contacts ?? []).map((profile) => {
@@ -879,6 +964,7 @@ export default function DealWorkspace({
                     })}
                     {!(selectedClient?.contacts?.length) && <p className="text-xs text-muted">No additional company key persons are linked.</p>}
                   </div>
+                </div>
                 </div>
                 <div className="mt-4 border-t border-ink-700 pt-4">
                   <h3 className="mb-3 text-xs font-semibold text-white">Lead Details</h3>
@@ -916,7 +1002,8 @@ export default function DealWorkspace({
                 <DetailValue label="Client email" value={selectedClient?.email || '—'} />
                 <DetailValue label="Client phone" value={selectedClient?.phone || '—'} />
               </div>
-              <div className="mt-5 rounded-xl border border-brand-400/30 bg-brand-400/10 p-4">
+              <div className="mt-5 max-h-60 space-y-4 overflow-y-auto pr-2">
+              <div className="rounded-xl border border-brand-400/30 bg-brand-400/10 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-300">Primary contact · Key person</p>
@@ -937,7 +1024,7 @@ export default function DealWorkspace({
                   <DetailValue label="Telegram" value={selectedDeal?.telegram ?? '—'} />
                 </div>
               </div>
-              {selectedClient?.contacts?.length ? <div className="mt-4">
+              {selectedClient?.contacts?.length ? <div>
                 <h3 className="mb-2 text-xs font-semibold text-white">Key persons</h3>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {selectedClient.contacts.map((profile) => {
@@ -949,6 +1036,7 @@ export default function DealWorkspace({
                   })}
                 </div>
               </div> : null}
+              </div>
               <form className="mt-4 rounded-xl border border-ink-600 bg-ink-950/40 p-4" onSubmit={saveContactChannels}>
                 <h3 className="mb-3 text-xs font-semibold text-white">Update communication channels</h3>
                 <div className="grid grid-cols-2 gap-2">
@@ -985,7 +1073,7 @@ export default function DealWorkspace({
             </section>
           </div>
           </>}
-          <section className="mt-7 border-t border-ink-600 pt-5">
+          <section className="mt-7 min-w-0 border-t border-ink-600 pt-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Clock3 size={15} className="text-brand-300" /> Activity Timeline</h2>
@@ -1025,13 +1113,18 @@ export default function DealWorkspace({
                 </button>
               ))}
             </div>
-            <div className="-mx-1 overflow-x-auto px-1 pb-3">
-              <div className="flex min-w-full items-stretch gap-3">
-                {filteredTimelineEntries.map((entry) => <TimelineItem
+            <div className="-mx-1 max-w-full touch-pan-x overflow-x-auto overscroll-x-contain scroll-smooth timeline-scrollbar px-1 pb-3"
+              role="region" aria-label="Activity timeline" tabIndex={0}>
+              <div className="flex w-max min-w-full items-stretch gap-3">
+                {filteredTimelineEntries.map((entry, index) => <TimelineItem
                   key={entry.key}
                   title={entry.title}
                   description={entry.description}
                   date={entry.date}
+                  createdAt={entry.createdAt}
+                  elapsedFromPrevious={index > 0
+                    ? Math.max(0, Date.parse(entry.date) - Date.parse(filteredTimelineEntries[index - 1].date))
+                    : undefined}
                   durationMinutes={entry.durationMinutes}
                   category={entry.category}
                 />)}
@@ -1056,7 +1149,7 @@ export default function DealWorkspace({
                 {selectedClient?.accountStatus === 'draft' && <p className="flex gap-2 text-warm"><AlertTriangle size={14} /> Customer profile is still a draft.</p>}
                 {selectedProduct?.isStatutoryMandatory && <p className="flex gap-2 text-warm"><AlertTriangle size={14} /> Statutory mandatory cover: confirm compliance evidence.</p>}
                 {selectedProduct && <p className="text-muted">Required intake: {selectedProduct.keyUnderwritingIntakeArtifacts}</p>}
-                {isStagnant && <p className="flex items-start gap-2 rounded-lg border border-hot/30 bg-hot/10 p-2 text-hot"><AlertTriangle size={14} className="shrink-0" /> This deal exceeded the {currentStage?.stagnationDaysThreshold}-day stage SLA.</p>}
+                {isStagnant && <p className="flex items-start gap-2 rounded-lg border border-hot/30 bg-hot/10 p-2 text-hot"><AlertTriangle size={14} className="shrink-0" /> This stage exceeded its {targetDays}-day target SLA.</p>}
               </div>
             </div>
             <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
@@ -1162,10 +1255,12 @@ function localDateTimeInput() {
   return date.toISOString().slice(0, 16);
 }
 
-function TimelineItem({ title, description, date, durationMinutes, category }: {
+function TimelineItem({ title, description, date, createdAt, elapsedFromPrevious, durationMinutes, category }: {
   title: string;
   description: string;
   date?: string;
+  createdAt?: string;
+  elapsedFromPrevious?: number;
   durationMinutes?: number;
   category: TimelineEntry['category'];
 }) {
@@ -1173,17 +1268,23 @@ function TimelineItem({ title, description, date, durationMinutes, category }: {
   const formattedTimestamp = timestamp && Number.isFinite(timestamp.getTime())
     ? `${formatDate(timestamp)} · ${timestamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
     : '';
+  const createdTimestamp = createdAt ? new Date(createdAt) : null;
+  const formattedCreatedTimestamp = createdTimestamp && Number.isFinite(createdTimestamp.getTime())
+    ? `${formatDate(createdTimestamp)} · ${createdTimestamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+    : '';
   const categoryLabel = category === 'appointment' ? 'Appointment'
     : category === 'proposal' ? 'Proposal'
       : category === 'stage' ? 'Stage change'
         : category === 'note' ? 'Note' : category === 'task' ? 'Task' : 'Activity';
-  return <article className="flex w-72 shrink-0 flex-col rounded-xl border border-ink-700 bg-ink-900/50 p-4">
+  return <article className="timeline-card flex w-64 shrink-0 flex-col rounded-xl border border-ink-700 bg-ink-900/50 p-4 sm:w-72">
     <div className="flex items-center justify-between gap-2">
       <Badge variant={category === 'task' ? 'warm' : 'muted'}>{categoryLabel}</Badge>
       <time className="text-right text-[10px] text-muted">{formattedTimestamp}</time>
     </div>
     <h3 className="mt-3 min-h-10 text-sm font-medium text-white">{title}</h3>
     {description && <p className="mt-2 flex-1 text-xs leading-relaxed text-muted">{description}</p>}
+    {elapsedFromPrevious !== undefined && <p className="mt-3 border-t border-ink-700 pt-2 text-[10px] text-muted">Since previous entry: {formatElapsedInterval(elapsedFromPrevious)}</p>}
+    {formattedCreatedTimestamp && <p className="mt-2 text-[10px] text-muted">Logged: {formattedCreatedTimestamp}</p>}
     {durationMinutes !== undefined && <p className="mt-3 border-t border-ink-700 pt-2 text-[10px] text-muted">Duration: {durationMinutes} minutes</p>}
   </article>;
 }

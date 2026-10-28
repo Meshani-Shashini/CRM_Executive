@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
-import { CalendarDays, CheckCircle2, CircleDot, Columns3, Filter, List, Mail, Plus, Search, ShieldCheck, TrendingUp, UserRound, X, Pencil } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CheckCircle2, CircleDot, Clock3, Columns3, Filter, List, Mail, Plus, Search, ShieldCheck, TrendingUp, UserRound, X, Pencil } from 'lucide-react';
 import type { Client, Lead } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
@@ -12,6 +12,7 @@ import ProductSelect from '../components/ui/ProductSelect';
 import { calculateBrokerageCommission } from '../utils/insurance';
 import { hasCompleteCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile, INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
+import { isStageSlaOverdue } from '../utils/stageSla';
 import DealWorkspace from './DealWorkspace';
 
 const LEAD_FUNNEL_STAGES = [
@@ -52,6 +53,7 @@ export default function LeadsPage() {
   const {
     leads, setLeads, deals, clients, setClients, user, users, pipelines,
     customerLookups, setCustomerLookups, products, activities, setActivities, viewAsRole,
+    pipelineStages, stageHistory,
   } = useApp();
   const activeRole = viewAsRole ?? user.role;
   const PRODUCT_CODES = products;
@@ -92,6 +94,7 @@ export default function LeadsPage() {
   const [statusFilter, setStatusFilter] = useState(() => hashParams().get('status') ?? '');
   const [insuranceClassFilter, setInsuranceClassFilter] = useState(() => hashParams().get('insuranceClass') ?? '');
   const [pendingLeadDeletion, setPendingLeadDeletion] = useState<Lead | null>(null);
+  const [clockNow, setClockNow] = useState(Date.now());
   const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
   const linkedDealIds = useMemo(() => new Set(deals.map((deal) => deal.id)), [deals]);
   const selectedPipeline = activePipelines.find((pipeline) => pipeline.id === selectedPipelineId);
@@ -154,6 +157,10 @@ export default function LeadsPage() {
     window.addEventListener('hashchange', applyHashFilters);
     return () => window.removeEventListener('hashchange', applyHashFilters);
   }, []);
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const matchesLeadFilters = (lead: Lead) =>
     (user.role === 'admin' || (user.role === 'sales' && lead.ownerId === user.id)) &&
     (!temperatureFilter || lead.temperature === temperatureFilter) &&
@@ -173,6 +180,30 @@ export default function LeadsPage() {
     stage,
     leads: searchedLeads.filter((lead) => boardStageForLead(lead, linkedDealIds) === stage),
   }));
+  const stageSlaForLead = (lead: Lead) => {
+    const linkedDeal = deals.find((deal) => deal.id === lead.dealId || deal.leadId === lead.id);
+    const configuredStages = pipelineStages
+      .filter((stage) => stage.pipelineId === (linkedDeal?.pipelineId ?? lead.pipelineId))
+      .sort((left, right) => left.stageOrder - right.stageOrder);
+    const leadStage = boardStageForLead(lead, linkedDealIds);
+    const leadStageIndex = LEAD_FUNNEL_STAGES.indexOf(leadStage);
+    const stage = linkedDeal
+      ? configuredStages.find((item) => item.name === linkedDeal.stage)
+      : configuredStages[leadStageIndex];
+    if (!stage) return { overdue: false, targetDays: 0 };
+    const activeHistory = linkedDeal && stageHistory.find((entry) =>
+      entry.dealId === linkedDeal.id && entry.toStageId === stage.id && !entry.exitedAt);
+    const enteredAt = activeHistory?.enteredAt
+      ?? linkedDeal?.stageChangedAt
+      ?? lead.stageChangedAt
+      ?? lead.routedAt
+      ?? linkedDeal?.createdAt
+      ?? lead.createdAt;
+    return {
+      overdue: isStageSlaOverdue(enteredAt, stage.stagnationDaysThreshold, clockNow),
+      targetDays: stage.stagnationDaysThreshold,
+    };
+  };
   const moveLeadToStage = (lead: Lead, stage: LeadBoardStage) => {
     if (stage === boardStageForLead(lead, linkedDealIds)) return;
     if (lead.dealId && linkedDealIds.has(lead.dealId)) return;
@@ -359,9 +390,13 @@ export default function LeadsPage() {
     }
 
     const valueMvr = toMvr(amount, leadCurrency, rate);
+    const now = new Date().toISOString();
+    const stageChanged = Boolean(editingLead && leadBoardStage !== boardStageForLead(editingLead, linkedDealIds));
     const lead: Lead = {
       ...(editingLead ?? {}),
       id: editingLead?.id ?? `L-${crypto.randomUUID()}`,
+      createdAt: editingLead?.createdAt ?? now,
+      stageChangedAt: stageChanged ? now : editingLead?.stageChangedAt ?? editingLead?.routedAt ?? now,
       personId: person?.id,
       person: selectedPersonName,
       clientId: selectedOrganization.id,
@@ -398,9 +433,7 @@ export default function LeadsPage() {
       lastActivity: editingLead?.lastActivity ?? 'Just now',
       ...(leadBoardStage === 'Qualified to Deals' ? { leadFunnelStage: 'L3: Qualified Opportunity' as const } : { leadFunnelStage: undefined }),
       ...(editingLead?.dealId ? { dealId: editingLead.dealId } : {}),
-      routedAt: editingLead && leadBoardStage !== boardStageForLead(editingLead, linkedDealIds)
-        ? new Date().toISOString()
-        : editingLead?.routedAt ?? new Date().toISOString(),
+      routedAt: stageChanged ? now : editingLead?.routedAt ?? now,
     };
     if (!personOptions.some((name) => name.toLowerCase() === selectedPersonName.toLowerCase())) {
       setCustomerLookups((current) => ({
@@ -447,7 +480,8 @@ export default function LeadsPage() {
         type: 'note',
         title: `Lead stage changed: ${from} → ${to}`,
         description: stageChangeRemarks.trim() || `Lead moved from ${from} to ${to}.`,
-        date: new Date().toISOString(),
+        date: now,
+        createdAt: now,
         userId: user.id,
       }, ...activities]);
     }
@@ -458,22 +492,24 @@ export default function LeadsPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h2 className="text-lg font-semibold text-white">All Leads</h2>
-        <p className="mt-1 text-xs text-muted">View, sort, and act on all leads.</p>
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1 rounded-lg border border-ink-600 bg-ink-800/60 p-1" role="tablist" aria-label="Lead views">
-          <button role="tab" aria-selected={view === 'list'} onClick={() => setView('list')} className={`rounded-md px-3 py-1.5 text-xs font-medium ${view === 'list' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}><List size={13} className="mr-1.5 inline" />List</button>
-          <button role="tab" aria-selected={view === 'funnel' || view === 'forecast'} onClick={() => setView('funnel')} className={`rounded-md px-3 py-1.5 text-xs font-medium ${view !== 'list' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}><Columns3 size={13} className="mr-1.5 inline" />Funnels</button>
+      <h2 className="sr-only">All Leads</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-1" role="tablist" aria-label="Lead views">
+            <button type="button" role="tab" aria-label="List view" title="List view" aria-selected={view === 'list'} onClick={() => setView('list')} className={`rounded-md p-2 transition ${view === 'list' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><List size={14} /></button>
+            <button type="button" role="tab" aria-label="Funnel view" title="Funnel view" aria-selected={view === 'funnel'} onClick={() => setView('funnel')} className={`rounded-md p-2 transition ${view === 'funnel' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><Columns3 size={14} /></button>
+            <button type="button" role="tab" aria-label="Forecast view" title="Forecast view" aria-selected={view === 'forecast'} onClick={() => setView('forecast')} className={`rounded-md p-2 transition ${view === 'forecast' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><TrendingUp size={14} /></button>
+          </div>
+          <button type="button" className="btn-primary !px-3 !py-2 !text-xs" onClick={openLeadForm} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding a lead' : undefined}><Plus size={13} /> Lead</button>
         </div>
-        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-3">
-          <label className="relative min-w-48 max-w-64 flex-1">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+          <Badge variant="brand">{searchedLeads.length} {searchedLeads.length === 1 ? 'lead' : 'leads'}</Badge>
+          <Badge variant="hot">{searchedLeads.filter((lead) => lead.temperature === 'HOT').length} hot</Badge>
+          <label className="relative min-w-36 max-w-64 flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-            <input className="input !py-2 pl-9 !text-xs" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search" aria-label="Search leads" />
+            <input className="input !py-2 pl-9 !text-xs" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search leads" aria-label="Search leads" />
           </label>
-          <button className="btn-ghost !px-3 !py-2 !text-xs" onClick={() => setFilterOpen(true)}><Filter size={13} /> Filter</button>
-          <button className="btn-primary !px-3 !py-2 !text-xs" onClick={openLeadForm} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding a lead' : undefined}>+ Lead</button>
+          <button type="button" className="btn-ghost !px-3 !py-2 !text-xs" onClick={() => setFilterOpen(true)}><Filter size={13} /> Filter</button>
         </div>
       </div>
 
@@ -519,6 +555,7 @@ export default function LeadsPage() {
                   const product = PRODUCT_CODES.find((item) => item.code === lead.productCode);
                   const CompanyIcon = lead.status === 'COMPLETED' ? CheckCircle2 : CircleDot;
                   const isLinked = Boolean(lead.dealId && linkedDealIds.has(lead.dealId));
+                  const stageSla = stageSlaForLead(lead);
                   return <article key={lead.id} draggable={!isLinked}
                     onDragStart={(event) => {
                       event.dataTransfer.setData('text/lead-id', lead.id);
@@ -538,7 +575,7 @@ export default function LeadsPage() {
                       <InsuranceBadge code={product?.code ?? lead.productCode} />
                       <Badge variant={lead.temperature === 'HOT' ? 'hot' : lead.temperature === 'COLD' ? 'cold' : 'warm'}>{lead.temperature ?? 'WARM'}</Badge>
                       <Badge variant={lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win'}>{lead.status}</Badge>
-                      <Badge variant={lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win'}>{lead.status}</Badge>
+                      {stageSla.overdue && <Badge variant="hot"><Clock3 size={11} /> SLA overdue</Badge>}
                     </div>
                     <div className="mt-2 flex items-center justify-between border-t border-ink-700/80 pt-2 text-[11px]">
                       <span className="text-muted">MVR value</span>
@@ -580,18 +617,18 @@ export default function LeadsPage() {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-[#1B1E22] bg-ink-950">
-          <table className="w-full min-w-[1080px] table-fixed text-xs">
+          <table className="w-full min-w-[1080px] table-fixed text-xs" aria-label="Leads">
             <thead className="bg-[#111214] text-[11px] font-semibold text-[#A1A3AA]">
               <tr>
-                <th className="w-[12%] border-b border-ink-700 px-3 py-3 text-left">Lead Name</th>
-                <th className="w-[12%] border-b border-ink-700 px-3 py-3 text-left">Client Name</th>
-                <th className="w-[12%] border-b border-ink-700 px-3 py-3 text-left">Funnel Stage</th>
-                <th className="w-[11%] border-b border-ink-700 px-3 py-3 text-left">Insurance Type</th>
-                <th className="w-[7%] border-b border-ink-700 px-3 py-3 text-left">Lead Tag</th>
-                <th className="w-[11%] border-b border-ink-700 px-3 py-3 text-left">Activity Status</th>
-                <th className="w-[8%] border-b border-ink-700 px-3 py-3 text-left">Assigned To</th>
-                <th className="w-[13%] border-b border-ink-700 px-3 py-3 text-left">Expiry / Renewal Date</th>
-                <th className="w-[14%] border-b border-ink-700 px-3 py-3 text-left">Expected Closing Date</th>
+                <th className="w-[12%] border-b border-[#1B1E22] px-3 py-3 text-left">Lead Name</th>
+                <th className="w-[12%] border-b border-[#1B1E22] px-3 py-3 text-left">Client Name</th>
+                <th className="w-[12%] border-b border-[#1B1E22] px-3 py-3 text-left">Funnel Stage</th>
+                <th className="w-[11%] border-b border-[#1B1E22] px-3 py-3 text-left">Insurance Type</th>
+                <th className="w-[7%] border-b border-[#1B1E22] px-3 py-3 text-left">Lead Tag</th>
+                <th className="w-[11%] border-b border-[#1B1E22] px-3 py-3 text-left">Activity Status</th>
+                <th className="w-[8%] border-b border-[#1B1E22] px-3 py-3 text-left">Owner</th>
+                <th className="w-[13%] border-b border-[#1B1E22] px-3 py-3 text-left">Expiry / Renewal Date</th>
+                <th className="w-[14%] border-b border-[#1B1E22] px-3 py-3 text-left">Expected Closing Date</th>
               </tr>
             </thead>
             <tbody>
@@ -599,7 +636,8 @@ export default function LeadsPage() {
                 const stage = boardStageForLead(lead, linkedDealIds);
                 const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId;
                 const statusVariant = lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win';
-                return <tr key={lead.id} role="link" tabIndex={0} aria-label={`Open lead details for ${lead.title ?? lead.client}`} draggable={!lead.dealId || !linkedDealIds.has(lead.dealId)} className="cursor-pointer border-b border-ink-700/80 last:border-0 text-xs transition-colors hover:bg-[#111214] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-400"
+                const stageSla = stageSlaForLead(lead);
+                return <tr key={lead.id} role="link" tabIndex={0} aria-label={`Open lead details for ${lead.title ?? lead.client}`} draggable={!lead.dealId || !linkedDealIds.has(lead.dealId)} className="cursor-pointer border-b border-[#1B1E22] last:border-0 text-xs transition-colors hover:bg-[#111214] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-400"
                   onClick={() => setInspectedLeadId(lead.id)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
@@ -619,13 +657,19 @@ export default function LeadsPage() {
                   }}>
                   <td className="break-words px-3 py-3 font-semibold text-white">{lead.title ?? `${lead.client} lead`}</td>
                   <td className="break-words px-3 py-3 font-normal text-[#E1E2E5]">{lead.client}</td>
-                  <td className="break-words px-3 py-3 font-normal text-[#E1E2E5]">{stage}</td>
+                  <td className="break-words px-3 py-3 font-normal text-[#E1E2E5]">
+                    <span className="inline-flex items-center gap-1.5">{stage}
+                      {stageSla.overdue && <span className="inline-flex items-center gap-1 rounded-full border border-hot/40 bg-hot/10 px-2 py-0.5 text-[10px] font-semibold text-hot" title={`Current stage exceeded its ${stageSla.targetDays}-day SLA`} aria-label={`SLA overdue: current stage exceeded its ${stageSla.targetDays}-day target`}>
+                        <AlertTriangle size={11} /> Overdue
+                      </span>}
+                    </span>
+                  </td>
                   <td className="break-words px-3 py-3 font-normal"><InsuranceBadge code={lead.productCode} /></td>
                   <td className="px-3 py-3 font-normal"><Badge variant={lead.temperature === 'HOT' ? 'hot' : lead.temperature === 'COLD' ? 'cold' : 'warm'}>{lead.temperature}</Badge></td>
                   <td className="px-3 py-3 font-normal"><Badge variant={statusVariant}>{lead.status}</Badge></td>
                   <td className="px-3 py-3 font-normal"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#292B30] text-[9px] font-semibold text-[#A4A6AE]" title={ownerName}>{avatarCode(ownerName)}</span></td>
-                  <td className="px-3 py-3 font-normal text-[#E1E2E5]">{formatDate(lead.renewalDate)}</td>
-                  <td className="px-3 py-3 font-normal text-[#E1E2E5]">{formatDate(lead.closeDate ?? lead.renewalDate)}</td>
+                  <td className="px-3 py-3 font-normal text-[#E1E2E5]">{formatDate(lead.renewalDate) || '—'}</td>
+                  <td className="px-3 py-3 font-normal text-[#E1E2E5]">{formatDate(lead.closeDate ?? lead.renewalDate) || '—'}</td>
                 </tr>;
               })}
               {searchedLeads.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-muted">No leads found.</td></tr>}
