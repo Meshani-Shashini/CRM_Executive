@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertTriangle, ArrowRight, Building2, CalendarDays, Check, Clock3, FileText,
-  MessageSquare, Phone, Plus, ShieldCheck, UserRound, Wallet,
+  MessageSquare, Phone, Plus, ShieldCheck, UserRound, Wallet, Trash2,
 } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
@@ -63,18 +63,22 @@ export default function DealWorkspace({
   deals,
   onCreateDeal,
   onEditDeal,
+  onDeleteLead,
+  onDeleteDeal,
   initialSelectedKey,
   onClose,
 }: {
   deals: Deal[];
   onCreateDeal?: () => void;
   onEditDeal?: (deal: Deal) => void;
+  onDeleteLead?: (lead: Lead) => void;
+  onDeleteDeal?: (deal: Deal) => void;
   initialSelectedKey?: string;
   onClose?: () => void;
 }) {
   const {
     activities, setActivities, clients, setClients, deals: allDeals, setDeals, leads, setLeads,
-    products, pipelines, pipelineStages, stageHistory, setStageHistory, invoices, setInvoices, user, users,
+    products, pipelines, pipelineStages, stageHistory, setStageHistory, invoices, setInvoices, user, users, viewAsRole,
   } = useApp();
   const [selectedKey, setSelectedKey] = useState('');
   const [workspaceView, setWorkspaceView] = useState<'kanban' | 'inspection'>('kanban');
@@ -114,6 +118,9 @@ export default function DealWorkspace({
   const selectedDeal = selected?.kind === 'deal' ? selected.item as Deal : undefined;
   const selectedLead = selected?.kind === 'lead' ? selected.item as Lead : undefined;
   const selectedItem = selectedDeal ?? selectedLead;
+  const activeRole = viewAsRole ?? user.role;
+  const dealHasInvoice = Boolean(selectedDeal && (selectedDeal.linkedInvoiceId
+    || invoices.some((invoice) => invoice.linkedDealId === selectedDeal.id)));
   const selectedClient = selectedItem ? clientForItem(selectedItem, clients) : undefined;
   const selectedProduct = products.find((product) => product.code === selectedItem?.productCode)
     ?? products.find((product) => product.name === (selectedDeal?.product ?? ''));
@@ -664,7 +671,7 @@ export default function DealWorkspace({
         <div className="border-b border-ink-600 p-4">
           <div className="flex items-center justify-between">
             <div><h2 className="font-semibold text-white">Deals & Leads</h2><p className="mt-1 text-xs text-muted">{records.length} records</p></div>
-            {onCreateDeal && <button type="button" className="btn-primary !px-2.5 !py-2" onClick={onCreateDeal} aria-label="Create deal"><Plus size={15} /></button>}
+            {onCreateDeal && <button type="button" className="btn-primary !px-2.5 !py-2 !text-xs" onClick={onCreateDeal}>+ Deal</button>}
           </div>
           <input className="input mt-3" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search client, product, stage…" aria-label="Search deals and leads" />
           <select className="input mt-2" value={productFilter} onChange={(event) => setProductFilter(event.target.value)} aria-label="Filter by product">
@@ -678,7 +685,7 @@ export default function DealWorkspace({
               className={`w-full border-b border-ink-700/60 p-3 text-left transition ${selected?.key === key ? 'border-l-2 border-l-brand-400 bg-brand-500/10' : 'hover:bg-ink-750/40'}`}>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-white">{item.client}</div>
+                  <div className="truncate text-[13px] font-semibold text-white">{item.client}</div>
                   <div className="mt-1 truncate text-xs text-muted">{kind === 'deal' ? (item as Deal).product : (item as Lead).title}</div>
                 </div>
                 <Badge variant={kind === 'deal' ? 'brand' : 'muted'}>{kind}</Badge>
@@ -696,7 +703,7 @@ export default function DealWorkspace({
           ))}
           {records.length === 0 && <div className="p-5 text-center text-sm text-muted">No matching deals or leads.</div>}
         </div>
-        {onCreateDeal && <button type="button" className="btn-ghost m-3" onClick={onCreateDeal}><Plus size={14} /> New deal</button>}
+        {onCreateDeal && <button type="button" className="btn-ghost m-3 !text-xs" onClick={onCreateDeal}>+ Deal</button>}
       </aside>}
 
       <main className="glass min-h-[460px] overflow-y-auto rounded-2xl p-5 xl:min-h-0">
@@ -714,7 +721,11 @@ export default function DealWorkspace({
                 <p className="mt-1 text-sm text-muted">{selectedDeal?.product ?? selectedProduct?.name ?? selectedLead?.productCode} · {selectedPipeline?.name ?? 'No pipeline'} · Ref {selectedItem.id}</p>
               </div>
             </div>
-            {selectedDeal && onEditDeal && <button type="button" className="btn-ghost !py-1.5" onClick={() => onEditDeal(selectedDeal)}>Edit deal</button>}
+            <div className="flex items-center gap-2">
+              {selectedDeal && onEditDeal && <button type="button" className="btn-ghost !py-1.5 text-xs" onClick={() => onEditDeal(selectedDeal)}>Edit Deal</button>}
+              {activeRole === 'admin' && selectedLead && onDeleteLead && <button type="button" className="btn-ghost !py-1.5 text-xs text-hot" onClick={() => onDeleteLead(selectedLead)}><Trash2 size={13} />Delete Lead</button>}
+              {activeRole === 'admin' && selectedDeal && onDeleteDeal && <button type="button" className="btn-ghost !py-1.5 text-xs text-hot" disabled={dealHasInvoice} title={dealHasInvoice ? 'Deals linked to invoices cannot be deleted.' : undefined} onClick={() => onDeleteDeal(selectedDeal)}><Trash2 size={13} />Delete Deal</button>}
+            </div>
           </div>
 
           {selectedLead ? (

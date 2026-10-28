@@ -88,7 +88,7 @@ export default function Sidebar({
     <>
       {open && <div className="fixed inset-0 bg-black/60 z-30 lg:hidden" onClick={onClose} />}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-40 w-[190px] bg-ink-900 border-r border-ink-600 flex flex-col transition-transform duration-200 ${
+        className={`fixed lg:static inset-y-0 left-0 z-40 w-[180px] bg-[#0B0C0E] border-r border-[#1B1E22] flex flex-col transition-transform duration-200 ${
           open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
@@ -105,7 +105,7 @@ export default function Sidebar({
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 overflow-y-auto no-scrollbar px-3 py-3 space-y-4">
+        <nav className="flex-1 overflow-y-auto no-scrollbar px-3 py-4 space-y-6">
           {GROUPS.map((g) => {
             const visibleItems = g.items.filter((i) => i.roles.includes(activeRole));
             if (visibleItems.length === 0) return null;
@@ -120,7 +120,7 @@ export default function Sidebar({
                     </span>
                   )}
                 </div>
-                <div className="space-y-0.5">
+                <div className="space-y-1.5">
                   {visibleItems.map((item) => {
                     const Icon = item.icon;
                     const isActive = active === item.key;
@@ -130,7 +130,7 @@ export default function Sidebar({
                         href={`#/${item.key}`}
                         onClick={onClose}
                         aria-current={isActive ? 'page' : undefined}
-                        className={`nav-item w-full !px-2 !text-xs no-underline ${isActive ? 'nav-item-active' : ''}`}
+                        className={`nav-item w-full !px-2 !text-xs !font-medium no-underline ${isActive ? 'nav-item-active' : ''}`}
                       >
                         <Icon size={16} />
                         <span className="flex-1 text-left">{item.label}</span>

@@ -3,7 +3,7 @@ import { INSURERS } from '../data/catalogs';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
 import { Plus, Filter, X } from 'lucide-react';
-import type { Deal, ProductCode } from '../types';
+import type { Deal, Lead, ProductCode } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
 import DateInput from '../components/ui/DateInput';
@@ -14,7 +14,7 @@ import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from 
 import DealWorkspace from './DealWorkspace';
 
 export default function DealsPage() {
-  const { deals, setDeals, clients, user, pipelines, pipelineStages, products } = useApp();
+  const { deals, setDeals, setLeads, clients, user, viewAsRole, pipelines, pipelineStages, products, invoices } = useApp();
   const [createOpen, setCreateOpen] = useState(false);
   const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
   const [createPipelineId, setCreatePipelineId] = useState('');
@@ -31,6 +31,8 @@ export default function DealsPage() {
   const [dealCloseDate, setDealCloseDate] = useState('');
   const [dealNextActivityAt, setDealNextActivityAt] = useState('');
   const [dealNextActivityTitle, setDealNextActivityTitle] = useState('');
+  const [pendingLeadDeletion, setPendingLeadDeletion] = useState<Lead | null>(null);
+  const [pendingDealDeletion, setPendingDealDeletion] = useState<Deal | null>(null);
   const [dealSource, setDealSource] = useState('');
   const [dealNotes, setDealNotes] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
@@ -109,6 +111,35 @@ export default function DealsPage() {
     setDealNotes(deal.notes ?? deal.proposalSummary ?? '');
     setCreateError('');
     setCreateOpen(true);
+  };
+
+  const requestDeleteDeal = (deal: Deal) => {
+    if ((viewAsRole ?? user.role) !== 'admin') return;
+    if (deal.linkedInvoiceId || invoices.some((invoice) => invoice.linkedDealId === deal.id)) return;
+    setPendingDealDeletion(deal);
+  };
+
+  const requestDeleteLead = (lead: Lead) => {
+    if ((viewAsRole ?? user.role) !== 'admin') return;
+    if (deals.some((deal) => deal.id === lead.dealId || deal.leadId === lead.id)) {
+      window.alert('This Lead cannot be deleted because it has an associated Deal. Reassign or delete the associated Deal first.');
+      return;
+    }
+    setPendingLeadDeletion(lead);
+  };
+
+  const confirmDeleteLead = () => {
+    if (!pendingLeadDeletion || (viewAsRole ?? user.role) !== 'admin') return;
+    setLeads((current) => current.filter((lead) => lead.id !== pendingLeadDeletion.id));
+    setPendingLeadDeletion(null);
+  };
+
+  const confirmDeleteDeal = () => {
+    if (!pendingDealDeletion || (viewAsRole ?? user.role) !== 'admin') return;
+    const dealId = pendingDealDeletion.id;
+    setDeals((current) => current.filter((deal) => deal.id !== dealId));
+    setLeads((current) => current.map((lead) => lead.dealId === dealId ? { ...lead, dealId: undefined } : lead));
+    setPendingDealDeletion(null);
   };
 
   const createDeal = (event: FormEvent<HTMLFormElement>) => {
@@ -194,17 +225,17 @@ export default function DealsPage() {
         <div className="flex items-center gap-3">
           <div className="hidden text-right sm:block"><div className="text-[10px] uppercase text-muted">Open deals</div><div className="text-sm font-semibold text-white">{deals.length}</div></div>
           <button type="button" className="btn-ghost !py-1.5" onClick={() => setFilterOpen(true)}><Filter size={14} /> Filter</button>
-          <button type="button" className="btn-primary !py-1.5" onClick={openCreate} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding deals' : undefined}><Plus size={14} /> New Deal</button>
+          <button type="button" className="btn-primary !py-1.5 !text-xs" onClick={openCreate} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding deals' : undefined}>+ Deal</button>
         </div>
       </div>
-      <DealWorkspace deals={visibleDeals} onCreateDeal={openCreate} onEditDeal={openEditDeal} />
+      <DealWorkspace deals={visibleDeals} onCreateDeal={openCreate} onEditDeal={openEditDeal} onDeleteLead={requestDeleteLead} onDeleteDeal={requestDeleteDeal} />
 
       <Modal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title={editingDeal ? 'Edit Deal' : 'Create Deal'}
         subtitle={editingDeal ? 'Update the opportunity, financials, pipeline, and client context.' : 'Add a sales opportunity to the pipeline.'}
-        footer={<><button type="button" className="btn-ghost" onClick={() => { setCreateOpen(false); setEditingDeal(null); }}><X size={14} /> Cancel</button><button type="submit" form="new-deal-form" className="btn-primary"><Plus size={14} /> {editingDeal ? 'Update Deal' : 'Create Deal'}</button></>}
+        footer={<><button type="button" className="btn-ghost" onClick={() => { setCreateOpen(false); setEditingDeal(null); }}><X size={14} /> Cancel</button><button type="submit" form="new-deal-form" className="btn-primary">{editingDeal ? <><Plus size={14} /> Update Deal</> : '+ Deal'}</button></>}
       >
         <form id="new-deal-form" onSubmit={createDeal} noValidate className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Type of Insurance Product *"><ProductSelect pipelines={pipelines} name="productCode" required value={selectedProduct?.code ?? ''} onChange={setSelectedProduct} /></Field>
@@ -244,6 +275,26 @@ export default function DealsPage() {
       </Modal>
       <Modal open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Deals" size="sm" footer={<><button className="btn-ghost" onClick={() => setStageFilter('')}>Clear</button><button className="btn-primary" onClick={() => setFilterOpen(false)}>Apply Filter</button></>}>
         <Field label="Stage"><select className="input" value={stageFilter} onChange={(event) => setStageFilter(event.target.value)}><option value="">All stages</option>{[...new Set(deals.map((deal) => deal.stage))].map((stage) => <option key={stage}>{stage}</option>)}</select></Field>
+      </Modal>
+      <Modal
+        open={Boolean(pendingLeadDeletion)}
+        onClose={() => setPendingLeadDeletion(null)}
+        title="Delete lead?"
+        subtitle={`Delete “${pendingLeadDeletion?.title ?? pendingLeadDeletion?.client ?? ''}”? This action cannot be undone.`}
+        size="sm"
+        footer={<><button type="button" className="btn-ghost" onClick={() => setPendingLeadDeletion(null)}>Cancel</button><button type="button" className="btn-danger" disabled={(viewAsRole ?? user.role) !== 'admin'} onClick={confirmDeleteLead}>Delete Lead</button></>}
+      >
+        <p className="text-sm text-muted">This lead will be permanently removed from the funnel.</p>
+      </Modal>
+      <Modal
+        open={Boolean(pendingDealDeletion)}
+        onClose={() => setPendingDealDeletion(null)}
+        title="Delete deal?"
+        subtitle={`Delete “${pendingDealDeletion?.client ?? ''}”? This action cannot be undone.`}
+        size="sm"
+        footer={<><button type="button" className="btn-ghost" onClick={() => setPendingDealDeletion(null)}>Cancel</button><button type="button" className="btn-danger" disabled={(viewAsRole ?? user.role) !== 'admin'} onClick={confirmDeleteDeal}>Delete Deal</button></>}
+      >
+        <p className="text-sm text-muted">The deal will be removed from its pipeline and unlinked from its lead. Deals with an associated invoice cannot be deleted.</p>
       </Modal>
     </div>
   );

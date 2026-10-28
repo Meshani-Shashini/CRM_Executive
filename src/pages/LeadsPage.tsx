@@ -51,11 +51,12 @@ function boardStageIcon(stage: LeadBoardStage) {
 export default function LeadsPage() {
   const {
     leads, setLeads, deals, clients, setClients, user, users, pipelines,
-    customerLookups, setCustomerLookups, products, activities, setActivities,
+    customerLookups, setCustomerLookups, products, activities, setActivities, viewAsRole,
   } = useApp();
+  const activeRole = viewAsRole ?? user.role;
   const PRODUCT_CODES = products;
   const [selectedPipelineId, setSelectedPipelineId] = useState('');
-  const [view, setView] = useState<'list' | 'funnel' | 'forecast'>('funnel');
+  const [view, setView] = useState<'list' | 'funnel' | 'forecast'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [newLeadOpen, setNewLeadOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
@@ -182,7 +183,7 @@ export default function LeadsPage() {
   };
 
   const deleteLead = (lead: Lead) => {
-    if (user.role !== 'admin' && user.role !== 'sales') return;
+    if (activeRole !== 'admin') return;
     const linkedDeal = deals.some((deal) => deal.id === lead.dealId || deal.leadId === lead.id);
     if (linkedDeal) {
       window.alert('This Lead cannot be deleted because it has an associated Deal. Reassign or delete the associated Deal first.');
@@ -192,9 +193,10 @@ export default function LeadsPage() {
   };
 
   const confirmDeleteLead = () => {
-    if (!pendingLeadDeletion) return;
+    if (!pendingLeadDeletion || activeRole !== 'admin') return;
     setLeads((current) => current.filter((item) => item.id !== pendingLeadDeletion.id));
     setPendingLeadDeletion(null);
+    setInspectedLeadId('');
   };
 
   const resetLeadForm = () => {
@@ -453,20 +455,23 @@ export default function LeadsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-1 rounded-lg border border-ink-600 bg-ink-800/60 p-1" role="tablist" aria-label="Lead views">
-          <button role="tab" aria-selected={view === 'list'} onClick={() => setView('list')} className={`rounded-md px-3 py-1.5 text-sm ${view === 'list' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}><List size={14} className="mr-1.5 inline" />List</button>
-          <button role="tab" aria-selected={view === 'funnel'} onClick={() => setView('funnel')} className={`rounded-md px-3 py-1.5 text-sm ${view === 'funnel' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}><Columns3 size={14} className="mr-1.5 inline" />Funnel</button>
-          <button role="tab" aria-selected={view === 'forecast'} onClick={() => setView('forecast')} className={`rounded-md px-3 py-1.5 text-sm ${view === 'forecast' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}><TrendingUp size={14} className="mr-1.5 inline" />Forecast</button>
-        </div>
-        <button className="btn-primary" onClick={openLeadForm} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding a lead' : undefined}><Plus size={15} /> Add a New Lead</button>
+      <div>
+        <h2 className="text-lg font-semibold text-white">All Leads</h2>
+        <p className="mt-1 text-xs text-muted">View, sort, and act on all leads.</p>
       </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="relative min-w-56 flex-1">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-          <input className="input pl-9" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search leads" aria-label="Search leads" />
-        </label>
-        <button className="btn-ghost" onClick={() => setFilterOpen(true)}><Filter size={14} /> Filter</button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-1 rounded-lg border border-ink-600 bg-ink-800/60 p-1" role="tablist" aria-label="Lead views">
+          <button role="tab" aria-selected={view === 'list'} onClick={() => setView('list')} className={`rounded-md px-3 py-1.5 text-xs font-medium ${view === 'list' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}><List size={13} className="mr-1.5 inline" />List</button>
+          <button role="tab" aria-selected={view === 'funnel' || view === 'forecast'} onClick={() => setView('funnel')} className={`rounded-md px-3 py-1.5 text-xs font-medium ${view !== 'list' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}><Columns3 size={13} className="mr-1.5 inline" />Funnels</button>
+        </div>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-3">
+          <label className="relative min-w-48 max-w-64 flex-1">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+            <input className="input !py-2 pl-9 !text-xs" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search" aria-label="Search leads" />
+          </label>
+          <button className="btn-ghost !px-3 !py-2 !text-xs" onClick={() => setFilterOpen(true)}><Filter size={13} /> Filter</button>
+          <button className="btn-primary !px-3 !py-2 !text-xs" onClick={openLeadForm} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding a lead' : undefined}>+ Lead</button>
+        </div>
       </div>
 
       {inspectedLeadId ? (
@@ -474,10 +479,15 @@ export default function LeadsPage() {
           deals={deals}
           initialSelectedKey={`lead:${inspectedLeadId}`}
           onClose={() => setInspectedLeadId('')}
+          onDeleteLead={deleteLead}
         />
       ) : activePipelines.length === 0 ? (
         <div className="glass rounded-2xl p-8 text-center text-sm text-muted">Create an active pipeline before adding leads.</div>
       ) : view === 'funnel' ? (
+        <div>
+        <div className="mb-2 flex justify-end">
+          <button type="button" className="text-xs text-muted hover:text-white" onClick={() => setView('forecast')}><TrendingUp size={13} className="mr-1 inline" />Forecast</button>
+        </div>
         <div className="overflow-x-auto pb-3">
         <div className="grid min-w-[1560px] grid-cols-6 gap-3">
           {leadsByBoardStage.map(({ stage, leads: stageLeads }) => {
@@ -540,7 +550,7 @@ export default function LeadsPage() {
                     </label>
                     {(user.role === 'admin' || user.role === 'sales') && <div className="mt-2 flex justify-between border-t border-ink-700/80 pt-2">
                       <button type="button" className="btn-ghost !py-1 text-[11px]" onClick={(event) => { event.stopPropagation(); openEditLead(lead); }}><Pencil size={12} /> Edit</button>
-                      <button type="button" className="btn-ghost !py-1 text-[11px] text-hot" onClick={(event) => { event.stopPropagation(); deleteLead(lead); }}>Delete</button>
+                      {activeRole === 'admin' && <button type="button" className="btn-ghost !py-1 text-[11px] text-hot" onClick={(event) => { event.stopPropagation(); deleteLead(lead); }}>Delete</button>}
                     </div>}
                   </article>;
                 })}
@@ -550,9 +560,10 @@ export default function LeadsPage() {
           })}
         </div>
         </div>
+        </div>
       ) : view === 'forecast' ? (
         <div className="glass rounded-2xl p-5">
-          <div className="mb-4"><h2 className="font-semibold text-white">Lead Forecast</h2><p className="mt-1 text-xs text-muted">Open lead exposure converted to MVR, grouped by funnel stage. Forecast values are unweighted estimates.</p></div>
+          <div className="mb-4 flex items-start justify-between gap-3"><div><h2 className="font-semibold text-white">Lead Forecast</h2><p className="mt-1 text-xs text-muted">Open lead exposure converted to MVR, grouped by funnel stage. Forecast values are unweighted estimates.</p></div><button type="button" className="text-xs text-muted hover:text-white" onClick={() => setView('funnel')}>Back to Funnels</button></div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {leadsByBoardStage.map(({ stage, leads: stageLeads }) => {
               const total = stageLeads.reduce((sum, lead) => sum + (lead.valueMvr ?? toMvr(lead.value ?? lead.premium, lead.currency ?? 'MVR', lead.exchangeRate)), 0);
@@ -565,20 +576,19 @@ export default function LeadsPage() {
           </div>
         </div>
       ) : (
-        <div className="glass rounded-2xl overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-ink-900/60 text-muted text-[11px] uppercase tracking-wider">
+        <div className="overflow-x-auto rounded-lg border border-[#1B1E22] bg-ink-950">
+          <table className="w-full min-w-[1080px] table-fixed text-xs">
+            <thead className="bg-[#111214] text-[11px] font-semibold text-[#A1A3AA]">
               <tr>
-                <th className="text-left px-4 py-3 font-medium">Lead Name</th>
-                <th className="text-left px-4 py-3 font-medium">Client</th>
-                <th className="text-left px-4 py-3 font-medium">Funnel Stage</th>
-                <th className="text-left px-4 py-3 font-medium">Insurance Type</th>
-                <th className="text-left px-4 py-3 font-medium">Lead Tag</th>
-                <th className="text-left px-4 py-3 font-medium">Activity Status</th>
-                <th className="text-left px-4 py-3 font-medium">Owner</th>
-                <th className="text-left px-4 py-3 font-medium">Expiry / Renewal</th>
-                <th className="text-left px-4 py-3 font-medium">Expected Closing Date</th>
-                {(user.role === 'admin' || user.role === 'sales') && <th className="text-right px-4 py-3 font-medium">Actions</th>}
+                <th className="w-[12%] border-b border-ink-700 px-3 py-3 text-left">Lead Name</th>
+                <th className="w-[12%] border-b border-ink-700 px-3 py-3 text-left">Client Name</th>
+                <th className="w-[12%] border-b border-ink-700 px-3 py-3 text-left">Funnel Stage</th>
+                <th className="w-[11%] border-b border-ink-700 px-3 py-3 text-left">Insurance Type</th>
+                <th className="w-[7%] border-b border-ink-700 px-3 py-3 text-left">Lead Tag</th>
+                <th className="w-[11%] border-b border-ink-700 px-3 py-3 text-left">Activity Status</th>
+                <th className="w-[8%] border-b border-ink-700 px-3 py-3 text-left">Assigned To</th>
+                <th className="w-[13%] border-b border-ink-700 px-3 py-3 text-left">Expiry / Renewal Date</th>
+                <th className="w-[14%] border-b border-ink-700 px-3 py-3 text-left">Expected Closing Date</th>
               </tr>
             </thead>
             <tbody>
@@ -586,7 +596,14 @@ export default function LeadsPage() {
                 const stage = boardStageForLead(lead, linkedDealIds);
                 const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId;
                 const statusVariant = lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win';
-                return <tr key={lead.id} draggable={!lead.dealId || !linkedDealIds.has(lead.dealId)} className="table-row"
+                return <tr key={lead.id} role="link" tabIndex={0} aria-label={`Open lead details for ${lead.title ?? lead.client}`} draggable={!lead.dealId || !linkedDealIds.has(lead.dealId)} className="cursor-pointer border-b border-ink-700/80 last:border-0 text-xs transition-colors hover:bg-[#111214] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-400"
+                  onClick={() => setInspectedLeadId(lead.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setInspectedLeadId(lead.id);
+                    }
+                  }}
                   onDragStart={(event) => {
                     event.dataTransfer.setData('text/lead-id', lead.id);
                     event.dataTransfer.effectAllowed = 'move';
@@ -597,23 +614,18 @@ export default function LeadsPage() {
                     const draggedLead = searchedLeads.find((item) => item.id === event.dataTransfer.getData('text/lead-id'));
                     if (draggedLead) moveLeadToStage(draggedLead, stage);
                   }}>
-                  <td className="px-4 py-3"><button type="button" onClick={() => setInspectedLeadId(lead.id)} className="text-left"><div className="font-medium text-white">{lead.title ?? `${lead.client} lead`}</div></button></td>
-                  <td className="px-4 py-3 text-muted">{lead.client}</td>
-                  <td className="px-4 py-3 text-muted">{stage}</td>
-                  <td className="px-4 py-3"><InsuranceBadge code={lead.productCode} /></td>
-                  <td className="px-4 py-3"><Badge variant={lead.temperature === 'HOT' ? 'hot' : lead.temperature === 'COLD' ? 'cold' : 'warm'}>{lead.temperature}</Badge></td>
-                  <td className="px-4 py-3"><Badge variant={statusVariant}>{lead.status}</Badge></td>
-                  <td className="px-4 py-3"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1E2024] text-[10px] font-semibold text-[#8E95A2]" title={ownerName}>{avatarCode(ownerName)}</span></td>
-                  <td className="px-4 py-3 text-muted">{formatDate(lead.renewalDate)}</td>
-                  <td className="px-4 py-3 text-muted">{formatDate(lead.closeDate ?? lead.renewalDate)}</td>
-                  {(user.role === 'admin' || user.role === 'sales') && (
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex justify-end gap-2"><button type="button" className="btn-ghost !py-1.5" onClick={() => openEditLead(lead)}><Pencil size={13} /> Edit Lead</button><button type="button" className="btn-ghost !py-1.5 text-hot" onClick={() => deleteLead(lead)}>Delete</button></div>
-                    </td>
-                  )}
+                  <td className="break-words px-3 py-3 font-semibold text-white">{lead.title ?? `${lead.client} lead`}</td>
+                  <td className="break-words px-3 py-3 font-normal text-[#E1E2E5]">{lead.client}</td>
+                  <td className="break-words px-3 py-3 font-normal text-[#E1E2E5]">{stage}</td>
+                  <td className="break-words px-3 py-3 font-normal"><InsuranceBadge code={lead.productCode} /></td>
+                  <td className="px-3 py-3 font-normal"><Badge variant={lead.temperature === 'HOT' ? 'hot' : lead.temperature === 'COLD' ? 'cold' : 'warm'}>{lead.temperature}</Badge></td>
+                  <td className="px-3 py-3 font-normal"><Badge variant={statusVariant}>{lead.status}</Badge></td>
+                  <td className="px-3 py-3 font-normal"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#292B30] text-[9px] font-semibold text-[#A4A6AE]" title={ownerName}>{avatarCode(ownerName)}</span></td>
+                  <td className="px-3 py-3 font-normal text-[#E1E2E5]">{formatDate(lead.renewalDate)}</td>
+                  <td className="px-3 py-3 font-normal text-[#E1E2E5]">{formatDate(lead.closeDate ?? lead.renewalDate)}</td>
                 </tr>;
               })}
-              {searchedLeads.length === 0 && <tr><td colSpan={user.role === 'admin' || user.role === 'sales' ? 10 : 9} className="px-4 py-8 text-center text-muted">No leads found.</td></tr>}
+              {searchedLeads.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-muted">No leads found.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -625,7 +637,7 @@ export default function LeadsPage() {
         title={pendingLeadStageChange ? 'Update Lead Stage' : editingLead ? 'Edit Lead' : 'Add Lead'}
         subtitle={pendingLeadStageChange ? `Move from ${pendingLeadStageChange.from} to ${pendingLeadStageChange.to}.` : editingLead ? 'Update this lead in its sales pipeline.' : 'Create a lead in a sales pipeline.'}
         size="lg"
-        footer={<><button type="button" className="btn-ghost" onClick={() => { setNewLeadOpen(false); resetLeadForm(); }}><X size={14} /> Cancel</button><button type="submit" form="new-lead-form" className="btn-primary"><Plus size={14} /> {editingLead ? 'Update Lead' : 'Save Lead'}</button></>}
+        footer={<><button type="button" className="btn-ghost" onClick={() => { setNewLeadOpen(false); resetLeadForm(); }}><X size={14} /> Cancel</button><button type="submit" form="new-lead-form" className="btn-primary">{editingLead ? <><Pencil size={14} /> Update Lead</> : '+ Lead'}</button></>}
       >
         <form id="new-lead-form" onSubmit={createLead} noValidate className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <SectionHeading title="Basic Information" />
@@ -837,7 +849,7 @@ export default function LeadsPage() {
         title="Delete lead?"
         subtitle={`Delete “${pendingLeadDeletion?.title ?? pendingLeadDeletion?.client ?? ''}”? This action cannot be undone.`}
         size="sm"
-        footer={<><button type="button" className="btn-ghost" onClick={() => setPendingLeadDeletion(null)}>Cancel</button><button type="button" className="btn-primary !bg-hot-600" onClick={confirmDeleteLead}>Delete Lead</button></>}
+        footer={<><button type="button" className="btn-ghost" onClick={() => setPendingLeadDeletion(null)}>Cancel</button><button type="button" className="btn-primary !bg-hot-600" disabled={activeRole !== 'admin'} onClick={confirmDeleteLead}>Delete Lead</button></>}
       >
         <p className="text-sm text-muted">This lead will be permanently removed from the funnel.</p>
       </Modal>
