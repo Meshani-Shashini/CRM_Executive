@@ -6,7 +6,15 @@ const DEMO_PIPELINES: Pipeline[] = [
   { id: 'ui-test-pipeline-commercial', tenantId: TENANT_ID, name: 'Commercial Property', code: 'COMMERCIAL_ENG', isActive: true },
   { id: 'ui-test-pipeline-marine', tenantId: TENANT_ID, name: 'Marine Cargo', code: 'MARINE_CARGO', isActive: true },
   { id: 'ui-test-pipeline-liability', tenantId: TENANT_ID, name: 'Casualty Liability', code: 'CASUALTY_LIABILITY', isActive: true },
+  { id: 'ui-test-pipeline-sla-none', tenantId: TENANT_ID, name: 'SLA Baseline Test', code: 'SLA_BASELINE_TEST', isActive: true },
 ];
+
+const DEMO_SLA_TARGET_DAYS: Record<string, number> = {
+  'ui-test-pipeline-commercial': 14,
+  'ui-test-pipeline-marine': 12,
+  'ui-test-pipeline-liability': 10,
+  'ui-test-pipeline-sla-none': 0,
+};
 
 const STAGE_NAMES = [
   'Fact-Finding & Risk Survey',
@@ -40,7 +48,7 @@ export function createSampleWorkspace(owner: User): {
     name,
     stageOrder: index + 1,
     winProbabilityPct: [20, 40, 60, 80, 100, 0][index],
-    stagnationDaysThreshold: index === 5 ? 0 : 14,
+    stagnationDaysThreshold: index === 5 ? 0 : DEMO_SLA_TARGET_DAYS[pipeline.id],
   })));
   const contactProfiles = (
     prefix: string,
@@ -123,24 +131,47 @@ export function createSampleWorkspace(owner: User): {
       tags: ['COLD', 'UI TEST'],
       accountStatus: 'active',
     },
+    {
+      id: 'ui-test-client-sla',
+      name: 'Atoll Baseline Services',
+      tin: 'TST-SLA-004',
+      country: 'Maldives',
+      phone: '+960 777 0404',
+      email: 'office@atollbaseline.example.test',
+      address: 'Fuvahmulah, Maldives',
+      contactPerson: 'Hassan Najeeb',
+      contacts: contactProfiles('atollbaseline', 'ui-test-lead-sla-none', 'ui-test-deal-sla-none', { name: 'Hassan Najeeb', email: 'hassan.najeeb@example.test', phone: '+960 777 0404', telegram: '@hassann' }),
+      sumInsured: 5500000,
+      premium: 110000,
+      expiry: inDays(180).slice(0, 10),
+      insurer: 'Island Assurance',
+      productCode: 'CF',
+      class: 'Fire',
+      ownerId: owner.id,
+      tags: ['COLD', 'UI TEST', 'NO SLA'],
+      accountStatus: 'active',
+    },
   ];
 
   const leadDefinitions = [
-    { id: 'ui-test-lead-cf', clientId: 'ui-test-client-cf', client: 'Lagoon View Resort', title: 'Commercial property and fire renewal', contact: 'Aishath Mariyam', productCode: 'CF', insuranceClass: 'Fire', temperature: 'HOT' as const, stage: 'Meetings Ongoing', amount: 25000000 },
-    { id: 'ui-test-lead-sh', clientId: 'ui-test-client-sh', client: 'Oceanic Vessel Services', title: 'Hull insurance placement', contact: 'Ibrahim Rasheed', productCode: 'SH', insuranceClass: 'Marine', temperature: 'WARM' as const, stage: 'Contact Made', amount: 12500000 },
-    { id: 'ui-test-lead-tl', clientId: 'ui-test-client-tl', client: 'Coral Bay Hospitality', title: 'Third-party liability programme', contact: 'Fathimath Shifa', productCode: 'TL', insuranceClass: 'Miscellaneous', temperature: 'COLD' as const, stage: 'Lead Identified', amount: 8000000 },
+    { id: 'ui-test-lead-cf', clientId: 'ui-test-client-cf', client: 'Lagoon View Resort', title: 'Commercial property and fire renewal', contact: 'Aishath Mariyam', productCode: 'CF', insuranceClass: 'Fire', temperature: 'HOT' as const, stage: 'Lead Identified', amount: 25000000, slaStatus: 'GREEN', durationDays: 5, targetDays: 14 },
+    { id: 'ui-test-lead-sh', clientId: 'ui-test-client-sh', client: 'Oceanic Vessel Services', title: 'Hull insurance placement', contact: 'Ibrahim Rasheed', productCode: 'SH', insuranceClass: 'Marine', temperature: 'WARM' as const, stage: 'Contact Made', amount: 12500000, slaStatus: 'AMBER', durationDays: 11, targetDays: 12 },
+    { id: 'ui-test-lead-tl', clientId: 'ui-test-client-tl', client: 'Coral Bay Hospitality', title: 'Third-party liability programme', contact: 'Fathimath Shifa', productCode: 'TL', insuranceClass: 'Miscellaneous', temperature: 'COLD' as const, stage: 'Key Person Identified', amount: 8000000, slaStatus: 'RED', durationDays: 18, targetDays: 10 },
+    { id: 'ui-test-lead-sla-none', clientId: 'ui-test-client-sla', client: 'Atoll Baseline Services', title: 'New commercial property opportunity - no SLA', contact: 'Hassan Najeeb', productCode: 'CF', insuranceClass: 'Fire', temperature: 'COLD' as const, stage: 'Lead Identified', amount: 5500000, slaStatus: 'NO SLA', durationDays: 0, targetDays: 0 },
   ];
 
   const leads: Lead[] = leadDefinitions.map((definition, index) => {
     const client = clients[index];
-    const { stage, amount, ...leadFields } = definition;
+    const { stage, amount, slaStatus, durationDays, targetDays, ...leadFields } = definition;
+    const justStarted = durationDays === 0;
+    const stageEnteredAt = justStarted ? new Date().toISOString() : daysAgo(durationDays);
     return {
       ...leadFields,
       person: leadFields.contact,
       clientId: client.id,
       value: amount,
       valueMvr: amount,
-      createdAt: daysAgo(index + 3),
+      createdAt: justStarted ? stageEnteredAt : daysAgo(durationDays + 2),
       currency: 'MVR',
       pipelineId: DEMO_PIPELINES[index].id,
       closeDate: inDays(20 + index * 10).slice(0, 10),
@@ -154,16 +185,16 @@ export function createSampleWorkspace(owner: User): {
       contact: leadFields.contact,
       funnelStage: stage,
       country: client.country,
-      source: 'UI test fixture',
-      notes: 'Sample lead for detail layout and stage tracking.',
+      source: `UI test fixture - SLA ${slaStatus}`,
+      notes: `SLA test scenario ${slaStatus}: ${durationDays} days in the active stage against a ${targetDays}-day target.`,
       renewalDate: client.expiry,
       sumInsured: client.sumInsured,
       premium: client.premium,
       ownerId: owner.id,
       status: index === 0 ? 'IN-PROGRESS' : 'TO-DO',
       lastActivity: 'Sample activity',
-      routedAt: daysAgo(index, 2),
-      stageChangedAt: daysAgo(index, 2),
+      routedAt: stageEnteredAt,
+      stageChangedAt: stageEnteredAt,
       ...(index === 0 ? { dealId: 'ui-test-deal-cf' } : {}),
     };
   });
@@ -175,11 +206,11 @@ export function createSampleWorkspace(owner: User): {
       throw new Error(`Could not create sample deal for ${definition.productCode}: configured stage or product is missing.`);
     }
     return {
-      id: `ui-test-deal-${['cf', 'sh', 'tl'][index]}`,
-      ...(index === 0 ? { leadId: definition.id } : {}),
+      id: `ui-test-deal-${['cf', 'sh', 'tl', 'sla-none'][index]}`,
+      leadId: definition.id,
       pipelineId: DEMO_PIPELINES[index].id,
-      createdAt: daysAgo(index + 1),
-      stageChangedAt: daysAgo(index, index + 1),
+      createdAt: definition.durationDays === 0 ? new Date().toISOString() : daysAgo(definition.durationDays + 2),
+      stageChangedAt: definition.durationDays === 0 ? new Date().toISOString() : daysAgo(definition.durationDays),
       client: definition.client,
       clientId: definition.clientId,
       product: product.name,
@@ -199,8 +230,8 @@ export function createSampleWorkspace(owner: User): {
       contactPhone: clients[index].phone,
       whatsapp: clients[index].contacts?.[0].whatsapp,
       telegram: clients[index].contacts?.[0].telegram,
-      source: 'UI test fixture',
-      notes: 'Sample deal for detail layout and stage tracking.',
+      source: `UI test fixture - SLA ${definition.slaStatus}`,
+      notes: `SLA test scenario ${definition.slaStatus}: ${definition.durationDays} days in the active stage against a ${definition.targetDays}-day target.`,
     };
   });
 
@@ -209,7 +240,8 @@ export function createSampleWorkspace(owner: User): {
     if (!stage) {
       throw new Error(`Could not create stage history for sample deal ${deal.id}: its current stage is missing.`);
     }
-    const enteredAt = daysAgo(index, index + 1);
+    const durationDays = leadDefinitions[index].durationDays;
+    const enteredAt = durationDays === 0 ? deal.stageChangedAt ?? new Date().toISOString() : daysAgo(durationDays);
     return {
       id: `ui-test-stage-history-${deal.id}`,
       tenantId: TENANT_ID,
