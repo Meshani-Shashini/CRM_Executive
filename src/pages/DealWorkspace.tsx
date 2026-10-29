@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   Activity as ActivityIcon, AlertTriangle, ArrowLeft, ArrowRight, Building2, CalendarDays, Check, Clock3, Columns3,
-  FileText, List, Pencil, Plus, ShieldCheck, Target, Wallet, Trash2,
+  FileText, List, Pencil, Plus, ShieldCheck, Wallet, Trash2,
 } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
@@ -1127,7 +1127,7 @@ export default function DealWorkspace({
         {onCreateDeal && <button type="button" className="btn-ghost m-3 !text-xs" onClick={onCreateDeal}>+ Deal</button>}
       </aside>}
 
-      <main className={`glass min-h-[460px] min-w-0 overflow-y-auto rounded-2xl p-3 sm:p-4 xl:min-h-0 ${selectedLead ? 'flex flex-col' : ''}`}>
+      <main className={`glass min-h-[460px] min-w-0 overflow-y-auto rounded-2xl px-3 py-1.5 sm:px-4 sm:py-1.5 xl:min-h-0 ${selectedLead ? 'flex flex-col' : ''}`}>
         {!selectedItem ? (
           <div className="flex h-full min-h-64 flex-col items-center justify-center text-center">
             <ShieldCheck size={30} className="text-brand-400" /><h2 className="mt-3 font-semibold text-white">Your placement workspace</h2>
@@ -1159,21 +1159,18 @@ export default function DealWorkspace({
             </div>
           </div>
 
-          <section aria-label={progressDeal ? 'Placement telemetry stage tracker' : 'Lead telemetry stage tracker'} className={`telemetry-panel order-1 mt-2 min-w-0 rounded-xl ${selectedLead ? 'p-1.5' : 'p-2.5'}`}>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <div className="flex items-center gap-2">
-                  <h2 className="sr-only">{progressDeal ? 'Placement telemetry' : 'Lead telemetry'}</h2>
-                  <ActivityIcon size={14} className="text-[#A7F2C5]" aria-hidden="true" />
-                  {progressDeal && <span className="text-[10px] tracking-wide text-[#6C727F]" title={`${selectedPipeline?.name ?? 'Pipeline'} stage sequence`}>{selectedPipeline?.name ?? 'Pipeline'}</span>}
-                </div>
-                <span className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-[#27C272]">
-                  {telemetryOverride && <span className="text-[#E09228]">Test · {telemetryOverride.label}</span>}
-                  <span className="telemetry-live-dot" aria-hidden="true" /><span className="sr-only">Live tracking</span>
-                </span>
+          <section aria-label={progressDeal ? 'Placement telemetry stage tracker' : 'Lead telemetry stage tracker'} className="telemetry-panel order-1 mt-2 min-w-0 rounded-xl px-2 py-1.5">
+            <h2 className="sr-only">{progressDeal ? 'Placement telemetry' : 'Lead telemetry'}</h2>
+            {stageTimeline.length ? <>
+              <div className="mb-1.5 flex items-center gap-1.5">
+                <ActivityIcon size={13} className="text-[#A7F2C5]" aria-hidden="true" />
+                <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#A7F2C5]">{progressDeal ? selectedPipeline?.name ?? 'Pipeline' : 'Lead Telemetry'}</span>
+                <span className="telemetry-live-dot" aria-hidden="true" />
+                <span className="sr-only">Live tracking</span>
+                {telemetryOverride && <span className="ml-auto max-w-24 truncate font-mono text-[9px] uppercase tracking-wider text-[#E09228]" title={`Test · ${telemetryOverride.label}`}>Test · {telemetryOverride.label}</span>}
               </div>
-              <div className={`${selectedLead ? 'mt-1' : 'mt-2'} min-w-0`}>
-                {stageTimeline.length ? <div className={`-mx-1 w-full max-w-full overflow-x-auto px-1 stage-stepper-scroll ${selectedLead ? 'pb-1' : 'pb-2'}`}>
-                  <ol className="telemetry-track flex w-max min-w-full items-start justify-between gap-1">
+              <div className="w-full min-w-0">
+                <ol className="telemetry-track flex w-full items-start justify-between">
                       {stageTimeline.map((stage) => {
                         const pipelineStage = typeof progressStages[stage.index] === 'string'
                           ? undefined
@@ -1189,49 +1186,34 @@ export default function DealWorkspace({
                           : stageElapsedMilliseconds;
                         const health = stageSlaHealth(durationMilliseconds, stage.targetDays);
                         const stageOverdue = health === 'overdue';
-                        const healthLabel = health === 'overdue' ? 'DRAGGED'
-                          : health === 'warning' ? 'AT RISK'
-                            : health === 'healthy' ? 'ON TRACK' : 'NO SLA';
-                        const healthColor = health === 'overdue' ? '#FF3366'
-                          : health === 'warning' ? '#E09228'
-                            : health === 'healthy' ? '#27C272' : '#A7F2C5';
-                        return <li key={stage.key} className="telemetry-step relative w-36 shrink-0">
-                          {stage.index < stageTimeline.length - 1 && <span
-                            className={`telemetry-connector ${selectedLead ? 'is-compact' : ''} ${stage.done ? 'is-complete' : ''}`}
-                            aria-hidden="true" />}
+                        const activeDateLabel = stage.active && Number.isFinite(stageEnteredAtMilliseconds)
+                          ? new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' })
+                            .format(stageEnteredAtMilliseconds)
+                            .replace(' ', '-')
+                            .toUpperCase()
+                          : '';
+                        return <li key={stage.key} className="telemetry-step relative min-w-0 flex-1">
                           <button type="button" disabled={!progressDeal || stage.active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
                             onClick={() => pipelineStage && progressDeal && requestStageChange(pipelineStage, progressDeal)}
                             title={stage.active && stageOverdue ? `SLA overdue: stage exceeded its ${stage.targetDays}-day target` : stage.active && health === 'warning' ? `SLA warning: stage is approaching its ${stage.targetDays}-day target` : stage.name}
                             aria-label={`${stage.name}${stage.active ? `; stage duration ${formatStageDuration(stageElapsedMilliseconds ?? 0)}; total ${formatDays(stage.cumulative)}` : stage.done ? '; completed' : '; upcoming'}${stage.active && stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : stage.active && health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
                             aria-current={stage.active ? 'step' : undefined}
-                            className={`telemetry-stage relative z-[1] flex w-full flex-col items-center border-0 bg-transparent px-1 py-0 text-center disabled:cursor-default ${stage.active ? 'is-active' : stage.done ? 'is-complete' : 'is-pending'}`}>
-                            <span className={`telemetry-node ${stage.active ? `is-${health}` : stage.done ? 'is-complete' : ''}`}>
-                              {stage.active && (health === 'overdue' || health === 'warning') ? <Clock3 size={12} aria-hidden="true" /> : stage.done ? <Check size={12} aria-hidden="true" /> : <span className="telemetry-node-core" />}
-                            </span>
-                            <span className={`mt-1 whitespace-nowrap text-[10px] font-semibold leading-4 sm:text-[11px] ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#808896]'}`}>
+                            className={`telemetry-stage relative z-[1] flex w-full flex-col items-center border-0 bg-transparent px-0.5 py-0 text-center disabled:cursor-default ${stage.active ? 'is-active' : stage.done ? 'is-complete' : 'is-pending'}`}>
+                            <span className={`flex h-7 w-full items-center justify-center whitespace-nowrap text-xs font-semibold leading-4 tracking-normal ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#89919C]'}`}>
                               {stage.name}
                             </span>
-                            {stage.active && selectedLead && <span className="telemetry-metric telemetry-metric-compact flex shrink-0 flex-nowrap items-center gap-x-1 whitespace-nowrap font-mono text-[8px] leading-none text-[#C9D2CC]"
-                              aria-label={`${formatDays(stageElapsedMilliseconds)} elapsed, ${stage.targetDays > 0 ? `${stage.targetDays} days target` : 'no target'}${stage.cumulative !== undefined ? `, ${formatDays(stage.cumulative)} total` : ''}`}>
-                              <span><Clock3 size={10} aria-hidden="true" />{formatDays(stageElapsedMilliseconds)}</span>
-                              <span><Target size={10} aria-hidden="true" />{stage.targetDays > 0 ? `${stage.targetDays}d` : '—'}</span>
-                            </span>}
-                            {stage.active && !selectedLead && <>
-                              <span className="telemetry-metric mt-0.5 flex w-full flex-nowrap items-center justify-center gap-x-2 whitespace-nowrap font-mono text-[8px] leading-4 text-[#C9D2CC]"
-                                aria-label={`${formatDays(stageElapsedMilliseconds)} elapsed, ${stage.targetDays > 0 ? `${stage.targetDays} days target` : 'no target'}${stage.cumulative !== undefined ? `, ${formatDays(stage.cumulative)} total` : ''}`}>
-                                <span><Clock3 size={10} aria-hidden="true" />{formatDays(stageElapsedMilliseconds)}</span>
-                                <span><Target size={10} aria-hidden="true" />{stage.targetDays > 0 ? `${stage.targetDays}d` : '—'}</span>
-                              </span>
-                              <span className={`telemetry-sla-label mt-1 whitespace-nowrap font-mono text-[10px] leading-4 tracking-[0.08em] sm:text-[11px] is-${health}`} style={{ color: healthColor }}>
-                                {healthLabel} · {stage.targetDays > 0 ? `${stage.targetDays}D TARGET` : 'NO SLA'}
-                              </span>
-                            </>}
+                            <span className={`flex h-4 items-center justify-center whitespace-nowrap font-mono text-[10px] font-semibold leading-none tracking-[0.08em] ${stage.active ? 'text-[#A7F2C5]' : 'text-transparent'}`}>
+                              {stage.active ? `NOW${activeDateLabel ? ` ${activeDateLabel}` : ''}` : '\u00a0'}
+                            </span>
+                            <span className={`telemetry-node ${stage.active ? `is-${health}` : stage.done ? 'is-complete' : ''}`}>
+                              {stage.done ? <Check size={11} aria-hidden="true" /> : <span className="telemetry-node-core" />}
+                            </span>
                           </button>
+                          {stage.index < stageTimeline.length - 1 && <span className={`telemetry-connector ${stage.done ? 'is-complete' : ''}`} aria-hidden="true" />}
                         </li>;
                       })}
-                  </ol>
-                </div> : <p className="py-2 text-xs text-muted">No stages are configured for this pipeline.</p>}
-            </div>
+                </ol>
+              </div></> : <p className="py-1 text-[10px] text-muted">No stages are configured for this pipeline.</p>}
           </section>
 
           {selectedLead ? (

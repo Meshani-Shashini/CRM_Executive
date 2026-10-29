@@ -90,11 +90,10 @@ body {
   .telemetry-panel {
     position: relative;
     isolation: isolate;
-    border: 1px solid rgba(75, 96, 86, 0.42);
-    background:
-      radial-gradient(ellipse at 9% 0%, rgba(39, 194, 114, 0.09), transparent 40%),
-      linear-gradient(135deg, rgba(17, 21, 22, 0.96), rgba(9, 10, 11, 0.98) 66%);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025), 0 12px 34px rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(75, 96, 86, 0.24);
+    background: linear-gradient(135deg, rgba(17, 21, 22, 0.68), rgba(9, 10, 11, 0.36));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+    backdrop-filter: blur(12px);
   }
   .telemetry-panel::after {
     position: absolute;
@@ -102,7 +101,7 @@ body {
     inset: 0;
     pointer-events: none;
     background-image: linear-gradient(rgba(111, 139, 124, 0.025) 1px, transparent 1px);
-    background-size: 100% 24px;
+    background-size: 100% 22px;
     content: "";
     mask-image: linear-gradient(to right, black, transparent 82%);
   }
@@ -111,17 +110,12 @@ body {
   .telemetry-connector {
     position: absolute;
     z-index: 0;
-    top: 11px;
+    top: 49px;
     left: 50%;
     right: -50%;
     height: 1px;
     overflow: hidden;
     background: #2A3037;
-  }
-  .telemetry-connector.is-compact {
-    top: 9px;
-    left: 50%;
-    right: -50%;
   }
   .telemetry-connector.is-complete {
     background: linear-gradient(90deg, rgba(39, 194, 114, 0.9), rgba(58, 167, 109, 0.42));
@@ -159,7 +153,8 @@ body {
     color: #70D49A;
     box-shadow: 0 0 10px rgba(39, 194, 114, 0.16);
   }
-  .telemetry-node.is-healthy {
+  .telemetry-node.is-healthy,
+  .telemetry-node.is-unconfigured {
     border-color: #27C272;
     background: #153322;
     color: #C7FFDE;
@@ -183,23 +178,9 @@ body {
     border-color: #27C272;
     box-shadow: 0 0 12px rgba(39, 194, 114, 0.24);
   }
-  .telemetry-metric > span {
-    border: 1px solid rgba(58, 66, 75, 0.58);
-    border-radius: 9999px;
-    background: rgba(15, 18, 21, 0.88);
-    padding: 2px 6px;
+  .telemetry-stage.is-active {
+    text-shadow: 0 0 10px rgba(39, 194, 114, 0.28);
   }
-  .telemetry-metric-compact > span {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    padding: 1px 3px;
-  }
-  .telemetry-sla-label { color: #69717D; }
-  .telemetry-sla-label.is-healthy { color: #27C272; }
-  .telemetry-sla-label.is-warning { color: #E09228; }
-  .telemetry-sla-label.is-overdue { color: #FF3366; text-shadow: 0 0 8px rgba(255, 51, 102, 0.38); }
-  .telemetry-sla-label.is-unconfigured { color: #69717D; }
   .telemetry-live-dot {
     width: 6px;
     height: 6px;
