@@ -34,6 +34,24 @@ interface TimelineEntry {
   category: 'stage' | 'activity' | 'appointment' | 'proposal' | 'note' | 'task';
 }
 
+interface ContactEditorDraft {
+  name: string;
+  role: string;
+  email: string;
+  phone: string;
+  whatsapp: string;
+  telegram: string;
+}
+
+const EMPTY_CONTACT_DRAFT: ContactEditorDraft = {
+  name: '',
+  role: 'Decision Maker',
+  email: '',
+  phone: '',
+  whatsapp: '',
+  telegram: '',
+};
+
 const LEAD_PROGRESS_STAGES = [
   'Lead Identified',
   'Contact Made',
@@ -187,6 +205,10 @@ export default function DealWorkspace({
   const [stageInsurer, setStageInsurer] = useState('');
   const [intakeComplete, setIntakeComplete] = useState(false);
   const [contactError, setContactError] = useState('');
+  const [addContactOpen, setAddContactOpen] = useState(false);
+  const [addContactError, setAddContactError] = useState('');
+  const [editingContactId, setEditingContactId] = useState('');
+  const [contactEditorDraft, setContactEditorDraft] = useState<ContactEditorDraft>(EMPTY_CONTACT_DRAFT);
   const [contactName, setContactName] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
@@ -236,10 +258,10 @@ export default function DealWorkspace({
     id: primaryContactProfile?.id ?? selectedLead?.contactProfileId ?? selectedDeal?.contactProfileId ?? `primary-${selectedItem?.id ?? 'contact'}`,
     name: primaryContactName,
     role: selectedLead?.contactRole ?? selectedDeal?.contactRole ?? primaryContactProfile?.role ?? 'Decision Maker',
-    email: selectedLead?.contactEmail ?? selectedDeal?.contactEmail ?? primaryContactProfile?.email ?? selectedClient?.email ?? '',
-    phone: selectedLead?.contactPhone ?? selectedDeal?.contactPhone ?? primaryContactProfile?.phone ?? selectedClient?.phone ?? '',
-    whatsapp: selectedLead?.whatsapp ?? selectedDeal?.whatsapp ?? primaryContactProfile?.whatsapp ?? '',
-    telegram: selectedLead?.telegram ?? selectedDeal?.telegram ?? primaryContactProfile?.telegram ?? '',
+    email: selectedLead?.contactEmail || selectedDeal?.contactEmail || primaryContactProfile?.email || selectedClient?.email || '',
+    phone: selectedLead?.contactPhone || selectedDeal?.contactPhone || primaryContactProfile?.phone || selectedClient?.phone || '',
+    whatsapp: selectedLead?.whatsapp || selectedDeal?.whatsapp || primaryContactProfile?.whatsapp || '',
+    telegram: selectedLead?.telegram || selectedDeal?.telegram || primaryContactProfile?.telegram || '',
   } : undefined;
   const detailContacts = [
     ...(primaryContact ? [primaryContact] : []),
@@ -865,7 +887,7 @@ export default function DealWorkspace({
   }));
 
   const assignContactProfile = (profileId: string) => {
-    const profile = selectedClient?.contacts?.find((contact) => contact.id === profileId);
+    const profile = contactProfiles.find((contact) => contact.id === profileId);
     if (!profile) return;
     if (selectedDeal) {
       setDeals((current) => current.map((deal) => deal.id === selectedDeal.id
@@ -883,9 +905,11 @@ export default function DealWorkspace({
       setClients((current) => current.map((client) => client.id === selectedClient?.id
         ? {
           ...client,
-          contacts: (client.contacts ?? []).map((contact) => contact.id === profile.id
-            ? { ...contact, linkedDealIds: [...new Set([...(contact.linkedDealIds ?? []), selectedDeal.id])] }
-            : contact),
+          contacts: client.contacts?.some((contact) => contact.id === profile.id)
+            ? (client.contacts ?? []).map((contact) => contact.id === profile.id
+              ? { ...contact, linkedDealIds: [...new Set([...(contact.linkedDealIds ?? []), selectedDeal.id])] }
+              : contact)
+            : [...(client.contacts ?? []), { ...profile, linkedDealIds: [...new Set([...(profile.linkedDealIds ?? []), selectedDeal.id])] }],
         }
         : client));
     } else if (selectedLead) {
@@ -904,12 +928,134 @@ export default function DealWorkspace({
       setClients((current) => current.map((client) => client.id === selectedClient?.id
         ? {
           ...client,
-          contacts: (client.contacts ?? []).map((contact) => contact.id === profile.id
-            ? { ...contact, linkedLeadIds: [...new Set([...(contact.linkedLeadIds ?? []), selectedLead.id])] }
-            : contact),
+          contacts: client.contacts?.some((contact) => contact.id === profile.id)
+            ? (client.contacts ?? []).map((contact) => contact.id === profile.id
+              ? { ...contact, linkedLeadIds: [...new Set([...(contact.linkedLeadIds ?? []), selectedLead.id])] }
+              : contact)
+            : [...(client.contacts ?? []), { ...profile, linkedLeadIds: [...new Set([...(profile.linkedLeadIds ?? []), selectedLead.id])] }],
         }
         : client));
     }
+  };
+
+  const openAddContact = () => {
+    setEditingContactId('');
+    setContactEditorDraft(EMPTY_CONTACT_DRAFT);
+    setAddContactError('');
+    setAddContactOpen(true);
+  };
+
+  const openEditContact = (contact: CompanyContactProfile) => {
+    setEditingContactId(contact.id);
+    setContactEditorDraft({
+      name: contact.name,
+      role: contact.role || 'Decision Maker',
+      email: contact.email,
+      phone: contact.phone,
+      whatsapp: contact.whatsapp ?? '',
+      telegram: contact.telegram ?? '',
+    });
+    setAddContactError('');
+    setAddContactOpen(true);
+  };
+
+  const saveContactProfile = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedLead && !selectedDeal) return;
+    setAddContactError('');
+    const name = contactEditorDraft.name.trim();
+    const role = contactEditorDraft.role.trim();
+    const email = contactEditorDraft.email.trim();
+    const phone = contactEditorDraft.phone.trim();
+    const whatsapp = contactEditorDraft.whatsapp.trim();
+    const telegram = contactEditorDraft.telegram.trim();
+    if (!name || !role || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+      || !/^[+()\d\s-]{7,}$/.test(phone)) {
+      setAddContactError('Enter a name, role, valid email address, and valid phone number.');
+      return;
+    }
+    if (detailContacts.some((contact) => contact.id !== editingContactId
+      && contact.email.trim().toLowerCase() === email.toLowerCase())) {
+      setAddContactError('A contact with this email is already linked to this lead.');
+      return;
+    }
+    const contact: CompanyContactProfile = {
+      id: editingContactId || `contact-${crypto.randomUUID()}`,
+      name,
+      role,
+      email,
+      phone,
+      whatsapp,
+      telegram,
+      linkedLeadIds: editingContactId
+        ? contactProfiles.find((profile) => profile.id === editingContactId)?.linkedLeadIds ?? []
+        : selectedLead ? [selectedLead.id] : linkedLead ? [linkedLead.id] : [],
+      linkedDealIds: editingContactId
+        ? contactProfiles.find((profile) => profile.id === editingContactId)?.linkedDealIds ?? []
+        : selectedLead?.dealId ? [selectedLead.dealId] : selectedDeal ? [selectedDeal.id] : [],
+    };
+
+    if (selectedLead || linkedLead) {
+      const targetLead = selectedLead ?? linkedLead;
+      if (targetLead) setLeads((current) => current.map((lead) => {
+        if (lead.id !== targetLead.id) return lead;
+        const contacts = lead.contacts ?? [];
+        const hasContact = contacts.some((profile) => profile.id === contact.id);
+        const isPrimary = lead.contactProfileId === contact.id
+          || (!lead.contactProfileId && lead.contact.trim().toLowerCase() === contact.name.trim().toLowerCase());
+        return {
+          ...lead,
+          contacts: hasContact
+            ? contacts.map((profile) => profile.id === contact.id ? contact : profile)
+            : [...contacts, contact],
+          ...(isPrimary ? {
+            contact: contact.name,
+            contactRole: contact.role,
+            contactEmail: contact.email,
+            contactPhone: contact.phone,
+            whatsapp: contact.whatsapp,
+            telegram: contact.telegram,
+          } : {}),
+        };
+      }));
+    }
+
+    if (selectedDeal) setDeals((current) => current.map((deal) => {
+      const isPrimary = deal.contactProfileId === contact.id
+        || (!deal.contactProfileId && deal.contactName?.trim().toLowerCase() === contact.name.trim().toLowerCase());
+      if (deal.id !== selectedDeal.id || !isPrimary) return deal;
+      return {
+        ...deal,
+        contactName: contact.name,
+        contactRole: contact.role,
+        contactEmail: contact.email,
+        contactPhone: contact.phone,
+        whatsapp: contact.whatsapp,
+        telegram: contact.telegram,
+      };
+    }));
+
+    if (selectedClient) {
+      setClients((current) => current.map((client) => {
+        if (client.id !== selectedClient.id) return client;
+        const contacts = client.contacts ?? [];
+        const hasContact = contacts.some((profile) => profile.id === contact.id);
+        return {
+          ...client,
+          contacts: hasContact
+            ? contacts.map((profile) => profile.id === contact.id ? {
+              ...contact,
+              linkedLeadIds: [...new Set([...(profile.linkedLeadIds ?? []), ...(contact.linkedLeadIds ?? [])])],
+              linkedDealIds: [...new Set([...(profile.linkedDealIds ?? []), ...(contact.linkedDealIds ?? [])])],
+            } : profile)
+            : [...contacts, contact],
+        };
+      }));
+    }
+    setEditingContactId('');
+    setContactEditorDraft(EMPTY_CONTACT_DRAFT);
+    setAddContactOpen(false);
+    setAddContactError('');
   };
 
   return (
@@ -1111,7 +1257,8 @@ export default function DealWorkspace({
                   <DetailValue label="Phone" value={selectedClient?.phone || '—'} />
                 </div>
                 <ContactDirectory contacts={detailContacts} primaryContactId={primaryContact?.id}
-                  assignedContactId={selectedLead.contactProfileId} onAssign={assignContactProfile} />
+                  assignedContactId={selectedLead.contactProfileId} onAssign={assignContactProfile}
+                  onAddContact={openAddContact} onEditContact={openEditContact} />
                 <div className="mt-4 border-t border-ink-700 pt-4">
                   <h3 className="mb-3 text-xs font-semibold text-white">Lead Details</h3>
                   <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2">
@@ -1149,7 +1296,8 @@ export default function DealWorkspace({
                 <DetailValue label="Client phone" value={selectedClient?.phone || '—'} />
               </div>
               <ContactDirectory contacts={detailContacts} primaryContactId={primaryContact?.id}
-                assignedContactId={selectedDeal?.contactProfileId} onAssign={assignContactProfile} />
+                assignedContactId={selectedDeal?.contactProfileId} onAssign={assignContactProfile}
+                onEditContact={openEditContact} />
               <form className="mt-4 rounded-xl border border-ink-600 bg-ink-950/40 p-4" onSubmit={saveContactChannels}>
                 <h3 className="mb-3 text-xs font-semibold text-white">Update communication channels</h3>
                 <div className="grid grid-cols-2 gap-2">
@@ -1291,6 +1439,34 @@ export default function DealWorkspace({
 
     </div>
       )}
+      <Modal open={addContactOpen} onClose={() => { setAddContactOpen(false); setAddContactError(''); setEditingContactId(''); }}
+        title={editingContactId ? 'Edit contact' : 'Add lead contact'} subtitle={selectedItem?.client}
+        footer={<><button type="button" className="btn-ghost" onClick={() => { setAddContactOpen(false); setAddContactError(''); setEditingContactId(''); }}>Cancel</button><button type="submit" form="lead-contact-form" className="btn-primary">{editingContactId ? <><Pencil size={14} /> Save Contact</> : <><Plus size={14} /> Add Contact</>}</button></>}>
+        <form id="lead-contact-form" onSubmit={saveContactProfile} className="grid gap-3 sm:grid-cols-2">
+          <Field label="Name *"><input className="input" name="name" required maxLength={120} value={contactEditorDraft.name}
+            onChange={(event) => setContactEditorDraft((current) => ({ ...current, name: event.target.value }))} /></Field>
+          <Field label="Role *"><select className="input" name="role" required value={contactEditorDraft.role}
+            onChange={(event) => setContactEditorDraft((current) => ({ ...current, role: event.target.value }))}>
+            <option>Decision Maker</option><option>Finance / Invoice</option><option>Risk Manager</option><option>Technical Lead</option><option>Other</option>
+          </select></Field>
+          <Field label="Email *"><input className="input" name="email" type="email" required value={contactEditorDraft.email}
+            onChange={(event) => setContactEditorDraft((current) => ({ ...current, email: event.target.value }))} /></Field>
+          <Field label="Phone *"><input className="input" name="phone" type="tel" required value={contactEditorDraft.phone}
+            onChange={(event) => setContactEditorDraft((current) => ({ ...current, phone: event.target.value }))} /></Field>
+          <Field label="WhatsApp"><input className="input" name="whatsapp" type="tel" value={contactEditorDraft.whatsapp}
+            onChange={(event) => setContactEditorDraft((current) => ({ ...current, whatsapp: event.target.value }))} /></Field>
+          <Field label="Telegram"><input className="input" name="telegram" value={contactEditorDraft.telegram}
+            onChange={(event) => setContactEditorDraft((current) => ({ ...current, telegram: event.target.value }))} /></Field>
+          <div className="sm:col-span-2">
+            <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs"
+              onClick={() => setContactEditorDraft((current) => ({ ...current, whatsapp: current.phone, telegram: current.phone }))}>
+              Same as Phone
+            </button>
+            <p className="mt-1 text-[11px] text-muted">Copies this contact’s phone number into WhatsApp and Telegram.</p>
+          </div>
+          {addContactError && <p role="alert" className="sm:col-span-2 text-xs text-hot">{addContactError}</p>}
+        </form>
+      </Modal>
       <Modal open={Boolean(activityModal)} onClose={() => setActivityModal(null)}
         title={activityModal === 'meeting' ? 'Schedule / Log Meeting'
           : activityModal === 'quote' ? 'Add insurer quote'
@@ -1362,15 +1538,22 @@ function ContactDirectory({
   primaryContactId,
   assignedContactId,
   onAssign,
+  onAddContact,
+  onEditContact,
 }: {
   contacts: CompanyContactProfile[];
   primaryContactId?: string;
   assignedContactId?: string;
   onAssign: (profileId: string) => void;
+  onAddContact?: () => void;
+  onEditContact: (contact: CompanyContactProfile) => void;
 }) {
   return <section className="mt-3 border-t border-ink-700 pt-3" aria-label="Customer contacts">
     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-      <h3 className="text-sm font-semibold text-white">Contacts <span className="ml-1 font-normal text-muted">{contacts.length}</span></h3>
+      <div className="flex items-center gap-2">
+        <h3 className="text-sm font-semibold text-white">Contacts <span className="ml-1 font-normal text-muted">{contacts.length}</span></h3>
+        {onAddContact && <button type="button" className="btn-ghost !gap-1 !px-2 !py-1 text-[11px]" onClick={onAddContact}><Plus size={12} /> Add Contact</button>}
+      </div>
       {contacts.length > 1 && <select className="input !w-auto max-w-full !py-1.5 text-xs" aria-label="Assign primary contact"
         value={assignedContactId ?? ''} onChange={(event) => onAssign(event.target.value)}>
         <option value="" disabled>Select a contact</option>
@@ -1378,14 +1561,14 @@ function ContactDirectory({
       </select>}
     </div>
     <div className="max-h-40 overflow-x-auto overflow-y-auto pr-1">
-      {contacts.length > 0 ? <div className="min-w-[700px]">
-        <dl className="grid grid-cols-[minmax(130px,1.2fr)_minmax(150px,1.5fr)_repeat(3,minmax(115px,1fr))] gap-3 px-2 pb-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-[#B9C1CC]">
-          <dt>Name</dt><dt>Email</dt><dt>Phone</dt><dt>WhatsApp</dt><dt>Telegram</dt>
+      {contacts.length > 0 ? <div className="min-w-[740px]">
+        <dl className="grid grid-cols-[minmax(130px,1.2fr)_minmax(150px,1.5fr)_repeat(3,minmax(115px,1fr))_32px] gap-3 px-2 pb-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-[#B9C1CC]">
+          <dt>Name</dt><dt>Email</dt><dt>Phone</dt><dt>WhatsApp</dt><dt>Telegram</dt><dt><span className="sr-only">Edit</span></dt>
         </dl>
         <div className="divide-y divide-ink-700/70">
           {contacts.map((contact) => {
             const primary = contact.id === primaryContactId;
-            return <article key={contact.id} className="grid grid-cols-[minmax(130px,1.2fr)_minmax(150px,1.5fr)_repeat(3,minmax(115px,1fr))] items-center gap-3 bg-ink-950/35 px-2 py-2 text-xs">
+            return <article key={contact.id} className="grid grid-cols-[minmax(130px,1.2fr)_minmax(150px,1.5fr)_repeat(3,minmax(115px,1fr))_32px] items-center gap-3 bg-ink-950/35 px-2 py-2 text-xs">
               <div className="flex min-w-0 items-center gap-1.5" title={`${contact.name}${contact.role ? ` · ${contact.role}` : ''}`}>
                 <span className="min-w-0 truncate font-semibold text-white">{contact.name}</span>
                 <span className="min-w-0 truncate text-[10px] text-muted">{contact.role}</span>
@@ -1395,6 +1578,9 @@ function ContactDirectory({
               <span className="truncate text-[#DCE5E0]" title={contact.phone || '—'}>{contact.phone || '—'}</span>
               <span className="truncate text-[#DCE5E0]" title={contact.whatsapp || '—'}>{contact.whatsapp || '—'}</span>
               <span className="truncate text-[#DCE5E0]" title={contact.telegram || '—'}>{contact.telegram || '—'}</span>
+              <button type="button" className="rounded-md p-1 text-muted transition hover:bg-ink-700 hover:text-white"
+                aria-label={`Edit ${contact.name}`} title={`Edit ${contact.name}`}
+                onClick={() => onEditContact(contact)}><Pencil size={13} /></button>
             </article>;
           })}
         </div>

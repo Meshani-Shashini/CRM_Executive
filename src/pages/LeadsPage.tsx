@@ -3,7 +3,7 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
 import { AlertTriangle, CalendarDays, CheckCircle2, CircleDot, Clock3, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, Snowflake, Sun, TrendingUp, UserRound, X } from 'lucide-react';
-import type { Client, Lead } from '../types';
+import type { Client, CompanyContactProfile, Lead } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
 import { formatDate, normalizeDateInput } from '../utils/date';
@@ -25,6 +25,28 @@ const LEAD_FUNNEL_STAGES = [
 ] as const;
 
 type LeadBoardStage = (typeof LEAD_FUNNEL_STAGES)[number];
+
+interface ContactDraft {
+  id: string;
+  name: string;
+  role: string;
+  email: string;
+  phone: string;
+  whatsapp: string;
+  telegram: string;
+}
+
+function contactDraft(profile?: CompanyContactProfile): ContactDraft {
+  return {
+    id: profile?.id ?? `contact-${crypto.randomUUID()}`,
+    name: profile?.name ?? '',
+    role: profile?.role ?? 'Decision Maker',
+    email: profile?.email ?? '',
+    phone: profile?.phone ?? '',
+    whatsapp: profile?.whatsapp ?? '',
+    telegram: profile?.telegram ?? '',
+  };
+}
 
 function boardStageForLead(lead: Lead, linkedDealIds: ReadonlySet<string>): LeadBoardStage {
   if (lead.dealId && linkedDealIds.has(lead.dealId)) return 'Qualified to Deals';
@@ -73,6 +95,7 @@ export default function LeadsPage() {
   const [contactRole, setContactRole] = useState('Decision Maker');
   const [contactEmail, setContactEmail] = useState('');
   const [contactPhone, setContactPhone] = useState('');
+  const [additionalContactDrafts, setAdditionalContactDrafts] = useState<ContactDraft[]>([]);
   const [leadTitle, setLeadTitle] = useState('');
   const [titleManuallyEdited, setTitleManuallyEdited] = useState(false);
   const [leadSource, setLeadSource] = useState('');
@@ -240,6 +263,7 @@ export default function LeadsPage() {
     setContactRole('Decision Maker');
     setContactEmail('');
     setContactPhone('');
+    setAdditionalContactDrafts([]);
     setLeadTitle('');
     setTitleManuallyEdited(false);
     setLeadSource('');
@@ -260,6 +284,11 @@ export default function LeadsPage() {
     setNewOrganizationOpen(false);
   };
 
+  const updateContactDraft = (id: string, field: keyof Omit<ContactDraft, 'id'>, value: string) => {
+    setAdditionalContactDrafts((current) => current.map((contact) =>
+      contact.id === id ? { ...contact, [field]: value } : contact));
+  };
+
   const openLeadForm = () => {
     resetLeadForm();
     setNewLeadOpen(true);
@@ -277,6 +306,12 @@ export default function LeadsPage() {
     setContactRole(lead.contactRole ?? 'Decision Maker');
     setContactEmail(lead.contactEmail ?? '');
     setContactPhone(lead.contactPhone ?? '');
+    const leadClient = clients.find((client) => client.id === lead.clientId)
+      ?? clients.find((client) => client.name.trim().toLowerCase() === lead.client.trim().toLowerCase());
+    const existingContacts = [...(lead.contacts ?? []), ...(leadClient?.contacts ?? []).filter((profile) => profile.linkedLeadIds?.includes(lead.id))]
+      .filter((profile, index, profiles) => profiles.findIndex((candidate) => candidate.id === profile.id) === index)
+      .filter((profile) => profile.id !== lead.contactProfileId && profile.name.trim().toLowerCase() !== lead.contact.trim().toLowerCase());
+    setAdditionalContactDrafts(existingContacts.map((profile) => contactDraft(profile)));
     setLeadTitle(lead.title ?? `${lead.client} lead`);
     setTitleManuallyEdited(true);
     setLeadSource(lead.source ?? '');
@@ -350,6 +385,14 @@ export default function LeadsPage() {
       profile.email.trim().toLowerCase() === email.toLowerCase(),
     );
     const profileId = contactProfileId || matchingProfile?.id || `contact-${crypto.randomUUID()}`;
+    const additionalContactErrors = additionalContactDrafts.some((contact) => {
+      const contactName = contact.name.trim();
+      const contactEmail = contact.email.trim();
+      const contactPhone = contact.phone.trim();
+      return !contactName || !contact.role.trim()
+        || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)
+        || !/^[+()\d\s-]{7,}$/.test(contactPhone);
+    });
     const person = users.find((candidate) =>
       candidate.role === 'sales' && candidate.name.trim().toLowerCase() === selectedPersonName.toLowerCase(),
     );
@@ -374,6 +417,10 @@ export default function LeadsPage() {
       setFormError('Enter a valid contact phone number.');
       return;
     }
+    if (additionalContactErrors) {
+      setFormError('Complete each additional contact name, role, valid email, and valid phone number.');
+      return;
+    }
     if (leadBoardStage === 'Qualified to Deals' &&
       (!hasCompleteCommunicationChannels({ contactPhone: phone, whatsapp, telegram }) || !hasCompleteClientProfile(selectedOrganization))) {
       setFormError('Complete the company profile and enter valid phone, WhatsApp, and Telegram details before qualifying this lead for a deal.');
@@ -393,9 +440,40 @@ export default function LeadsPage() {
     const valueMvr = toMvr(amount, leadCurrency, rate);
     const now = new Date().toISOString();
     const stageChanged = Boolean(editingLead && leadBoardStage !== boardStageForLead(editingLead, linkedDealIds));
+    const leadId = editingLead?.id ?? `L-${crypto.randomUUID()}`;
+    const primaryExistingProfile = selectedOrganization.contacts?.find((profile) =>
+      profile.id === profileId || profile.email.trim().toLowerCase() === email.toLowerCase());
+    const primaryProfile: CompanyContactProfile = {
+      id: primaryExistingProfile?.id ?? profileId,
+      name: primaryContact,
+      role: contactRole,
+      email,
+      phone,
+      whatsapp,
+      telegram,
+      linkedLeadIds: [...new Set([...(primaryExistingProfile?.linkedLeadIds ?? []), leadId])],
+      linkedDealIds: primaryExistingProfile?.linkedDealIds ?? [],
+    };
+    const additionalProfiles = additionalContactDrafts.map((draft): CompanyContactProfile => {
+      const contactEmail = draft.email.trim();
+      const existing = selectedOrganization.contacts?.find((profile) =>
+        profile.id === draft.id || profile.email.trim().toLowerCase() === contactEmail.toLowerCase());
+      return {
+        id: existing?.id ?? draft.id,
+        name: draft.name.trim(),
+        role: draft.role.trim(),
+        email: contactEmail,
+        phone: draft.phone.trim(),
+        whatsapp: draft.whatsapp.trim(),
+        telegram: draft.telegram.trim(),
+        linkedLeadIds: [...new Set([...(existing?.linkedLeadIds ?? []), leadId])],
+        linkedDealIds: existing?.linkedDealIds ?? [],
+      };
+    });
+    const savedContacts = [primaryProfile, ...additionalProfiles];
     const lead: Lead = {
       ...(editingLead ?? {}),
-      id: editingLead?.id ?? `L-${crypto.randomUUID()}`,
+      id: leadId,
       createdAt: editingLead?.createdAt ?? now,
       stageChangedAt: stageChanged ? now : editingLead?.stageChangedAt ?? editingLead?.routedAt ?? now,
       personId: person?.id,
@@ -419,6 +497,7 @@ export default function LeadsPage() {
       contactPhone: phone,
       whatsapp,
       telegram,
+      contacts: savedContacts,
       source: leadSource.trim(),
       notes: leadNotes.trim(),
       country: selectedOrganization.country,
@@ -448,24 +527,22 @@ export default function LeadsPage() {
     setClients((current) => current.map((client) => {
       if (client.id !== selectedOrganization.id) return client;
       const currentContacts = client.contacts ?? [];
-      const existingContact = currentContacts.find((contact) => contact.id === contactProfileId)
-        ?? currentContacts.find((contact) => contact.email.trim().toLowerCase() === email.toLowerCase());
-      const profile = {
-        id: existingContact?.id ?? profileId,
-        name: primaryContact,
-        role: contactRole,
-        email,
-        phone,
-        whatsapp,
-        telegram,
-        linkedLeadIds: [...new Set([...(existingContact?.linkedLeadIds ?? []), lead.id])],
-        linkedDealIds: existingContact?.linkedDealIds ?? [],
-      };
+      const updatedContacts = savedContacts.reduce((contacts, profile) => {
+        const existing = contacts.find((contact) => contact.id === profile.id
+          || contact.email.trim().toLowerCase() === profile.email.trim().toLowerCase());
+        const updatedProfile = {
+          ...profile,
+          id: existing?.id ?? profile.id,
+          linkedLeadIds: [...new Set([...(existing?.linkedLeadIds ?? []), lead.id])],
+          linkedDealIds: [...new Set([...(existing?.linkedDealIds ?? []), ...(profile.linkedDealIds ?? [])])],
+        };
+        return existing
+          ? contacts.map((contact) => contact.id === existing.id ? updatedProfile : contact)
+          : [...contacts, updatedProfile];
+      }, currentContacts);
       return {
         ...client,
-        contacts: existingContact
-          ? currentContacts.map((contact) => contact.id === existingContact.id ? profile : contact)
-          : [...currentContacts, profile],
+        contacts: updatedContacts,
         contactPerson: client.contactPerson || primaryContact,
         phone: client.phone || phone,
         email: client.email || email,
@@ -786,6 +863,37 @@ export default function LeadsPage() {
           </Field>
           <Field label="WhatsApp"><input className="input" name="whatsapp" type="tel" defaultValue={editingLead?.whatsapp ?? ''} placeholder="+960 ..." /></Field>
           <Field label="Telegram"><input className="input" name="telegram" defaultValue={editingLead?.telegram ?? ''} placeholder="@username or phone" /></Field>
+          <div className="sm:col-span-2 space-y-3">
+            {additionalContactDrafts.map((contact, index) => <section key={contact.id} className="rounded-lg border border-ink-700 bg-ink-900/35 p-3">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-white">Additional Contact {index + 1}</h3>
+                <button type="button" className="btn-ghost !px-2 !py-1 text-[11px] text-hot"
+                  onClick={() => setAdditionalContactDrafts((current) => current.filter((item) => item.id !== contact.id))}>
+                  <X size={12} /> Remove
+                </button>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                <Field label="Name *"><input className="input" value={contact.name} required placeholder="Contact name"
+                  onChange={(event) => updateContactDraft(contact.id, 'name', event.target.value)} /></Field>
+                <Field label="Role *"><select className="input" value={contact.role} required
+                  onChange={(event) => updateContactDraft(contact.id, 'role', event.target.value)}>
+                  <option>Decision Maker</option><option>Finance / Invoice</option><option>Risk Manager</option><option>Technical Lead</option><option>Other</option>
+                </select></Field>
+                <Field label="Email *"><input className="input" type="email" value={contact.email} required placeholder="name@company.com"
+                  onChange={(event) => updateContactDraft(contact.id, 'email', event.target.value)} /></Field>
+                <Field label="Phone *"><input className="input" type="tel" value={contact.phone} required placeholder="+960 ..."
+                  onChange={(event) => updateContactDraft(contact.id, 'phone', event.target.value)} /></Field>
+                <Field label="WhatsApp"><input className="input" type="tel" value={contact.whatsapp} placeholder="+960 ..."
+                  onChange={(event) => updateContactDraft(contact.id, 'whatsapp', event.target.value)} /></Field>
+                <Field label="Telegram"><input className="input" value={contact.telegram} placeholder="@username or phone"
+                  onChange={(event) => updateContactDraft(contact.id, 'telegram', event.target.value)} /></Field>
+              </div>
+            </section>)}
+            <button type="button" className="btn-ghost !px-3 !py-1.5 text-xs"
+              onClick={() => setAdditionalContactDrafts((current) => [...current, contactDraft()])}>
+              <Plus size={13} /> Add Another Contact
+            </button>
+          </div>
           <SectionHeading title="Opportunity Details" />
           <Field label="Title *">
             <input className={inputClass(fieldErrors.leadTitle)} name="title" maxLength={200} required value={leadTitle} onChange={(event) => { setTitleManuallyEdited(true); setLeadTitle(event.target.value); }} aria-invalid={Boolean(fieldErrors.leadTitle)} />
