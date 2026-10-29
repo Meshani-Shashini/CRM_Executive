@@ -1159,7 +1159,7 @@ export default function DealWorkspace({
             </div>
           </div>
 
-          <section aria-label={progressDeal ? 'Placement telemetry stage tracker' : 'Lead telemetry stage tracker'} className="telemetry-panel order-1 mt-2 min-w-0 rounded-xl p-2.5">
+          <section aria-label={progressDeal ? 'Placement telemetry stage tracker' : 'Lead telemetry stage tracker'} className={`telemetry-panel order-1 mt-2 min-w-0 rounded-xl ${selectedLead ? 'p-1.5' : 'p-2.5'}`}>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <div className="flex items-center gap-2">
                   <h2 className="sr-only">{progressDeal ? 'Placement telemetry' : 'Lead telemetry'}</h2>
@@ -1171,8 +1171,8 @@ export default function DealWorkspace({
                   <span className="telemetry-live-dot" aria-hidden="true" /><span className="sr-only">Live tracking</span>
                 </span>
               </div>
-              <div className="mt-2 min-w-0">
-                {stageTimeline.length ? <div className="-mx-1 w-full max-w-full overflow-x-auto px-1 pb-2 stage-stepper-scroll">
+              <div className={`${selectedLead ? 'mt-1' : 'mt-2'} min-w-0`}>
+                {stageTimeline.length ? <div className={`-mx-1 w-full max-w-full overflow-x-auto px-1 stage-stepper-scroll ${selectedLead ? 'pb-1' : 'pb-2'}`}>
                   <ol className="telemetry-track flex w-max min-w-full items-start justify-between gap-1">
                       {stageTimeline.map((stage) => {
                         const pipelineStage = typeof progressStages[stage.index] === 'string'
@@ -1197,7 +1197,7 @@ export default function DealWorkspace({
                             : health === 'healthy' ? '#27C272' : '#A7F2C5';
                         return <li key={stage.key} className="telemetry-step relative w-36 shrink-0">
                           {stage.index < stageTimeline.length - 1 && <span
-                            className={`telemetry-connector ${stage.done ? 'is-complete' : ''}`}
+                            className={`telemetry-connector ${selectedLead ? 'is-compact' : ''} ${stage.done ? 'is-complete' : ''}`}
                             aria-hidden="true" />}
                           <button type="button" disabled={!progressDeal || stage.active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
                             onClick={() => pipelineStage && progressDeal && requestStageChange(pipelineStage, progressDeal)}
@@ -1208,10 +1208,15 @@ export default function DealWorkspace({
                             <span className={`telemetry-node ${stage.active ? `is-${health}` : stage.done ? 'is-complete' : ''}`}>
                               {stage.active && (health === 'overdue' || health === 'warning') ? <Clock3 size={12} aria-hidden="true" /> : stage.done ? <Check size={12} aria-hidden="true" /> : <span className="telemetry-node-core" />}
                             </span>
-                            <span className={`mt-1 min-h-6 text-[10px] font-semibold leading-4 sm:text-[11px] ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#808896]'}`}>
+                            <span className={`mt-1 whitespace-nowrap text-[10px] font-semibold leading-4 sm:text-[11px] ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#808896]'}`}>
                               {stage.name}
                             </span>
-                            {stage.active && <>
+                            {stage.active && selectedLead && <span className="telemetry-metric telemetry-metric-compact flex shrink-0 flex-nowrap items-center gap-x-1 whitespace-nowrap font-mono text-[8px] leading-none text-[#C9D2CC]"
+                              aria-label={`${formatDays(stageElapsedMilliseconds)} elapsed, ${stage.targetDays > 0 ? `${stage.targetDays} days target` : 'no target'}${stage.cumulative !== undefined ? `, ${formatDays(stage.cumulative)} total` : ''}`}>
+                              <span><Clock3 size={10} aria-hidden="true" />{formatDays(stageElapsedMilliseconds)}</span>
+                              <span><Target size={10} aria-hidden="true" />{stage.targetDays > 0 ? `${stage.targetDays}d` : '—'}</span>
+                            </span>}
+                            {stage.active && !selectedLead && <>
                               <span className="telemetry-metric mt-0.5 flex w-full flex-nowrap items-center justify-center gap-x-2 whitespace-nowrap font-mono text-[8px] leading-4 text-[#C9D2CC]"
                                 aria-label={`${formatDays(stageElapsedMilliseconds)} elapsed, ${stage.targetDays > 0 ? `${stage.targetDays} days target` : 'no target'}${stage.cumulative !== undefined ? `, ${formatDays(stage.cumulative)} total` : ''}`}>
                                 <span><Clock3 size={10} aria-hidden="true" />{formatDays(stageElapsedMilliseconds)}</span>
@@ -1231,7 +1236,7 @@ export default function DealWorkspace({
 
           {selectedLead ? (
             <>
-            <div className="order-3 mt-3 grid gap-3 lg:grid-cols-2">
+            <div className="order-2 mt-3 grid gap-3 lg:grid-cols-2">
               <section className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
                 <h2 className="mb-4 text-sm font-semibold text-white">Client Details</h2>
                 <div className="grid grid-cols-2 gap-x-5 gap-y-4">
@@ -1266,10 +1271,10 @@ export default function DealWorkspace({
                 </div>
               </section>
             </div>
-            <section className="order-4 mt-3 min-w-0 rounded-xl border border-ink-600 bg-ink-900/30 p-4">
+            <section className="order-3 mt-3 min-w-0 rounded-xl border border-ink-600 bg-ink-900/30 p-3">
               <ContactDirectory contacts={detailContacts} primaryContactId={primaryContact?.id}
                 assignedContactId={selectedLead.contactProfileId} onAssign={assignContactProfile}
-                onEditContact={openEditContact} />
+                onEditContact={openEditContact} compact />
             </section>
             </>
           ) : <>
@@ -1323,7 +1328,7 @@ export default function DealWorkspace({
             </section>
           </div>
           </>}
-          <section className={`${selectedLead ? 'order-2' : ''} mt-4 min-w-0 border-t border-ink-600 pt-3`}>
+          <section className={`${selectedLead ? 'order-4' : ''} mt-4 min-w-0 border-t border-ink-600 pt-3`}>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Clock3 size={15} className="text-brand-300" /> Activity</h2>
@@ -1528,15 +1533,17 @@ function ContactDirectory({
   assignedContactId,
   onAssign,
   onEditContact,
+  compact = false,
 }: {
   contacts: CompanyContactProfile[];
   primaryContactId?: string;
   assignedContactId?: string;
   onAssign: (profileId: string) => void;
   onEditContact: (contact: CompanyContactProfile) => void;
+  compact?: boolean;
 }) {
-  return <section className="mt-3 border-t border-ink-700 pt-3" aria-label="Customer contacts">
-    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+  return <section className={compact ? '' : 'mt-3 border-t border-ink-700 pt-3'} aria-label="Customer contacts">
+    <div className={`flex flex-wrap items-center justify-between gap-2 ${compact ? 'mb-1' : 'mb-2'}`}>
       <div className="flex items-center gap-2">
         <h3 className="text-sm font-semibold text-white">Contacts <span className="ml-1 font-normal text-muted">{contacts.length}</span></h3>
       </div>
@@ -1548,13 +1555,13 @@ function ContactDirectory({
     </div>
     <div className="max-h-40 overflow-x-auto overflow-y-auto pr-1">
       {contacts.length > 0 ? <div className="min-w-[740px]">
-        <dl className="grid grid-cols-[minmax(130px,1.2fr)_minmax(150px,1.5fr)_repeat(3,minmax(115px,1fr))_32px] gap-3 px-2 pb-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-[#B9C1CC]">
+        <dl className={`grid grid-cols-[minmax(130px,1.2fr)_minmax(150px,1.5fr)_repeat(3,minmax(115px,1fr))_32px] gap-3 px-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#B9C1CC] ${compact ? 'py-1' : 'pb-1.5'}`}>
           <dt>Name</dt><dt>Email</dt><dt>Phone</dt><dt>WhatsApp</dt><dt>Telegram</dt><dt><span className="sr-only">Edit</span></dt>
         </dl>
         <div className="divide-y divide-ink-700/70">
           {contacts.map((contact) => {
             const primary = contact.id === primaryContactId;
-            return <article key={contact.id} className="grid grid-cols-[minmax(130px,1.2fr)_minmax(150px,1.5fr)_repeat(3,minmax(115px,1fr))_32px] items-center gap-3 bg-ink-950/35 px-2 py-2 text-xs">
+            return <article key={contact.id} className={`grid grid-cols-[minmax(130px,1.2fr)_minmax(150px,1.5fr)_repeat(3,minmax(115px,1fr))_32px] items-center gap-3 bg-ink-950/35 px-2 text-xs ${compact ? 'py-1.5' : 'py-2'}`}>
               <div className="flex min-w-0 items-center gap-1.5" title={`${contact.name}${contact.role ? ` · ${contact.role}` : ''}`}>
                 <span className="min-w-0 truncate font-semibold text-white">{contact.name}</span>
                 <span className="min-w-0 truncate text-[10px] text-muted">{contact.role}</span>
