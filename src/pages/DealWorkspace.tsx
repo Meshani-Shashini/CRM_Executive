@@ -1006,7 +1006,7 @@ export default function DealWorkspace({
               </div>
               <div className="mt-3 min-w-0">
                 {stageTimeline.length ? <div className="-mx-1 max-w-full overflow-x-auto px-1 pb-1 stage-stepper-scroll">
-                  <ol className="telemetry-track flex w-max min-w-full items-start">
+                  <ol className="telemetry-track flex w-full items-start justify-between">
                       {stageTimeline.map((stage) => {
                         const pipelineStage = typeof progressStages[stage.index] === 'string'
                           ? undefined
@@ -1020,7 +1020,7 @@ export default function DealWorkspace({
                         const healthColor = health === 'overdue' ? '#FF3366'
                           : health === 'warning' ? '#E09228'
                             : health === 'healthy' ? '#27C272' : '#A7F2C5';
-                        return <li key={stage.key} className="telemetry-step relative w-32 shrink-0 sm:w-36">
+                        return <li key={stage.key} className="telemetry-step relative min-w-32 flex-1">
                           {stage.index < stageTimeline.length - 1 && <span
                             className={`telemetry-connector ${stage.done ? 'is-complete' : ''}`}
                             aria-hidden="true" />}
