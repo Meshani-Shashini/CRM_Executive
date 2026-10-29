@@ -7,7 +7,7 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
 import { TENANT_ID } from '../lib/supabase';
-import type { Activity, Deal, Lead, PipelineStage, StageHistoryAudit } from '../types';
+import type { Activity, CompanyContactProfile, Deal, Lead, PipelineStage, StageHistoryAudit } from '../types';
 import { formatAmount } from '../utils/currency';
 import { formatDate } from '../utils/date';
 import { calculateBrokerageCommission } from '../utils/insurance';
@@ -214,6 +214,26 @@ export default function DealWorkspace({
   const dealHasInvoice = Boolean(selectedDeal && (selectedDeal.linkedInvoiceId
     || invoices.some((invoice) => invoice.linkedDealId === selectedDeal.id)));
   const selectedClient = selectedItem ? clientForItem(selectedItem, clients) : undefined;
+  const clientContacts = selectedClient?.contacts ?? [];
+  const primaryContactName = selectedLead?.contact ?? selectedDeal?.contactName ?? selectedClient?.contactPerson ?? '';
+  const primaryContactProfile = clientContacts.find((profile) =>
+    (selectedLead?.contactProfileId ?? selectedDeal?.contactProfileId) === profile.id
+    || profile.name.trim().toLowerCase() === primaryContactName.trim().toLowerCase());
+  const primaryContact: CompanyContactProfile | undefined = primaryContactName.trim() ? {
+    ...primaryContactProfile,
+    id: primaryContactProfile?.id ?? selectedLead?.contactProfileId ?? selectedDeal?.contactProfileId ?? `primary-${selectedItem?.id ?? 'contact'}`,
+    name: primaryContactName,
+    role: selectedLead?.contactRole ?? selectedDeal?.contactRole ?? primaryContactProfile?.role ?? 'Decision Maker',
+    email: selectedLead?.contactEmail ?? selectedDeal?.contactEmail ?? primaryContactProfile?.email ?? selectedClient?.email ?? '',
+    phone: selectedLead?.contactPhone ?? selectedDeal?.contactPhone ?? primaryContactProfile?.phone ?? selectedClient?.phone ?? '',
+    whatsapp: selectedLead?.whatsapp ?? selectedDeal?.whatsapp ?? primaryContactProfile?.whatsapp ?? '',
+    telegram: selectedLead?.telegram ?? selectedDeal?.telegram ?? primaryContactProfile?.telegram ?? '',
+  } : undefined;
+  const detailContacts = [
+    ...(primaryContact ? [primaryContact] : []),
+    ...clientContacts.filter((profile) => profile.id !== primaryContactProfile?.id
+      && profile.name.trim().toLowerCase() !== primaryContactName.trim().toLowerCase()),
+  ];
   const selectedProduct = products.find((product) => product.code === selectedItem?.productCode)
     ?? products.find((product) => product.name === (selectedDeal?.product ?? ''));
   const selectedPipeline = pipelines.find((pipeline) => pipeline.id === selectedItem?.pipelineId);
@@ -1065,42 +1085,8 @@ export default function DealWorkspace({
                   <DetailValue label="Email" value={selectedClient?.email || '—'} />
                   <DetailValue label="Phone" value={selectedClient?.phone || '—'} />
                 </div>
-                <div className="mt-3 max-h-48 space-y-3 overflow-y-auto pr-2">
-                <div className="rounded-xl border border-brand-400/30 bg-brand-400/10 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-300">Primary contact · Key person</p>
-                      <p className="mt-1 text-base font-semibold text-white">{selectedLead.contact || 'Contact not set'}</p>
-                      <p className="mt-1 text-xs text-muted">{selectedLead.contactRole ?? 'Decision Maker'}</p>
-                    </div>
-                    {selectedClient?.contacts?.length ? <Field label="Assign company contact">
-                      <select className="input min-w-48" value={selectedLead.contactProfileId ?? ''} onChange={(event) => assignContactProfile(event.target.value)}>
-                        <option value="">Current lead contact</option>
-                        {selectedClient.contacts.map((profile) => <option key={profile.id} value={profile.id}>{profile.role} · {profile.name}</option>)}
-                      </select>
-                    </Field> : null}
-                  </div>
-                  <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-                    <DetailValue label="Email" value={selectedLead.contactEmail || '—'} />
-                    <DetailValue label="Phone" value={selectedLead.contactPhone || '—'} />
-                    <DetailValue label="WhatsApp" value={selectedLead.whatsapp || '—'} />
-                    <DetailValue label="Telegram" value={selectedLead.telegram || '—'} />
-                  </div>
-                </div>
-                <div>
-                  <h3 className="mb-2 text-xs font-semibold text-white">Key persons</h3>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {(selectedClient?.contacts ?? []).map((profile) => {
-                      const primary = profile.id === selectedLead.contactProfileId;
-                      return <div key={profile.id} className={`rounded-lg border p-3 text-xs ${primary ? 'border-brand-400/40 bg-brand-400/10' : 'border-ink-700 bg-ink-950/50'}`}>
-                        <div className="flex items-center justify-between gap-2"><span className="font-medium text-white">{profile.name}</span><Badge variant={primary ? 'brand' : 'muted'}>{profile.role}{primary ? ' · Primary' : ''}</Badge></div>
-                        <p className="mt-2 text-muted">{profile.email || 'Email missing'} · {profile.phone || 'Phone missing'}</p>
-                      </div>;
-                    })}
-                    {!(selectedClient?.contacts?.length) && <p className="text-xs text-muted">No additional company key persons are linked.</p>}
-                  </div>
-                </div>
-                </div>
+                <ContactDirectory contacts={detailContacts} primaryContactId={primaryContact?.id}
+                  assignedContactId={selectedLead.contactProfileId} onAssign={assignContactProfile} />
                 <div className="mt-4 border-t border-ink-700 pt-4">
                   <h3 className="mb-3 text-xs font-semibold text-white">Lead Details</h3>
                   <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2">
@@ -1137,41 +1123,8 @@ export default function DealWorkspace({
                 <DetailValue label="Client email" value={selectedClient?.email || '—'} />
                 <DetailValue label="Client phone" value={selectedClient?.phone || '—'} />
               </div>
-              <div className="mt-3 max-h-48 space-y-3 overflow-y-auto pr-2">
-              <div className="rounded-xl border border-brand-400/30 bg-brand-400/10 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-300">Primary contact · Key person</p>
-                    <p className="mt-1 text-base font-semibold text-white">{selectedDeal?.contactName ?? selectedClient?.contactPerson ?? 'Contact not set'}</p>
-                    <p className="mt-1 text-xs text-muted">{selectedDeal?.contactRole ?? 'Decision Maker'}</p>
-                  </div>
-                  {selectedClient?.contacts?.length ? <Field label="Assign company contact">
-                    <select className="input min-w-48" value={selectedDeal?.contactProfileId ?? ''} onChange={(event) => assignContactProfile(event.target.value)}>
-                      <option value="">Current contact</option>
-                      {selectedClient.contacts.map((profile) => <option key={profile.id} value={profile.id}>{profile.role} · {profile.name}</option>)}
-                    </select>
-                  </Field> : null}
-                </div>
-                <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-                  <DetailValue label="Email" value={selectedDeal?.contactEmail ?? selectedClient?.email ?? '—'} />
-                  <DetailValue label="Phone" value={selectedDeal?.contactPhone ?? selectedClient?.phone ?? '—'} />
-                  <DetailValue label="WhatsApp" value={selectedDeal?.whatsapp ?? '—'} />
-                  <DetailValue label="Telegram" value={selectedDeal?.telegram ?? '—'} />
-                </div>
-              </div>
-              {selectedClient?.contacts?.length ? <div>
-                <h3 className="mb-2 text-xs font-semibold text-white">Key persons</h3>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {selectedClient.contacts.map((profile) => {
-                    const primary = profile.id === selectedDeal?.contactProfileId;
-                    return <div key={profile.id} className={`rounded-lg border p-3 text-xs ${primary ? 'border-brand-400/40 bg-brand-400/10' : 'border-ink-700 bg-ink-950/50'}`}>
-                      <div className="flex items-center justify-between gap-2"><span className="font-medium text-white">{profile.name}</span><Badge variant={primary ? 'brand' : 'muted'}>{profile.role}{primary ? ' · Primary' : ''}</Badge></div>
-                      <p className="mt-2 text-muted">{profile.email || 'Email missing'} · {profile.phone || 'Phone missing'}</p>
-                    </div>;
-                  })}
-                </div>
-              </div> : null}
-              </div>
+              <ContactDirectory contacts={detailContacts} primaryContactId={primaryContact?.id}
+                assignedContactId={selectedDeal?.contactProfileId} onAssign={assignContactProfile} />
               <form className="mt-4 rounded-xl border border-ink-600 bg-ink-950/40 p-4" onSubmit={saveContactChannels}>
                 <h3 className="mb-3 text-xs font-semibold text-white">Update communication channels</h3>
                 <div className="grid grid-cols-2 gap-2">
@@ -1377,6 +1330,50 @@ export default function DealWorkspace({
 
 function DetailValue({ label, value }: { label: string; value: string }) {
   return <div className="min-w-0"><div className="text-xs text-muted">{label}</div><div className="mt-1 break-words text-sm text-white">{value}</div></div>;
+}
+
+function ContactDirectory({
+  contacts,
+  primaryContactId,
+  assignedContactId,
+  onAssign,
+}: {
+  contacts: CompanyContactProfile[];
+  primaryContactId?: string;
+  assignedContactId?: string;
+  onAssign: (profileId: string) => void;
+}) {
+  return <section className="mt-3 border-t border-ink-700 pt-3" aria-label="Customer contacts">
+    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <h3 className="text-xs font-semibold text-white">Contacts <span className="ml-1 font-normal text-muted">{contacts.length}</span></h3>
+      {contacts.length > 1 && <select className="input !w-auto max-w-full !py-1.5 text-xs" aria-label="Assign primary contact"
+        value={assignedContactId ?? ''} onChange={(event) => onAssign(event.target.value)}>
+        <option value="" disabled>Select a contact</option>
+        {contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.role} · {contact.name}</option>)}
+      </select>}
+    </div>
+    <div className="max-h-60 space-y-2 overflow-y-auto pr-2">
+      {contacts.map((contact) => {
+        const primary = contact.id === primaryContactId;
+        return <article key={contact.id} className={`rounded-lg border p-2.5 ${primary ? 'border-brand-400/35 bg-brand-400/5' : 'border-ink-700 bg-ink-950/45'}`}>
+          <div className="flex flex-wrap items-center justify-between gap-1.5">
+            <h4 className="text-xs font-semibold text-white">{contact.name}</h4>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-muted">{contact.role}</span>
+              {primary && <Badge variant="brand">Primary</Badge>}
+            </div>
+          </div>
+          <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px] sm:grid-cols-4">
+            <div className="min-w-0"><dt className="text-muted">Email</dt><dd className="truncate text-[#DCE5E0]" title={contact.email || '—'}>{contact.email || '—'}</dd></div>
+            <div className="min-w-0"><dt className="text-muted">Phone</dt><dd className="truncate text-[#DCE5E0]" title={contact.phone || '—'}>{contact.phone || '—'}</dd></div>
+            <div className="min-w-0"><dt className="text-muted">WhatsApp</dt><dd className="truncate text-[#DCE5E0]" title={contact.whatsapp || '—'}>{contact.whatsapp || '—'}</dd></div>
+            <div className="min-w-0"><dt className="text-muted">Telegram</dt><dd className="truncate text-[#DCE5E0]" title={contact.telegram || '—'}>{contact.telegram || '—'}</dd></div>
+          </dl>
+        </article>;
+      })}
+      {!contacts.length && <p className="rounded-lg border border-ink-700 bg-ink-950/45 p-3 text-xs text-muted">No contacts are linked to this customer yet.</p>}
+    </div>
+  </section>;
 }
 
 function avatarCode(name: string) {

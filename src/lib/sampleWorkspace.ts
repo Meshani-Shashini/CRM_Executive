@@ -55,20 +55,27 @@ export function createSampleWorkspace(owner: User): {
     linkedLeadId: string,
     linkedDealId: string,
     primaryContact: { name: string; email: string; phone: string; telegram: string },
-  ) => [
-    { id: `${prefix}-contact-01`, ...primaryContact, role: 'Decision Maker', whatsapp: primaryContact.phone, linkedLeadIds: [linkedLeadId], linkedDealIds: [linkedDealId] },
-    ...Array.from({ length: 11 }, (_, index) => ({
-      id: `${prefix}-contact-${String(index + 2).padStart(2, '0')}`,
-      name: `Key Person ${index + 2}`,
-      role: ['Finance Director', 'Operations Manager', 'Risk Manager'][index % 3],
-      email: `contact${index + 2}@${prefix}.example.test`,
-      phone: `+960 777 ${String(1100 + index).slice(-4)}`,
-      whatsapp: `+960 777 ${String(1100 + index).slice(-4)}`,
-      telegram: `@${prefix}contact${index + 2}`,
-      linkedLeadIds: [linkedLeadId],
-      linkedDealIds: [linkedDealId],
-    })),
-  ];
+  ) => {
+    const phoneNumber = Number(primaryContact.phone.replace(/\D/g, '').slice(-4));
+    const additionalContacts = [
+      { name: `${prefix} Finance Director`, role: 'Finance Director', email: `finance@${prefix}.example.test`, telegram: `@${prefix}finance` },
+      { name: `${prefix} Operations Manager`, role: 'Operations Manager', email: `operations@${prefix}.example.test`, telegram: `@${prefix}operations` },
+    ];
+    return [
+      { id: `${prefix}-contact-01`, ...primaryContact, role: 'Decision Maker', whatsapp: primaryContact.phone, linkedLeadIds: [linkedLeadId], linkedDealIds: [linkedDealId] },
+      ...additionalContacts.map((contact, index) => {
+        const phone = `+960 777 ${String(phoneNumber + index + 1).slice(-4)}`;
+        return {
+          id: `${prefix}-contact-${String(index + 2).padStart(2, '0')}`,
+          ...contact,
+          phone,
+          whatsapp: phone,
+          linkedLeadIds: [linkedLeadId],
+          linkedDealIds: [linkedDealId],
+        };
+      }),
+    ];
+  };
 
   const clients: Client[] = [
     {
