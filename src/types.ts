@@ -42,6 +42,7 @@ export interface Lead {
   contactPhone?: string;
   whatsapp?: string;
   telegram?: string;
+  contacts?: CompanyContactProfile[];
   source?: string;
   notes?: string;
   country: string;

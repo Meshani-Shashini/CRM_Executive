@@ -189,6 +189,7 @@ export function createSampleWorkspace(owner: User): {
       telegram: client.contacts?.[0].telegram,
       contactProfileId: client.contacts?.[0].id,
       contactRole: client.contacts?.[0].role,
+      contacts: client.contacts,
       contact: leadFields.contact,
       funnelStage: stage,
       country: client.country,

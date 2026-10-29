@@ -179,7 +179,7 @@ body {
     border-color: #27C272;
     box-shadow: 0 0 12px rgba(39, 194, 114, 0.24);
   }
-  .telemetry-metric span {
+  .telemetry-metric > span {
     border: 1px solid rgba(58, 66, 75, 0.58);
     border-radius: 9999px;
     background: rgba(15, 18, 21, 0.88);

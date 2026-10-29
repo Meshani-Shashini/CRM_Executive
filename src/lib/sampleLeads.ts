@@ -1,4 +1,4 @@
-import type { Lead, LeadTemperature, ActivityStatus } from '../types';
+import type { CompanyContactProfile, Lead, LeadTemperature, ActivityStatus } from '../types';
 import { supabase, TENANT_ID } from './supabase';
 
 export const SAMPLE_LEAD_IDS = [
@@ -17,6 +17,29 @@ const USD_TO_MVR = 15.42;
 function dateFromToday(days: number, today = new Date()): string {
   const date = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + days));
   return date.toISOString().slice(0, 10);
+}
+
+function sampleContacts(leadId: string, primaryName: string): CompanyContactProfile[] {
+  const slug = leadId.replace(/^sample-lead-/, '').replace(/[^a-z0-9]/gi, '');
+  const suffix = 1000 + [...leadId].reduce((total, character) => total + character.charCodeAt(0), 0) % 8000;
+  const names = [
+    { name: primaryName, role: 'Decision Maker', suffix: 0 },
+    { name: `${primaryName.split(/\s+/)[0]} Finance Contact`, role: 'Finance Contact', suffix: 1 },
+    { name: `${primaryName.split(/\s+/)[0]} Technical Lead`, role: 'Technical Lead', suffix: 2 },
+  ];
+  return names.map((contact, index) => {
+    const phone = `+960 777 ${String(suffix + index).slice(-4)}`;
+    return {
+      id: `${leadId}-contact-${String(index + 1).padStart(2, '0')}`,
+      name: contact.name,
+      role: contact.role,
+      email: `${slug}.${index === 0 ? 'primary' : index === 1 ? 'finance' : 'technical'}@example.test`,
+      phone,
+      whatsapp: phone,
+      telegram: `@${slug}${index + 1}`,
+      linkedLeadIds: [leadId],
+    };
+  });
 }
 
 function lead(input: {
@@ -40,6 +63,8 @@ function lead(input: {
     : input.value;
   const closeDate = dateFromToday(input.closeInDays, input.today);
   const createdAt = (input.today ?? new Date()).toISOString();
+  const contacts = sampleContacts(input.id, input.person);
+  const primaryContact = contacts[0];
 
   return {
     id: input.id,
@@ -55,6 +80,13 @@ function lead(input: {
     closeDate,
     visibility: 'individual',
     contact: input.person,
+    contactProfileId: primaryContact.id,
+    contactRole: primaryContact.role,
+    contactEmail: primaryContact.email,
+    contactPhone: primaryContact.phone,
+    whatsapp: primaryContact.whatsapp,
+    telegram: primaryContact.telegram,
+    contacts,
     country: 'Maldives',
     insuranceClass: input.insuranceClass,
     productCode: input.productCode,

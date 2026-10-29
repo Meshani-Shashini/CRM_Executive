@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
-  AlertTriangle, ArrowRight, Building2, CalendarDays, Check, Clock3, FileText,
-  Plus, ShieldCheck, Wallet, Trash2,
+  AlertTriangle, ArrowLeft, ArrowRight, Building2, CalendarDays, Check, Clock3, Columns3,
+  FileText, List, Pencil, Plus, ShieldCheck, Target, Wallet, Trash2,
 } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
@@ -61,8 +61,13 @@ function stageBadgeTone(name: string): 'hot' | 'warm' | 'win' | 'brand' {
 }
 
 function clientForItem(item: Deal | Lead, clients: ReturnType<typeof useApp>['clients']) {
+  const linkedLeadId = 'leadId' in item ? item.leadId : item.id;
+  const linkedDealId = 'dealId' in item ? item.dealId : item.id;
   return clients.find((client) => client.id === item.clientId)
-    ?? clients.find((client) => client.name.trim().toLowerCase() === item.client.trim().toLowerCase());
+    ?? clients.find((client) => client.name.trim().toLowerCase() === item.client.trim().toLowerCase())
+    ?? clients.find((client) => client.contacts?.some((contact) =>
+      (linkedLeadId && contact.linkedLeadIds?.includes(linkedLeadId))
+      || (linkedDealId && contact.linkedDealIds?.includes(linkedDealId))));
 }
 
 function dateBefore(date: string, days: number) {
@@ -215,10 +220,17 @@ export default function DealWorkspace({
     || invoices.some((invoice) => invoice.linkedDealId === selectedDeal.id)));
   const selectedClient = selectedItem ? clientForItem(selectedItem, clients) : undefined;
   const clientContacts = selectedClient?.contacts ?? [];
+  const itemContacts = selectedLead?.contacts ?? linkedLead?.contacts ?? [];
+  const contactProfiles = [...clientContacts, ...itemContacts]
+    .filter((contact, index, profiles) => profiles.findIndex((profile) => profile.id === contact.id) === index);
   const primaryContactName = selectedLead?.contact ?? selectedDeal?.contactName ?? selectedClient?.contactPerson ?? '';
-  const primaryContactProfile = clientContacts.find((profile) =>
+  const primaryContactProfile = contactProfiles.find((profile) =>
     (selectedLead?.contactProfileId ?? selectedDeal?.contactProfileId) === profile.id
     || profile.name.trim().toLowerCase() === primaryContactName.trim().toLowerCase());
+  const resolvedContactPhone = selectedLead?.contactPhone || selectedDeal?.contactPhone
+    || primaryContactProfile?.phone || selectedClient?.phone || '';
+  const resolvedWhatsapp = selectedLead?.whatsapp || selectedDeal?.whatsapp || primaryContactProfile?.whatsapp || '';
+  const resolvedTelegram = selectedLead?.telegram || selectedDeal?.telegram || primaryContactProfile?.telegram || '';
   const primaryContact: CompanyContactProfile | undefined = primaryContactName.trim() ? {
     ...primaryContactProfile,
     id: primaryContactProfile?.id ?? selectedLead?.contactProfileId ?? selectedDeal?.contactProfileId ?? `primary-${selectedItem?.id ?? 'contact'}`,
@@ -231,7 +243,7 @@ export default function DealWorkspace({
   } : undefined;
   const detailContacts = [
     ...(primaryContact ? [primaryContact] : []),
-    ...clientContacts.filter((profile) => profile.id !== primaryContactProfile?.id
+    ...contactProfiles.filter((profile) => profile.id !== primaryContactProfile?.id
       && profile.name.trim().toLowerCase() !== primaryContactName.trim().toLowerCase()),
   ];
   const selectedProduct = products.find((product) => product.code === selectedItem?.productCode)
@@ -469,11 +481,11 @@ export default function DealWorkspace({
   useEffect(() => {
     if (!selectedItem) return;
     setContactName(selectedDeal?.contactName ?? selectedLead?.contact ?? selectedClient?.contactPerson ?? '');
-    setContactPhone(selectedDeal?.contactPhone ?? selectedLead?.contactPhone ?? selectedClient?.phone ?? '');
-    setWhatsapp(selectedDeal?.whatsapp ?? selectedLead?.whatsapp ?? '');
-    setTelegram(selectedDeal?.telegram ?? selectedLead?.telegram ?? '');
+    setContactPhone(resolvedContactPhone);
+    setWhatsapp(resolvedWhatsapp);
+    setTelegram(resolvedTelegram);
     setContactError('');
-  }, [selectedKey, selectedDeal, selectedLead, selectedClient, selectedItem]);
+  }, [selectedKey, selectedDeal, selectedLead, selectedClient, selectedItem, resolvedContactPhone, resolvedWhatsapp, resolvedTelegram]);
 
   const saveContactChannels = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -535,7 +547,12 @@ export default function DealWorkspace({
 
   const convertLead = () => {
     if (!selectedLead) return;
-    if (!hasCompleteCommunicationChannels(selectedLead)) {
+    const contactChannels = {
+      contactPhone: resolvedContactPhone,
+      whatsapp: resolvedWhatsapp,
+      telegram: resolvedTelegram,
+    };
+    if (!hasCompleteCommunicationChannels(contactChannels)) {
       setContactError('Complete phone, WhatsApp, and Telegram before converting this lead to a deal.');
       return;
     }
@@ -567,12 +584,10 @@ export default function DealWorkspace({
       client: selectedLead.client,
       clientId: selectedLead.clientId,
       contactName: selectedLead.contact,
-      contactProfileId: selectedLead.contactProfileId,
+      contactProfileId: selectedLead.contactProfileId ?? primaryContactProfile?.id,
       contactRole: selectedLead.contactRole,
-      contactEmail: selectedLead.contactEmail,
-      contactPhone: selectedLead.contactPhone,
-      whatsapp: selectedLead.whatsapp,
-      telegram: selectedLead.telegram,
+      contactEmail: selectedLead.contactEmail || primaryContactProfile?.email || '',
+      ...contactChannels,
       product: product.name,
       productCode: product.code,
       value,
@@ -590,12 +605,21 @@ export default function DealWorkspace({
       notes: selectedLead.notes,
     };
     setDeals((current) => [deal, ...current]);
-    setLeads((current) => current.map((lead) => lead.id === selectedLead.id ? { ...lead, dealId: deal.id } : lead));
-    if (selectedClient && selectedLead.contactProfileId) {
+    setLeads((current) => current.map((lead) => lead.id === selectedLead.id
+      ? {
+        ...lead,
+        dealId: deal.id,
+        contactProfileId: lead.contactProfileId ?? primaryContactProfile?.id,
+        contactEmail: lead.contactEmail || primaryContactProfile?.email || '',
+        ...contactChannels,
+      }
+      : lead));
+    if (selectedClient && (selectedLead.contactProfileId ?? primaryContactProfile?.id)) {
+      const contactProfileId = selectedLead.contactProfileId ?? primaryContactProfile?.id;
       setClients((current) => current.map((client) => client.id === selectedClient.id
         ? {
           ...client,
-          contacts: (client.contacts ?? []).map((contact) => contact.id === selectedLead.contactProfileId
+          contacts: (client.contacts ?? []).map((contact) => contact.id === contactProfileId
             ? { ...contact, linkedDealIds: [...new Set([...(contact.linkedDealIds ?? []), deal.id])] }
             : contact),
         }
@@ -1000,18 +1024,18 @@ export default function DealWorkspace({
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              <div className="flex gap-1 rounded-lg border border-ink-600 bg-ink-800/60 p-1" role="tablist" aria-label="Deal workspace views">
-                <button type="button" role="tab" aria-selected={false} onClick={() => setWorkspaceView('kanban')} className="rounded-md px-2.5 py-1 text-xs text-muted hover:text-white">Kanban</button>
-                <button type="button" role="tab" aria-selected={true} onClick={() => setWorkspaceView('inspection')} className="rounded-md bg-ink-700 px-2.5 py-1 text-xs text-white">Inspection</button>
+              <div className="flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-1" role="tablist" aria-label="Deal workspace views">
+                <button type="button" role="tab" aria-label="Kanban view" title="Kanban view" aria-selected={false} onClick={() => setWorkspaceView('kanban')} className="rounded-md p-2 text-muted transition hover:text-white"><Columns3 size={14} /></button>
+                <button type="button" role="tab" aria-label="Inspection view" title="Inspection view" aria-selected={true} onClick={() => setWorkspaceView('inspection')} className="rounded-md bg-[#1B1E22] p-2 text-white transition"><List size={14} /></button>
               </div>
-              {onClose && <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={onClose}>Back</button>}
-              {selectedDeal && onEditDeal && <button type="button" className="btn-ghost !py-1.5 text-xs" onClick={() => onEditDeal(selectedDeal)}>Edit Deal</button>}
+              {onClose && <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={onClose}><ArrowLeft size={13} />Back</button>}
+              {selectedDeal && onEditDeal && <button type="button" className="btn-ghost !py-1.5 text-xs" onClick={() => onEditDeal(selectedDeal)}><Pencil size={13} />Edit Deal</button>}
               {activeRole === 'admin' && selectedLead && onDeleteLead && <button type="button" className="btn-ghost !py-1.5 text-xs text-hot" onClick={() => onDeleteLead(selectedLead)}><Trash2 size={13} />Delete Lead</button>}
               {activeRole === 'admin' && selectedDeal && onDeleteDeal && <button type="button" className="btn-ghost !py-1.5 text-xs text-hot" disabled={dealHasInvoice} title={dealHasInvoice ? 'Deals linked to invoices cannot be deleted.' : undefined} onClick={() => onDeleteDeal(selectedDeal)}><Trash2 size={13} />Delete Deal</button>}
             </div>
           </div>
 
-          <section aria-label="Stage progress" className="telemetry-panel mt-2 rounded-xl p-3">
+          <section aria-label="Stage progress" className="telemetry-panel mt-2 rounded-xl p-2.5">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <div className="flex items-center gap-2">
                   <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#DCE5E0]">
@@ -1024,9 +1048,9 @@ export default function DealWorkspace({
                   <span className="telemetry-live-dot" aria-hidden="true" /> Live tracking
                 </span>
               </div>
-              <div className="mt-3 min-w-0">
-                {stageTimeline.length ? <div className="-mx-1 max-w-full overflow-x-auto px-1 pb-1 stage-stepper-scroll">
-                  <ol className="telemetry-track flex w-full items-start justify-between">
+              <div className="mt-2 min-w-0">
+                {stageTimeline.length ? <div className="-mx-1 max-w-full overflow-x-auto px-1 pb-2 stage-stepper-scroll">
+                  <ol className="telemetry-track flex w-max min-w-full items-start justify-between">
                       {stageTimeline.map((stage) => {
                         const pipelineStage = typeof progressStages[stage.index] === 'string'
                           ? undefined
@@ -1040,7 +1064,7 @@ export default function DealWorkspace({
                         const healthColor = health === 'overdue' ? '#FF3366'
                           : health === 'warning' ? '#E09228'
                             : health === 'healthy' ? '#27C272' : '#A7F2C5';
-                        return <li key={stage.key} className="telemetry-step relative min-w-32 flex-1">
+                        return <li key={stage.key} className="telemetry-step relative w-36 shrink-0">
                           {stage.index < stageTimeline.length - 1 && <span
                             className={`telemetry-connector ${stage.done ? 'is-complete' : ''}`}
                             aria-hidden="true" />}
@@ -1053,15 +1077,16 @@ export default function DealWorkspace({
                             <span className={`telemetry-node ${stage.active ? `is-${health}` : stage.done ? 'is-complete' : ''}`}>
                               {stage.active && (health === 'overdue' || health === 'warning') ? <Clock3 size={12} aria-hidden="true" /> : stage.done ? <Check size={12} aria-hidden="true" /> : <span className="telemetry-node-core" />}
                             </span>
-                            <span className={`mt-1 min-h-7 text-[10px] font-semibold leading-4 sm:text-[11px] ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#808896]'}`}>
+                            <span className={`mt-1 min-h-6 text-[10px] font-semibold leading-4 sm:text-[11px] ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#808896]'}`}>
                               {stage.name}
                             </span>
                             {stage.active && <>
-                              <span className="telemetry-metric mt-1 flex w-full flex-wrap items-center justify-center gap-x-1.5 font-mono text-[8px] text-[#C9D2CC]">
-                                <span>{formatDays(elapsedMilliseconds)} elapsed</span>
-                                {stage.cumulative !== undefined && <span>{formatDays(stage.cumulative)} total</span>}
+                              <span className="telemetry-metric mt-0.5 flex w-full flex-nowrap items-center justify-center gap-x-2 whitespace-nowrap font-mono text-[8px] leading-4 text-[#C9D2CC]"
+                                aria-label={`${formatDays(elapsedMilliseconds)} elapsed, ${stage.targetDays > 0 ? `${stage.targetDays} days target` : 'no target'}${stage.cumulative !== undefined ? `, ${formatDays(stage.cumulative)} total` : ''}`}>
+                                <span><Clock3 size={10} aria-hidden="true" />{formatDays(elapsedMilliseconds)}</span>
+                                <span><Target size={10} aria-hidden="true" />{stage.targetDays > 0 ? `${stage.targetDays}d` : '—'}</span>
                               </span>
-                              <span className={`telemetry-sla-label mt-0.5 font-mono text-[8px] tracking-[0.08em] is-${health}`} style={{ color: healthColor }}>
+                              <span className={`telemetry-sla-label mt-1 whitespace-nowrap font-mono text-[10px] leading-4 tracking-[0.08em] sm:text-[11px] is-${health}`} style={{ color: healthColor }}>
                                 {healthLabel} · {stage.targetDays > 0 ? `${stage.targetDays}D TARGET` : 'NO SLA'}
                               </span>
                             </>}
@@ -1345,33 +1370,35 @@ function ContactDirectory({
 }) {
   return <section className="mt-3 border-t border-ink-700 pt-3" aria-label="Customer contacts">
     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-      <h3 className="text-xs font-semibold text-white">Contacts <span className="ml-1 font-normal text-muted">{contacts.length}</span></h3>
+      <h3 className="text-sm font-semibold text-white">Contacts <span className="ml-1 font-normal text-muted">{contacts.length}</span></h3>
       {contacts.length > 1 && <select className="input !w-auto max-w-full !py-1.5 text-xs" aria-label="Assign primary contact"
         value={assignedContactId ?? ''} onChange={(event) => onAssign(event.target.value)}>
         <option value="" disabled>Select a contact</option>
         {contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.role} · {contact.name}</option>)}
       </select>}
     </div>
-    <div className="max-h-60 space-y-2 overflow-y-auto pr-2">
-      {contacts.map((contact) => {
-        const primary = contact.id === primaryContactId;
-        return <article key={contact.id} className={`rounded-lg border p-2.5 ${primary ? 'border-brand-400/35 bg-brand-400/5' : 'border-ink-700 bg-ink-950/45'}`}>
-          <div className="flex flex-wrap items-center justify-between gap-1.5">
-            <h4 className="text-xs font-semibold text-white">{contact.name}</h4>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-muted">{contact.role}</span>
-              {primary && <Badge variant="brand">Primary</Badge>}
-            </div>
-          </div>
-          <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px] sm:grid-cols-4">
-            <div className="min-w-0"><dt className="text-muted">Email</dt><dd className="truncate text-[#DCE5E0]" title={contact.email || '—'}>{contact.email || '—'}</dd></div>
-            <div className="min-w-0"><dt className="text-muted">Phone</dt><dd className="truncate text-[#DCE5E0]" title={contact.phone || '—'}>{contact.phone || '—'}</dd></div>
-            <div className="min-w-0"><dt className="text-muted">WhatsApp</dt><dd className="truncate text-[#DCE5E0]" title={contact.whatsapp || '—'}>{contact.whatsapp || '—'}</dd></div>
-            <div className="min-w-0"><dt className="text-muted">Telegram</dt><dd className="truncate text-[#DCE5E0]" title={contact.telegram || '—'}>{contact.telegram || '—'}</dd></div>
-          </dl>
-        </article>;
-      })}
-      {!contacts.length && <p className="rounded-lg border border-ink-700 bg-ink-950/45 p-3 text-xs text-muted">No contacts are linked to this customer yet.</p>}
+    <div className="max-h-40 overflow-x-auto overflow-y-auto pr-1">
+      {contacts.length > 0 ? <div className="min-w-[700px]">
+        <dl className="grid grid-cols-[minmax(130px,1.2fr)_minmax(150px,1.5fr)_repeat(3,minmax(115px,1fr))] gap-3 px-2 pb-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-[#B9C1CC]">
+          <dt>Name</dt><dt>Email</dt><dt>Phone</dt><dt>WhatsApp</dt><dt>Telegram</dt>
+        </dl>
+        <div className="divide-y divide-ink-700/70">
+          {contacts.map((contact) => {
+            const primary = contact.id === primaryContactId;
+            return <article key={contact.id} className="grid grid-cols-[minmax(130px,1.2fr)_minmax(150px,1.5fr)_repeat(3,minmax(115px,1fr))] items-center gap-3 bg-ink-950/35 px-2 py-2 text-xs">
+              <div className="flex min-w-0 items-center gap-1.5" title={`${contact.name}${contact.role ? ` · ${contact.role}` : ''}`}>
+                <span className="min-w-0 truncate font-semibold text-white">{contact.name}</span>
+                <span className="min-w-0 truncate text-[10px] text-muted">{contact.role}</span>
+                {primary && <span className="shrink-0 text-[9px] uppercase tracking-wide text-brand-300">Primary</span>}
+              </div>
+              <span className="truncate text-[#DCE5E0]" title={contact.email || '—'}>{contact.email || '—'}</span>
+              <span className="truncate text-[#DCE5E0]" title={contact.phone || '—'}>{contact.phone || '—'}</span>
+              <span className="truncate text-[#DCE5E0]" title={contact.whatsapp || '—'}>{contact.whatsapp || '—'}</span>
+              <span className="truncate text-[#DCE5E0]" title={contact.telegram || '—'}>{contact.telegram || '—'}</span>
+            </article>;
+          })}
+        </div>
+      </div> : <p className="rounded-lg border border-ink-700 bg-ink-950/45 p-3 text-xs text-muted">No contacts are linked to this customer yet.</p>}
     </div>
   </section>;
 }

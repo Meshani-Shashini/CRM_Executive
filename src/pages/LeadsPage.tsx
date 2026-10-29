@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
-import { AlertTriangle, CalendarDays, CheckCircle2, CircleDot, Clock3, Columns3, Filter, List, Mail, Plus, Search, ShieldCheck, TrendingUp, UserRound, X, Pencil } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CheckCircle2, CircleDot, Clock3, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, Snowflake, Sun, TrendingUp, UserRound, X } from 'lucide-react';
 import type { Client, Lead } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
@@ -94,6 +94,7 @@ export default function LeadsPage() {
   const [statusFilter, setStatusFilter] = useState(() => hashParams().get('status') ?? '');
   const [insuranceClassFilter, setInsuranceClassFilter] = useState(() => hashParams().get('insuranceClass') ?? '');
   const [pendingLeadDeletion, setPendingLeadDeletion] = useState<Lead | null>(null);
+  const [openLeadActionsId, setOpenLeadActionsId] = useState('');
   const [clockNow, setClockNow] = useState(Date.now());
   const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
   const linkedDealIds = useMemo(() => new Set(deals.map((deal) => deal.id)), [deals]);
@@ -491,25 +492,25 @@ export default function LeadsPage() {
   };
 
   return (
-    <div className={inspectedLeadId ? 'space-y-0' : 'space-y-5'}>
+    <div className={inspectedLeadId ? 'space-y-0' : 'space-y-2'}>
       <h2 className="sr-only">All Leads</h2>
       {!inspectedLeadId && <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-1" role="tablist" aria-label="Lead views">
-            <button type="button" role="tab" aria-label="List view" title="List view" aria-selected={view === 'list'} onClick={() => setView('list')} className={`rounded-md p-2 transition ${view === 'list' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><List size={14} /></button>
-            <button type="button" role="tab" aria-label="Funnel view" title="Funnel view" aria-selected={view === 'funnel'} onClick={() => setView('funnel')} className={`rounded-md p-2 transition ${view === 'funnel' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><Columns3 size={14} /></button>
-            <button type="button" role="tab" aria-label="Forecast view" title="Forecast view" aria-selected={view === 'forecast'} onClick={() => setView('forecast')} className={`rounded-md p-2 transition ${view === 'forecast' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><TrendingUp size={14} /></button>
+          <div className="flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-0.5" role="tablist" aria-label="Lead views">
+            <button type="button" role="tab" aria-label="List view" title="List view" aria-selected={view === 'list'} onClick={() => setView('list')} className={`rounded-md p-1.5 transition ${view === 'list' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><List size={14} /></button>
+            <button type="button" role="tab" aria-label="Funnel view" title="Funnel view" aria-selected={view === 'funnel'} onClick={() => setView('funnel')} className={`rounded-md p-1.5 transition ${view === 'funnel' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><Columns3 size={14} /></button>
+            <button type="button" role="tab" aria-label="Forecast view" title="Forecast view" aria-selected={view === 'forecast'} onClick={() => setView('forecast')} className={`rounded-md p-1.5 transition ${view === 'forecast' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><TrendingUp size={14} /></button>
           </div>
-          <button type="button" className="btn-primary !px-3 !py-2 !text-xs" onClick={openLeadForm} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding a lead' : undefined}><Plus size={13} /> Lead</button>
+          <button type="button" className="btn-primary !px-3 !py-1.5 !text-xs" onClick={openLeadForm} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding a lead' : undefined}><Plus size={13} /> Lead</button>
         </div>
         <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
-          <Badge variant="brand">{searchedLeads.length} {searchedLeads.length === 1 ? 'lead' : 'leads'}</Badge>
-          <Badge variant="hot">{searchedLeads.filter((lead) => lead.temperature === 'HOT').length} hot</Badge>
+          <Badge variant="brand"><span className="font-semibold">{searchedLeads.length}</span> {searchedLeads.length === 1 ? 'lead' : 'leads'}</Badge>
+          <Badge variant="hot"><Flame size={11} /> {searchedLeads.filter((lead) => lead.temperature === 'HOT').length} hot</Badge>
           <label className="relative min-w-36 max-w-64 flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-            <input className="input !py-2 pl-9 !text-xs" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search leads" aria-label="Search leads" />
+            <input className="input !py-1.5 pl-9 !text-xs" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search leads" aria-label="Search leads" />
           </label>
-          <button type="button" className="btn-ghost !px-3 !py-2 !text-xs" onClick={() => setFilterOpen(true)}><Filter size={13} /> Filter</button>
+          <button type="button" className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={() => setFilterOpen(true)}><Filter size={13} /> Filter</button>
         </div>
       </div>}
 
@@ -617,18 +618,19 @@ export default function LeadsPage() {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-[#1B1E22] bg-ink-950">
-          <table className="w-full min-w-[1080px] table-fixed text-xs" aria-label="Leads">
-            <thead className="bg-[#111214] text-[11px] font-semibold text-[#A1A3AA]">
+          <table className="w-full min-w-[1280px] table-fixed text-xs" aria-label="Leads">
+            <thead className="bg-[#111214] text-xs font-semibold text-[#D0D3D9]">
               <tr>
-                <th className="w-[12%] border-b border-[#1B1E22] px-3 py-3 text-left">Lead Name</th>
-                <th className="w-[12%] border-b border-[#1B1E22] px-3 py-3 text-left">Client Name</th>
-                <th className="w-[12%] border-b border-[#1B1E22] px-3 py-3 text-left">Funnel Stage</th>
-                <th className="w-[11%] border-b border-[#1B1E22] px-3 py-3 text-left">Insurance Type</th>
-                <th className="w-[7%] border-b border-[#1B1E22] px-3 py-3 text-left">Lead Tag</th>
-                <th className="w-[11%] border-b border-[#1B1E22] px-3 py-3 text-left">Activity Status</th>
-                <th className="w-[8%] border-b border-[#1B1E22] px-3 py-3 text-left">Owner</th>
-                <th className="w-[13%] border-b border-[#1B1E22] px-3 py-3 text-left">Expiry / Renewal Date</th>
-                <th className="w-[14%] border-b border-[#1B1E22] px-3 py-3 text-left">Expected Closing Date</th>
+                <th className="w-[14%] border-b border-[#1B1E22] px-3 py-2 text-left">Lead Name</th>
+                <th className="w-[14%] border-b border-[#1B1E22] px-3 py-2 text-left">Client Name</th>
+                <th className="w-[18%] border-b border-[#1B1E22] px-3 py-2 text-left">Funnel Stage</th>
+                <th className="w-[11%] border-b border-[#1B1E22] px-3 py-2 text-left">Insurance Type</th>
+                <th className="w-[7%] border-b border-[#1B1E22] px-3 py-2 text-left">Lead Tag</th>
+                <th className="w-[9%] border-b border-[#1B1E22] px-3 py-2 text-left">Activity Status</th>
+                <th className="w-[5%] border-b border-[#1B1E22] px-3 py-2 text-left">Owner</th>
+                <th className="w-[10%] border-b border-[#1B1E22] px-3 py-2 text-left">Expiry / Renewal</th>
+                <th className="w-[9%] border-b border-[#1B1E22] px-3 py-2 text-left">Expected Closing</th>
+                <th className="w-[3%] border-b border-[#1B1E22] px-2 py-2 text-right"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -637,9 +639,12 @@ export default function LeadsPage() {
                 const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId;
                 const statusVariant = lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win';
                 const stageSla = stageSlaForLead(lead);
+                const temperatureVariant = lead.temperature === 'HOT' ? 'hot' : lead.temperature === 'COLD' ? 'cold' : 'warm';
+                const TemperatureIcon = lead.temperature === 'HOT' ? Flame : lead.temperature === 'COLD' ? Snowflake : Sun;
                 return <tr key={lead.id} role="link" tabIndex={0} aria-label={`Open lead details for ${lead.title ?? lead.client}`} draggable={!lead.dealId || !linkedDealIds.has(lead.dealId)} className="cursor-pointer border-b border-[#1B1E22] last:border-0 text-xs transition-colors hover:bg-[#111214] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-400"
                   onClick={() => setInspectedLeadId(lead.id)}
                   onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault();
                       setInspectedLeadId(lead.id);
@@ -655,24 +660,36 @@ export default function LeadsPage() {
                     const draggedLead = searchedLeads.find((item) => item.id === event.dataTransfer.getData('text/lead-id'));
                     if (draggedLead) moveLeadToStage(draggedLead, stage);
                   }}>
-                  <td className="break-words px-3 py-3 font-semibold text-white">{lead.title ?? `${lead.client} lead`}</td>
-                  <td className="break-words px-3 py-3 font-normal text-[#E1E2E5]">{lead.client}</td>
-                  <td className="break-words px-3 py-3 font-normal text-[#E1E2E5]">
+                  <td className="break-words px-3 py-2 font-semibold text-white">{lead.title ?? `${lead.client} lead`}</td>
+                  <td className="break-words px-3 py-2 font-normal text-[#E1E2E5]">{lead.client}</td>
+                  <td className="break-words px-3 py-2 font-normal text-[#E1E2E5]">
                     <span className="inline-flex items-center gap-1.5">{stage}
                       {stageSla.overdue && <span className="inline-flex items-center gap-1 rounded-full border border-hot/40 bg-hot/10 px-2 py-0.5 text-[10px] font-semibold text-hot" title={`Current stage exceeded its ${stageSla.targetDays}-day SLA`} aria-label={`SLA overdue: current stage exceeded its ${stageSla.targetDays}-day target`}>
                         <AlertTriangle size={11} /> Overdue
                       </span>}
                     </span>
                   </td>
-                  <td className="break-words px-3 py-3 font-normal"><InsuranceBadge code={lead.productCode} /></td>
-                  <td className="px-3 py-3 font-normal"><Badge variant={lead.temperature === 'HOT' ? 'hot' : lead.temperature === 'COLD' ? 'cold' : 'warm'}>{lead.temperature}</Badge></td>
-                  <td className="px-3 py-3 font-normal"><Badge variant={statusVariant}>{lead.status}</Badge></td>
-                  <td className="px-3 py-3 font-normal"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#292B30] text-[9px] font-semibold text-[#A4A6AE]" title={ownerName}>{avatarCode(ownerName)}</span></td>
-                  <td className="px-3 py-3 font-normal text-[#E1E2E5]">{formatDate(lead.renewalDate) || '—'}</td>
-                  <td className="px-3 py-3 font-normal text-[#E1E2E5]">{formatDate(lead.closeDate ?? lead.renewalDate) || '—'}</td>
+                  <td className="break-words px-3 py-2 font-normal"><InsuranceBadge code={lead.productCode} /></td>
+                  <td className="px-3 py-2 font-normal"><Badge variant={temperatureVariant}><TemperatureIcon size={11} /> {lead.temperature}</Badge></td>
+                  <td className="px-3 py-2 font-normal"><Badge variant={statusVariant}><CheckCircle2 size={11} /> {lead.status}</Badge></td>
+                  <td className="px-3 py-2 font-normal"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#292B30] text-[9px] font-semibold text-[#A4A6AE]" title={ownerName}>{avatarCode(ownerName)}</span></td>
+                  <td className="whitespace-nowrap px-3 py-2 font-normal text-[#E1E2E5]">{tableDate(lead.renewalDate)}</td>
+                  <td className="whitespace-nowrap px-3 py-2 font-normal text-[#E1E2E5]">{tableDate(lead.closeDate ?? lead.renewalDate)}</td>
+                  <td className="relative px-2 py-2 text-right" onClick={(event) => event.stopPropagation()}>
+                    <button type="button" className="rounded-md p-1.5 text-muted transition hover:bg-ink-700 hover:text-white" aria-label={`Actions for ${lead.title ?? lead.client}`} aria-haspopup="menu" aria-expanded={openLeadActionsId === lead.id}
+                      onClick={() => setOpenLeadActionsId((current) => current === lead.id ? '' : lead.id)}>
+                      <MoreHorizontal size={15} />
+                    </button>
+                    {openLeadActionsId === lead.id && <div role="menu" aria-label={`Lead actions for ${lead.title ?? lead.client}`} className="absolute right-2 top-9 z-20 min-w-32 rounded-lg border border-ink-600 bg-ink-900 p-1 text-left shadow-xl">
+                      {(user.role === 'admin' || user.role === 'sales') && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs text-[#DCE5E0] hover:bg-ink-700"
+                        onClick={() => { setOpenLeadActionsId(''); openEditLead(lead); }}><Pencil size={12} /> Edit lead</button>}
+                      {activeRole === 'admin' && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs text-hot hover:bg-ink-700"
+                        onClick={() => { setOpenLeadActionsId(''); deleteLead(lead); }}><X size={12} /> Delete lead</button>}
+                    </div>}
+                  </td>
                 </tr>;
               })}
-              {searchedLeads.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-muted">No leads found.</td></tr>}
+              {searchedLeads.length === 0 && <tr><td colSpan={10} className="px-4 py-8 text-center text-muted">No leads found.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -939,4 +956,8 @@ function InsuranceBadge({ code }: { code: string }) {
 function avatarCode(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   return (parts.length > 1 ? parts.map((part) => part[0]).slice(0, 2).join('') : (parts[0] ?? '').slice(0, 2)).toUpperCase();
+}
+
+function tableDate(value?: string) {
+  return value ? normalizeDateInput(value) || '—' : '—';
 }
