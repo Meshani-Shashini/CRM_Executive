@@ -89,7 +89,6 @@ body {
   .stage-stepper-scroll::-webkit-scrollbar-thumb:hover { background: #454B55; }
   .telemetry-panel {
     position: relative;
-    overflow: hidden;
     isolation: isolate;
     border: 1px solid rgba(75, 96, 86, 0.42);
     background:

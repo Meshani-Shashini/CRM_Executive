@@ -8,18 +8,19 @@ import {
   Phone, Mail, MapPin, Calendar, FileText, MessageSquare, Upload,
   Building2, Briefcase, ShieldCheck, Plus, Search, Pencil, Trash2, CheckCircle2,
 } from 'lucide-react';
-import type { Activity, Client } from '../types';
+import type { Activity, Client, CompanyContactProfile } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { formatDate } from '../utils/date';
 import DateInput from '../components/ui/DateInput';
 import { hasCompleteClientProfile, INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
+import { linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
 
 const activityIcon: Record<Activity['type'], typeof Phone> = {
   call: Phone, meeting: Calendar, email: Mail, upload: Upload, note: MessageSquare, quote: FileText, task: CheckCircle2,
 };
 
 export default function ClientsPage() {
-  const { clients, setClients, leads, deals, invoices, activities, setActivities, user, users } = useApp();
+  const { clients, setClients, leads, setLeads, deals, setDeals, invoices, activities, setActivities, user, users } = useApp();
   const [selectedId, setSelectedId] = useState('');
   const [portalClientId, setPortalClientId] = useState(user.clientId ?? '');
   const [query, setQuery] = useState('');
@@ -40,6 +41,88 @@ export default function ClientsPage() {
   const productName = (code: string) => PRODUCT_CODES.find((p) => p.code === code)?.name ?? code;
   const owner = selected && users.find((u) => u.id === selected.ownerId);
 
+  const updateOrganizationPrimaryContact = (
+    client: Client,
+    name: string,
+    email: string,
+    phone: string,
+    role: string,
+  ) => {
+    if (!name && !email && !phone) return;
+    const existing = client.contacts?.find((contact) =>
+      (email && contact.email.trim().toLowerCase() === email.toLowerCase())
+      || (name && contact.name.trim().toLowerCase() === name.toLowerCase()));
+    const linkedDealIds = deals.filter((deal) => (deal.clientId === client.id
+      || deal.client.trim().toLowerCase() === client.name.trim().toLowerCase())
+      && (deal.contactProfileId === existing?.id
+        || (email && deal.contactEmail?.trim().toLowerCase() === email.toLowerCase())
+        || (name && deal.contactName?.trim().toLowerCase() === name.toLowerCase())))
+      .map((deal) => deal.id);
+    const profile: CompanyContactProfile = {
+      id: existing?.id ?? `contact-${crypto.randomUUID()}`,
+      name: name || existing?.name || '',
+      role: role || existing?.role || 'Decision Maker',
+      email: email || existing?.email || '',
+      phone: phone || existing?.phone || '',
+      whatsapp: phone || existing?.whatsapp || '',
+      telegram: existing?.telegram ?? '',
+      linkedLeadIds: existing?.linkedLeadIds ?? [],
+      linkedDealIds: [...new Set([...(existing?.linkedDealIds ?? []), ...linkedDealIds])],
+    };
+    const updatedContacts = mergeContactProfiles(client.contacts, [profile]);
+    setLeads((current) => current.map((lead) => {
+      const belongsToClient = lead.clientId === client.id
+        || lead.client.trim().toLowerCase() === client.name.trim().toLowerCase();
+      const matchingContact = lead.contacts?.find((contact) =>
+        contact.id === profile.id
+        || (profile.email && contact.email.trim().toLowerCase() === profile.email.toLowerCase()));
+      const isPrimary = Boolean(lead.contactProfileId === matchingContact?.id
+        || (profile.email && lead.contactEmail?.trim().toLowerCase() === profile.email.toLowerCase())
+        || lead.contact.trim().toLowerCase() === profile.name.trim().toLowerCase());
+      if (!belongsToClient || (!matchingContact && !isPrimary)) return lead;
+      const linkedProfile = linkContactProfile({
+        ...(matchingContact ?? {}),
+        ...profile,
+        id: matchingContact?.id ?? profile.id,
+        linkedLeadIds: [...new Set([...(matchingContact?.linkedLeadIds ?? []), ...(profile.linkedLeadIds ?? [])])],
+        linkedDealIds: [...new Set([...(matchingContact?.linkedDealIds ?? []), ...(profile.linkedDealIds ?? [])])],
+      }, lead.id, lead.dealId);
+      return {
+        ...lead,
+        contacts: mergeContactProfiles(lead.contacts, [linkedProfile]),
+        ...(isPrimary ? {
+          contact: profile.name,
+          contactProfileId: linkedProfile.id,
+          contactRole: profile.role,
+          contactEmail: profile.email,
+          contactPhone: profile.phone,
+          whatsapp: profile.whatsapp,
+          telegram: profile.telegram,
+        } : {}),
+      };
+    }));
+    setDeals((current) => current.map((deal) => {
+      const belongsToClient = deal.clientId === client.id
+        || deal.client.trim().toLowerCase() === client.name.trim().toLowerCase();
+      const isPrimary = deal.contactProfileId === existing?.id
+        || (profile.email && deal.contactEmail?.trim().toLowerCase() === profile.email.toLowerCase())
+        || deal.contactName?.trim().toLowerCase() === profile.name.trim().toLowerCase();
+      return !belongsToClient || !isPrimary ? deal : {
+        ...deal,
+        contactProfileId: profile.id,
+        contactName: profile.name,
+        contactRole: profile.role,
+        contactEmail: profile.email,
+        contactPhone: profile.phone,
+        whatsapp: profile.whatsapp,
+        telegram: profile.telegram,
+      };
+    }));
+    setClients((current) => current.map((record) => record.id === client.id
+      ? { ...record, contacts: updatedContacts }
+      : record));
+  };
+
   const filtered = visibleClients.filter((c) =>
     c.name.toLowerCase().includes(query.toLowerCase()) ||
     c.tin.toLowerCase().includes(query.toLowerCase())
@@ -47,17 +130,13 @@ export default function ClientsPage() {
 
   const deleteClient = (client: Client) => {
     if (user.role !== 'admin') return;
-    const linkedLeads = leads.filter((lead) => (lead.clientId === client.id || lead.client.trim().toLowerCase() === client.name.trim().toLowerCase()) && lead.status !== 'COMPLETED');
-    const linkedDeals = deals.filter((deal) => {
-      const matchesClient = deal.clientId === client.id || deal.client.trim().toLowerCase() === client.name.trim().toLowerCase();
-      const stage = deal.stage.trim().toLowerCase();
-      const isClosed = deal.disposition === 'won' || deal.disposition === 'lost'
-        || /won|bound|renewed|policy issued|lost|declined/.test(stage);
-      return matchesClient && !isClosed;
-    });
+    const linkedLeads = leads.filter((lead) => lead.clientId === client.id
+      || lead.client.trim().toLowerCase() === client.name.trim().toLowerCase());
+    const linkedDeals = deals.filter((deal) => deal.clientId === client.id
+      || deal.client.trim().toLowerCase() === client.name.trim().toLowerCase());
     const linkedInvoices = invoices.filter((invoice) => invoice.clientId === client.id);
     if (linkedLeads.length || linkedDeals.length || linkedInvoices.length) {
-      window.alert(`Cannot delete "${client.name}" because it has ${linkedLeads.length + linkedDeals.length + linkedInvoices.length} associated record(s). Reassign or delete the linked Leads, Deals, and Invoices first.`);
+      window.alert(`Cannot delete "${client.name}" because it has ${linkedLeads.length + linkedDeals.length + linkedInvoices.length} associated record(s). Reassign or delete all linked Leads, Deals, and Invoices first.`);
       return;
     }
     setPendingDeletion(client);
@@ -105,6 +184,13 @@ export default function ClientsPage() {
         return;
       }
       setPortalClientId(editingClient.id);
+      updateOrganizationPrimaryContact(
+        editingClient,
+        contactPerson,
+        email,
+        phone,
+        editingClient.insuredEntity?.primaryStakeholder.designation ?? 'Decision Maker',
+      );
       setClients((current) => current.map((client) => client.id === editingClient.id
         ? {
           ...client,
@@ -172,6 +258,13 @@ export default function ClientsPage() {
           notes: read('nextActionNotes', existingDetails.nextAction.notes),
         },
       } : undefined;
+      updateOrganizationPrimaryContact(
+        editingClient,
+        contactPerson,
+        email,
+        phone,
+        read('stakeholderDesignation', existingDetails?.primaryStakeholder.designation ?? 'Decision Maker'),
+      );
       setClients((current) => current.map((client) => client.id === editingClient.id
         ? {
           ...client,

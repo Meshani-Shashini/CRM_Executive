@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, Building2, CalendarDays, Check, Clock3, Columns3,
+  Activity as ActivityIcon, AlertTriangle, ArrowLeft, ArrowRight, Building2, CalendarDays, Check, Clock3, Columns3,
   FileText, List, Pencil, Plus, ShieldCheck, Target, Wallet, Trash2,
 } from 'lucide-react';
 import Badge from '../components/ui/Badge';
@@ -14,6 +14,7 @@ import { calculateBrokerageCommission } from '../utils/insurance';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile } from '../utils/customerProfile';
 import { isStageSlaOverdue } from '../utils/stageSla';
+import { linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
 
 const LOSS_REASONS = [
   'Price / premium',
@@ -170,6 +171,7 @@ export default function DealWorkspace({
   deals,
   onCreateDeal,
   onEditDeal,
+  onEditLead,
   onDeleteLead,
   onDeleteDeal,
   initialSelectedKey,
@@ -178,6 +180,7 @@ export default function DealWorkspace({
   deals: Deal[];
   onCreateDeal?: () => void;
   onEditDeal?: (deal: Deal) => void;
+  onEditLead?: (lead: Lead) => void;
   onDeleteLead?: (lead: Lead) => void;
   onDeleteDeal?: (deal: Deal) => void;
   initialSelectedKey?: string;
@@ -243,8 +246,7 @@ export default function DealWorkspace({
   const selectedClient = selectedItem ? clientForItem(selectedItem, clients) : undefined;
   const clientContacts = selectedClient?.contacts ?? [];
   const itemContacts = selectedLead?.contacts ?? linkedLead?.contacts ?? [];
-  const contactProfiles = [...clientContacts, ...itemContacts]
-    .filter((contact, index, profiles) => profiles.findIndex((profile) => profile.id === contact.id) === index);
+  const contactProfiles = mergeContactProfiles(clientContacts, itemContacts);
   const primaryContactName = selectedLead?.contact ?? selectedDeal?.contactName ?? selectedClient?.contactPerson ?? '';
   const primaryContactProfile = contactProfiles.find((profile) =>
     (selectedLead?.contactProfileId ?? selectedDeal?.contactProfileId) === profile.id
@@ -263,11 +265,7 @@ export default function DealWorkspace({
     whatsapp: selectedLead?.whatsapp || selectedDeal?.whatsapp || primaryContactProfile?.whatsapp || '',
     telegram: selectedLead?.telegram || selectedDeal?.telegram || primaryContactProfile?.telegram || '',
   } : undefined;
-  const detailContacts = [
-    ...(primaryContact ? [primaryContact] : []),
-    ...contactProfiles.filter((profile) => profile.id !== primaryContactProfile?.id
-      && profile.name.trim().toLowerCase() !== primaryContactName.trim().toLowerCase()),
-  ];
+  const detailContacts = mergeContactProfiles(primaryContact ? [primaryContact] : undefined, contactProfiles);
   const selectedProduct = products.find((product) => product.code === selectedItem?.productCode)
     ?? products.find((product) => product.name === (selectedDeal?.product ?? ''));
   const selectedPipeline = pipelines.find((pipeline) => pipeline.id === selectedItem?.pipelineId);
@@ -627,6 +625,12 @@ export default function DealWorkspace({
       notes: selectedLead.notes,
     };
     setDeals((current) => [deal, ...current]);
+    const linkedLeadContacts = mergeContactProfiles(
+      selectedLead.contacts,
+      contactProfiles.filter((contact) => contact.linkedLeadIds?.includes(selectedLead.id)),
+      primaryContact ? [primaryContact] : undefined,
+    )
+      .map((contact) => linkContactProfile(contact, selectedLead.id, deal.id));
     setLeads((current) => current.map((lead) => lead.id === selectedLead.id
       ? {
         ...lead,
@@ -634,17 +638,12 @@ export default function DealWorkspace({
         contactProfileId: lead.contactProfileId ?? primaryContactProfile?.id,
         contactEmail: lead.contactEmail || primaryContactProfile?.email || '',
         ...contactChannels,
+        contacts: linkedLeadContacts,
       }
       : lead));
-    if (selectedClient && (selectedLead.contactProfileId ?? primaryContactProfile?.id)) {
-      const contactProfileId = selectedLead.contactProfileId ?? primaryContactProfile?.id;
+    if (selectedClient) {
       setClients((current) => current.map((client) => client.id === selectedClient.id
-        ? {
-          ...client,
-          contacts: (client.contacts ?? []).map((contact) => contact.id === contactProfileId
-            ? { ...contact, linkedDealIds: [...new Set([...(contact.linkedDealIds ?? []), deal.id])] }
-            : contact),
-        }
+        ? { ...client, contacts: mergeContactProfiles(client.contacts, linkedLeadContacts) }
         : client));
     }
     setStageHistory((current) => [...current, {
@@ -938,13 +937,6 @@ export default function DealWorkspace({
     }
   };
 
-  const openAddContact = () => {
-    setEditingContactId('');
-    setContactEditorDraft(EMPTY_CONTACT_DRAFT);
-    setAddContactError('');
-    setAddContactOpen(true);
-  };
-
   const openEditContact = (contact: CompanyContactProfile) => {
     setEditingContactId(contact.id);
     setContactEditorDraft({
@@ -979,7 +971,7 @@ export default function DealWorkspace({
       setAddContactError('A contact with this email is already linked to this lead.');
       return;
     }
-    const contact: CompanyContactProfile = {
+    const contact: CompanyContactProfile = linkContactProfile({
       id: editingContactId || `contact-${crypto.randomUUID()}`,
       name,
       role,
@@ -987,27 +979,20 @@ export default function DealWorkspace({
       phone,
       whatsapp,
       telegram,
-      linkedLeadIds: editingContactId
-        ? contactProfiles.find((profile) => profile.id === editingContactId)?.linkedLeadIds ?? []
-        : selectedLead ? [selectedLead.id] : linkedLead ? [linkedLead.id] : [],
-      linkedDealIds: editingContactId
-        ? contactProfiles.find((profile) => profile.id === editingContactId)?.linkedDealIds ?? []
-        : selectedLead?.dealId ? [selectedLead.dealId] : selectedDeal ? [selectedDeal.id] : [],
-    };
+      linkedLeadIds: contactProfiles.find((profile) => profile.id === editingContactId)?.linkedLeadIds ?? [],
+      linkedDealIds: contactProfiles.find((profile) => profile.id === editingContactId)?.linkedDealIds ?? [],
+    }, selectedLead?.id ?? linkedLead?.id, selectedDeal?.id ?? selectedLead?.dealId ?? linkedLead?.dealId);
 
     if (selectedLead || linkedLead) {
       const targetLead = selectedLead ?? linkedLead;
       if (targetLead) setLeads((current) => current.map((lead) => {
         if (lead.id !== targetLead.id) return lead;
         const contacts = lead.contacts ?? [];
-        const hasContact = contacts.some((profile) => profile.id === contact.id);
         const isPrimary = lead.contactProfileId === contact.id
           || (!lead.contactProfileId && lead.contact.trim().toLowerCase() === contact.name.trim().toLowerCase());
         return {
           ...lead,
-          contacts: hasContact
-            ? contacts.map((profile) => profile.id === contact.id ? contact : profile)
-            : [...contacts, contact],
+          contacts: mergeContactProfiles(contacts, [linkContactProfile(contact, lead.id, lead.dealId)]),
           ...(isPrimary ? {
             contact: contact.name,
             contactRole: contact.role,
@@ -1038,17 +1023,9 @@ export default function DealWorkspace({
     if (selectedClient) {
       setClients((current) => current.map((client) => {
         if (client.id !== selectedClient.id) return client;
-        const contacts = client.contacts ?? [];
-        const hasContact = contacts.some((profile) => profile.id === contact.id);
         return {
           ...client,
-          contacts: hasContact
-            ? contacts.map((profile) => profile.id === contact.id ? {
-              ...contact,
-              linkedLeadIds: [...new Set([...(profile.linkedLeadIds ?? []), ...(contact.linkedLeadIds ?? [])])],
-              linkedDealIds: [...new Set([...(profile.linkedDealIds ?? []), ...(contact.linkedDealIds ?? [])])],
-            } : profile)
-            : [...contacts, contact],
+          contacts: mergeContactProfiles(client.contacts, [contact]),
         };
       }));
     }
@@ -1150,14 +1127,14 @@ export default function DealWorkspace({
         {onCreateDeal && <button type="button" className="btn-ghost m-3 !text-xs" onClick={onCreateDeal}>+ Deal</button>}
       </aside>}
 
-      <main className="glass min-h-[460px] min-w-0 overflow-y-auto rounded-2xl p-3 sm:p-4 xl:min-h-0">
+      <main className={`glass min-h-[460px] min-w-0 overflow-y-auto rounded-2xl p-3 sm:p-4 xl:min-h-0 ${selectedLead ? 'flex flex-col' : ''}`}>
         {!selectedItem ? (
           <div className="flex h-full min-h-64 flex-col items-center justify-center text-center">
             <ShieldCheck size={30} className="text-brand-400" /><h2 className="mt-3 font-semibold text-white">Your placement workspace</h2>
             <p className="mt-1 text-sm text-muted">Select a lead or deal to see its complete lifecycle and activity.</p>
           </div>
         ) : <>
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink-600 pb-2">
+          <div className="order-0 flex flex-wrap items-center justify-between gap-2 border-b border-ink-600 pb-2">
             <div className="flex min-w-0 items-center gap-2">
               <Building2 size={17} className="shrink-0 text-brand-300" />
               <div className="min-w-0">
@@ -1174,34 +1151,42 @@ export default function DealWorkspace({
                 <button type="button" role="tab" aria-label="Kanban view" title="Kanban view" aria-selected={false} onClick={() => setWorkspaceView('kanban')} className="rounded-md p-2 text-muted transition hover:text-white"><Columns3 size={14} /></button>
                 <button type="button" role="tab" aria-label="Inspection view" title="Inspection view" aria-selected={true} onClick={() => setWorkspaceView('inspection')} className="rounded-md bg-[#1B1E22] p-2 text-white transition"><List size={14} /></button>
               </div>
-              {onClose && <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={onClose}><ArrowLeft size={13} />Back</button>}
-              {selectedDeal && onEditDeal && <button type="button" className="btn-ghost !py-1.5 text-xs" onClick={() => onEditDeal(selectedDeal)}><Pencil size={13} />Edit Deal</button>}
-              {activeRole === 'admin' && selectedLead && onDeleteLead && <button type="button" className="btn-ghost !py-1.5 text-xs text-hot" onClick={() => onDeleteLead(selectedLead)}><Trash2 size={13} />Delete Lead</button>}
-              {activeRole === 'admin' && selectedDeal && onDeleteDeal && <button type="button" className="btn-ghost !py-1.5 text-xs text-hot" disabled={dealHasInvoice} title={dealHasInvoice ? 'Deals linked to invoices cannot be deleted.' : undefined} onClick={() => onDeleteDeal(selectedDeal)}><Trash2 size={13} />Delete Deal</button>}
+              {onClose && <button type="button" aria-label="Back to leads" title="Back to leads" className="btn-ghost !px-2 !py-1.5" onClick={onClose}><ArrowLeft size={14} /></button>}
+              {(activeRole === 'admin' || activeRole === 'sales') && selectedLead && onEditLead && <button type="button" aria-label="Edit lead" title="Edit lead" className="btn-ghost !px-2 !py-1.5" onClick={() => onEditLead(selectedLead)}><Pencil size={14} /></button>}
+              {selectedDeal && onEditDeal && <button type="button" aria-label="Edit deal" title="Edit deal" className="btn-ghost !px-2 !py-1.5" onClick={() => onEditDeal(selectedDeal)}><Pencil size={14} /></button>}
+              {activeRole === 'admin' && selectedLead && onDeleteLead && <button type="button" aria-label="Delete lead" title="Delete lead" className="btn-ghost !px-2 !py-1.5 text-hot" onClick={() => onDeleteLead(selectedLead)}><Trash2 size={14} /></button>}
+              {activeRole === 'admin' && selectedDeal && onDeleteDeal && <button type="button" aria-label="Delete deal" className="btn-ghost !px-2 !py-1.5 text-hot" disabled={dealHasInvoice} title={dealHasInvoice ? 'Deals linked to invoices cannot be deleted.' : 'Delete deal'} onClick={() => onDeleteDeal(selectedDeal)}><Trash2 size={14} /></button>}
             </div>
           </div>
 
-          <section aria-label="Stage progress" className="telemetry-panel mt-2 rounded-xl p-2.5">
+          <section aria-label={progressDeal ? 'Placement telemetry stage tracker' : 'Lead telemetry stage tracker'} className="telemetry-panel order-1 mt-2 min-w-0 rounded-xl p-2.5">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#DCE5E0]">
-                    {progressDeal ? 'Placement telemetry' : 'Lead telemetry'}
-                  </h2>
-                  {progressDeal && <span className="text-[10px] tracking-wide text-[#6C727F]">{selectedPipeline?.name ?? 'Pipeline'} · stage sequence</span>}
+                  <h2 className="sr-only">{progressDeal ? 'Placement telemetry' : 'Lead telemetry'}</h2>
+                  <ActivityIcon size={14} className="text-[#A7F2C5]" aria-hidden="true" />
+                  {progressDeal && <span className="text-[10px] tracking-wide text-[#6C727F]" title={`${selectedPipeline?.name ?? 'Pipeline'} stage sequence`}>{selectedPipeline?.name ?? 'Pipeline'}</span>}
                 </div>
                 <span className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-[#27C272]">
                   {telemetryOverride && <span className="text-[#E09228]">Test · {telemetryOverride.label}</span>}
-                  <span className="telemetry-live-dot" aria-hidden="true" /> Live tracking
+                  <span className="telemetry-live-dot" aria-hidden="true" /><span className="sr-only">Live tracking</span>
                 </span>
               </div>
               <div className="mt-2 min-w-0">
-                {stageTimeline.length ? <div className="-mx-1 max-w-full overflow-x-auto px-1 pb-2 stage-stepper-scroll">
-                  <ol className="telemetry-track flex w-max min-w-full items-start justify-between">
+                {stageTimeline.length ? <div className="-mx-1 w-full max-w-full overflow-x-auto px-1 pb-2 stage-stepper-scroll">
+                  <ol className="telemetry-track flex w-max min-w-full items-start justify-between gap-1">
                       {stageTimeline.map((stage) => {
                         const pipelineStage = typeof progressStages[stage.index] === 'string'
                           ? undefined
                           : progressStages[stage.index] as PipelineStage;
-                        const durationMilliseconds = stage.active ? elapsedMilliseconds : stage.duration;
+                        const stageEnteredAtMilliseconds = stage.enteredAt ? Date.parse(stage.enteredAt) : Number.NaN;
+                        const stageElapsedMilliseconds = stage.active
+                          ? Number.isFinite(stageEnteredAtMilliseconds)
+                            ? Math.max(0, clockNow - stageEnteredAtMilliseconds)
+                            : 0
+                          : stage.duration;
+                        const durationMilliseconds = stage.active && telemetryOverride
+                          ? Math.max(0, clockNow - telemetryOverride.timestamp)
+                          : stageElapsedMilliseconds;
                         const health = stageSlaHealth(durationMilliseconds, stage.targetDays);
                         const stageOverdue = health === 'overdue';
                         const healthLabel = health === 'overdue' ? 'DRAGGED'
@@ -1217,7 +1202,7 @@ export default function DealWorkspace({
                           <button type="button" disabled={!progressDeal || stage.active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
                             onClick={() => pipelineStage && progressDeal && requestStageChange(pipelineStage, progressDeal)}
                             title={stage.active && stageOverdue ? `SLA overdue: stage exceeded its ${stage.targetDays}-day target` : stage.active && health === 'warning' ? `SLA warning: stage is approaching its ${stage.targetDays}-day target` : stage.name}
-                            aria-label={`${stage.name}${stage.active ? `; stage duration ${formatStageDuration(elapsedMilliseconds)}; total ${formatDays(stage.cumulative)}` : stage.done ? '; completed' : '; upcoming'}${stage.active && stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : stage.active && health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
+                            aria-label={`${stage.name}${stage.active ? `; stage duration ${formatStageDuration(stageElapsedMilliseconds ?? 0)}; total ${formatDays(stage.cumulative)}` : stage.done ? '; completed' : '; upcoming'}${stage.active && stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : stage.active && health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
                             aria-current={stage.active ? 'step' : undefined}
                             className={`telemetry-stage relative z-[1] flex w-full flex-col items-center border-0 bg-transparent px-1 py-0 text-center disabled:cursor-default ${stage.active ? 'is-active' : stage.done ? 'is-complete' : 'is-pending'}`}>
                             <span className={`telemetry-node ${stage.active ? `is-${health}` : stage.done ? 'is-complete' : ''}`}>
@@ -1228,8 +1213,8 @@ export default function DealWorkspace({
                             </span>
                             {stage.active && <>
                               <span className="telemetry-metric mt-0.5 flex w-full flex-nowrap items-center justify-center gap-x-2 whitespace-nowrap font-mono text-[8px] leading-4 text-[#C9D2CC]"
-                                aria-label={`${formatDays(elapsedMilliseconds)} elapsed, ${stage.targetDays > 0 ? `${stage.targetDays} days target` : 'no target'}${stage.cumulative !== undefined ? `, ${formatDays(stage.cumulative)} total` : ''}`}>
-                                <span><Clock3 size={10} aria-hidden="true" />{formatDays(elapsedMilliseconds)}</span>
+                                aria-label={`${formatDays(stageElapsedMilliseconds)} elapsed, ${stage.targetDays > 0 ? `${stage.targetDays} days target` : 'no target'}${stage.cumulative !== undefined ? `, ${formatDays(stage.cumulative)} total` : ''}`}>
+                                <span><Clock3 size={10} aria-hidden="true" />{formatDays(stageElapsedMilliseconds)}</span>
                                 <span><Target size={10} aria-hidden="true" />{stage.targetDays > 0 ? `${stage.targetDays}d` : '—'}</span>
                               </span>
                               <span className={`telemetry-sla-label mt-1 whitespace-nowrap font-mono text-[10px] leading-4 tracking-[0.08em] sm:text-[11px] is-${health}`} style={{ color: healthColor }}>
@@ -1245,7 +1230,8 @@ export default function DealWorkspace({
           </section>
 
           {selectedLead ? (
-            <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            <>
+            <div className="order-3 mt-3 grid gap-3 lg:grid-cols-2">
               <section className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
                 <h2 className="mb-4 text-sm font-semibold text-white">Client Details</h2>
                 <div className="grid grid-cols-2 gap-x-5 gap-y-4">
@@ -1256,9 +1242,6 @@ export default function DealWorkspace({
                   <DetailValue label="Email" value={selectedClient?.email || '—'} />
                   <DetailValue label="Phone" value={selectedClient?.phone || '—'} />
                 </div>
-                <ContactDirectory contacts={detailContacts} primaryContactId={primaryContact?.id}
-                  assignedContactId={selectedLead.contactProfileId} onAssign={assignContactProfile}
-                  onAddContact={openAddContact} onEditContact={openEditContact} />
                 <div className="mt-4 border-t border-ink-700 pt-4">
                   <h3 className="mb-3 text-xs font-semibold text-white">Lead Details</h3>
                   <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2">
@@ -1283,6 +1266,12 @@ export default function DealWorkspace({
                 </div>
               </section>
             </div>
+            <section className="order-4 mt-3 min-w-0 rounded-xl border border-ink-600 bg-ink-900/30 p-4">
+              <ContactDirectory contacts={detailContacts} primaryContactId={primaryContact?.id}
+                assignedContactId={selectedLead.contactProfileId} onAssign={assignContactProfile}
+                onEditContact={openEditContact} />
+            </section>
+            </>
           ) : <>
           <div className="mt-3 grid gap-3 lg:grid-cols-2">
             <section className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
@@ -1334,11 +1323,11 @@ export default function DealWorkspace({
             </section>
           </div>
           </>}
-          <section className="mt-4 min-w-0 border-t border-ink-600 pt-3">
+          <section className={`${selectedLead ? 'order-2' : ''} mt-4 min-w-0 border-t border-ink-600 pt-3`}>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Clock3 size={15} className="text-brand-300" /> Activity Timeline</h2>
-                <p className="mt-1 text-xs text-muted">Stage movement and client touchpoints, grouped by activity type.</p>
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Clock3 size={15} className="text-brand-300" /> Activity</h2>
+                <p className="mt-1 text-xs text-muted">Stage movement and client touchpoints.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('meeting')}><CalendarDays size={13} /> Appointment</button>
@@ -1393,7 +1382,7 @@ export default function DealWorkspace({
               </div>
             </div>
           </section>
-          {selectedLead ? <section className="mt-3 rounded-xl border border-ink-600 bg-ink-900/30 p-3">
+          {selectedLead ? <section className="order-4 mt-3 rounded-xl border border-ink-600 bg-ink-900/30 p-3">
             <h2 className="text-sm font-semibold text-white">Lead progression</h2>
             {progressDeal ? <p className="mt-3 text-xs text-win">This lead is linked to deal {progressDeal.id} and follows its placement stages.</p> : <>
               <p className="mt-3 text-xs text-muted">Convert this lead to begin the placement stage workflow.</p>
@@ -1538,21 +1527,18 @@ function ContactDirectory({
   primaryContactId,
   assignedContactId,
   onAssign,
-  onAddContact,
   onEditContact,
 }: {
   contacts: CompanyContactProfile[];
   primaryContactId?: string;
   assignedContactId?: string;
   onAssign: (profileId: string) => void;
-  onAddContact?: () => void;
   onEditContact: (contact: CompanyContactProfile) => void;
 }) {
   return <section className="mt-3 border-t border-ink-700 pt-3" aria-label="Customer contacts">
     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
       <div className="flex items-center gap-2">
         <h3 className="text-sm font-semibold text-white">Contacts <span className="ml-1 font-normal text-muted">{contacts.length}</span></h3>
-        {onAddContact && <button type="button" className="btn-ghost !gap-1 !px-2 !py-1 text-[11px]" onClick={onAddContact}><Plus size={12} /> Add Contact</button>}
       </div>
       {contacts.length > 1 && <select className="input !w-auto max-w-full !py-1.5 text-xs" aria-label="Assign primary contact"
         value={assignedContactId ?? ''} onChange={(event) => onAssign(event.target.value)}>

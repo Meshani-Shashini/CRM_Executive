@@ -15,6 +15,7 @@ import {
   SAMPLE_LEAD_IDS,
 } from '../lib/sampleLeads';
 import { createSampleWorkspace } from '../lib/sampleWorkspace';
+import { reconcileContactAssociations } from '../utils/contactProfiles';
 
 interface AppState {
   user: User;
@@ -372,14 +373,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         const records = (data ?? []) as TenantRecord[];
         setTaxRates(asArray<TaxRate>(records, 'tax-rates'));
-        setLeads(asArray<Lead>(records, 'leads'));
-        setClients(asArray<Client>(records, 'clients'));
+        const loadedLeads = asArray<Lead>(records, 'leads');
+        const loadedClients = asArray<Client>(records, 'clients');
+        const loadedDeals = asArray<Deal>(records, 'deals');
+        const contactsReconciled = reconcileContactAssociations(loadedLeads, loadedClients, loadedDeals);
+        setLeads(contactsReconciled.leads);
+        setClients(contactsReconciled.clients);
         const customerLookupsRecord = records.find((record) => record.resource === 'customer-lookups');
         setCustomerLookups(mergeCustomerLookups(customerLookupsRecord?.data.options));
         const savedProducts = asArray<ProductCode>(records, 'products');
         setProducts(savedProducts.length > 0 ? savedProducts.map(normalizeProduct) : PRODUCT_CODES.map((product) => ({ ...product, id: product.code })));
         setActivities(asArray<Activity>(records, 'activities'));
-        setDeals(asArray<Deal>(records, 'deals'));
+        setDeals(loadedDeals);
         setInvoices(asArray<Invoice>(records, 'invoices'));
         setPayments(asArray<Payment>(records, 'payments'));
         setPipelines(asArray<Pipeline>(records, 'pipelines'));

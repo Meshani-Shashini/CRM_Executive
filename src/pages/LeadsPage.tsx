@@ -13,6 +13,7 @@ import { calculateBrokerageCommission } from '../utils/insurance';
 import { hasCompleteCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile, INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
 import { isStageSlaOverdue } from '../utils/stageSla';
+import { linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
 import DealWorkspace from './DealWorkspace';
 
 const LEAD_FUNNEL_STAGES = [
@@ -249,6 +250,17 @@ export default function LeadsPage() {
 
   const confirmDeleteLead = () => {
     if (!pendingLeadDeletion || activeRole !== 'admin') return;
+    if (deals.some((deal) => deal.leadId === pendingLeadDeletion.id || deal.id === pendingLeadDeletion.dealId)) {
+      window.alert('This Lead cannot be deleted while it is linked to a Deal.');
+      return;
+    }
+    setClients((current) => current.map((client) => ({
+      ...client,
+      contacts: (client.contacts ?? []).map((contact) => ({
+        ...contact,
+        linkedLeadIds: (contact.linkedLeadIds ?? []).filter((id) => id !== pendingLeadDeletion.id),
+      })),
+    })));
     setLeads((current) => current.filter((item) => item.id !== pendingLeadDeletion.id));
     setPendingLeadDeletion(null);
     setInspectedLeadId('');
@@ -393,6 +405,10 @@ export default function LeadsPage() {
         || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)
         || !/^[+()\d\s-]{7,}$/.test(contactPhone);
     });
+    const normalizedEmails = [email, ...additionalContactDrafts.map((contact) => contact.email.trim())]
+      .filter(Boolean)
+      .map((value) => value.toLowerCase());
+    const duplicateContactEmails = new Set(normalizedEmails).size !== normalizedEmails.length;
     const person = users.find((candidate) =>
       candidate.role === 'sales' && candidate.name.trim().toLowerCase() === selectedPersonName.toLowerCase(),
     );
@@ -417,8 +433,10 @@ export default function LeadsPage() {
       setFormError('Enter a valid contact phone number.');
       return;
     }
-    if (additionalContactErrors) {
-      setFormError('Complete each additional contact name, role, valid email, and valid phone number.');
+    if (additionalContactErrors || duplicateContactEmails) {
+      setFormError(duplicateContactEmails
+        ? 'Each lead contact must have a unique email address.'
+        : 'Complete each additional contact name, role, valid email, and valid phone number.');
       return;
     }
     if (leadBoardStage === 'Qualified to Deals' &&
@@ -470,7 +488,8 @@ export default function LeadsPage() {
         linkedDealIds: existing?.linkedDealIds ?? [],
       };
     });
-    const savedContacts = [primaryProfile, ...additionalProfiles];
+    const savedContacts = [primaryProfile, ...additionalProfiles]
+      .map((profile) => linkContactProfile(profile, leadId, editingLead?.dealId));
     const lead: Lead = {
       ...(editingLead ?? {}),
       id: leadId,
@@ -491,7 +510,7 @@ export default function LeadsPage() {
       closeDate: expectedCloseDate,
       visibility: 'individual',
       contact: primaryContact,
-      contactProfileId: profileId,
+      contactProfileId: primaryProfile.id,
       contactRole,
       contactEmail: email,
       contactPhone: phone,
@@ -525,24 +544,14 @@ export default function LeadsPage() {
       ? current.map((existing) => existing.id === editingLead.id ? lead : existing)
       : [lead, ...current]);
     setClients((current) => current.map((client) => {
-      if (client.id !== selectedOrganization.id) return client;
-      const currentContacts = client.contacts ?? [];
-      const updatedContacts = savedContacts.reduce((contacts, profile) => {
-        const existing = contacts.find((contact) => contact.id === profile.id
-          || contact.email.trim().toLowerCase() === profile.email.trim().toLowerCase());
-        const updatedProfile = {
-          ...profile,
-          id: existing?.id ?? profile.id,
-          linkedLeadIds: [...new Set([...(existing?.linkedLeadIds ?? []), lead.id])],
-          linkedDealIds: [...new Set([...(existing?.linkedDealIds ?? []), ...(profile.linkedDealIds ?? [])])],
-        };
-        return existing
-          ? contacts.map((contact) => contact.id === existing.id ? updatedProfile : contact)
-          : [...contacts, updatedProfile];
-      }, currentContacts);
+      const currentContacts = (client.contacts ?? []).map((contact) => ({
+        ...contact,
+        linkedLeadIds: (contact.linkedLeadIds ?? []).filter((id) => id !== leadId),
+      }));
+      if (client.id !== selectedOrganization.id) return { ...client, contacts: currentContacts };
       return {
         ...client,
-        contacts: updatedContacts,
+        contacts: mergeContactProfiles(currentContacts, savedContacts),
         contactPerson: client.contactPerson || primaryContact,
         phone: client.phone || phone,
         email: client.email || email,
@@ -596,6 +605,7 @@ export default function LeadsPage() {
           deals={deals}
           initialSelectedKey={`lead:${inspectedLeadId}`}
           onClose={() => setInspectedLeadId('')}
+          onEditLead={openEditLead}
           onDeleteLead={deleteLead}
         />
       ) : activePipelines.length === 0 ? (

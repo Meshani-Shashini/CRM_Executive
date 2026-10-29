@@ -3,7 +3,7 @@ import { INSURERS } from '../data/catalogs';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
 import { Plus, Filter, X } from 'lucide-react';
-import type { Deal, Lead, ProductCode } from '../types';
+import type { CompanyContactProfile, Deal, Lead, ProductCode } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
 import DateInput from '../components/ui/DateInput';
@@ -11,11 +11,12 @@ import ProductSelect from '../components/ui/ProductSelect';
 import { calculateBrokerageCommission } from '../utils/insurance';
 import { normalizeDateInput } from '../utils/date';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
+import { linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
 import DealWorkspace from './DealWorkspace';
 import { TENANT_ID } from '../lib/supabase';
 
 export default function DealsPage() {
-  const { deals, setDeals, setLeads, clients, user, viewAsRole, pipelines, pipelineStages, products, invoices, setStageHistory } = useApp();
+  const { deals, setDeals, setLeads, clients, setClients, user, viewAsRole, pipelines, pipelineStages, products, invoices, setStageHistory } = useApp();
   const [createOpen, setCreateOpen] = useState(false);
   const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
   const [createPipelineId, setCreatePipelineId] = useState('');
@@ -131,6 +132,13 @@ export default function DealsPage() {
 
   const confirmDeleteLead = () => {
     if (!pendingLeadDeletion || (viewAsRole ?? user.role) !== 'admin') return;
+    setClients((current) => current.map((client) => ({
+      ...client,
+      contacts: (client.contacts ?? []).map((contact) => ({
+        ...contact,
+        linkedLeadIds: (contact.linkedLeadIds ?? []).filter((id) => id !== pendingLeadDeletion.id),
+      })),
+    })));
     setLeads((current) => current.filter((lead) => lead.id !== pendingLeadDeletion.id));
     setPendingLeadDeletion(null);
   };
@@ -139,7 +147,23 @@ export default function DealsPage() {
     if (!pendingDealDeletion || (viewAsRole ?? user.role) !== 'admin') return;
     const dealId = pendingDealDeletion.id;
     setDeals((current) => current.filter((deal) => deal.id !== dealId));
-    setLeads((current) => current.map((lead) => lead.dealId === dealId ? { ...lead, dealId: undefined } : lead));
+    setClients((current) => current.map((client) => ({
+      ...client,
+      contacts: (client.contacts ?? []).map((contact) => ({
+        ...contact,
+        linkedDealIds: (contact.linkedDealIds ?? []).filter((id) => id !== dealId),
+      })),
+    })));
+    setLeads((current) => current.map((lead) => lead.dealId === dealId
+      ? {
+        ...lead,
+        dealId: undefined,
+        contacts: (lead.contacts ?? []).map((contact) => ({
+          ...contact,
+          linkedDealIds: (contact.linkedDealIds ?? []).filter((id) => id !== dealId),
+        })),
+      }
+      : lead));
     setPendingDealDeletion(null);
   };
 
@@ -192,16 +216,37 @@ export default function DealsPage() {
     const nextActivityCreatedAt = hasNextActivity
       ? sameNextActivity ? editingDeal?.nextActivityCreatedAt ?? now : now
       : undefined;
+    const dealId = editingDeal?.id ?? `d-${Date.now()}`;
+    const dealClientRecord = clients.find((client) => client.name === dealClient.trim());
+    const contactName = String(data.get('contactName') ?? '').trim();
+    const contactEmail = String(data.get('contactEmail') ?? '').trim();
+    const matchingContact = dealClientRecord?.contacts?.find((contact) =>
+      contact.id === editingDeal?.contactProfileId
+      || (contactEmail && contact.email.trim().toLowerCase() === contactEmail.toLowerCase()));
+    const validContact = Boolean(contactName
+      && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)
+      && /^[+()\d\s-]{7,}$/.test(dealPhone));
+    const dealContactProfile: CompanyContactProfile | undefined = validContact ? {
+      id: matchingContact?.id ?? editingDeal?.contactProfileId ?? `contact-${crypto.randomUUID()}`,
+      name: contactName,
+      role: matchingContact?.role ?? editingDeal?.contactRole ?? 'Decision Maker',
+      email: contactEmail,
+      phone: dealPhone,
+      whatsapp: dealWhatsapp,
+      telegram: dealTelegram,
+      linkedLeadIds: matchingContact?.linkedLeadIds ?? [],
+      linkedDealIds: matchingContact?.linkedDealIds ?? [],
+    } : undefined;
     const deal: Deal = {
       ...(editingDeal ?? {}),
-      id: editingDeal?.id ?? `d-${Date.now()}`,
+      id: dealId,
       pipelineId: String(data.get('pipelineId')),
       createdAt: editingDeal?.createdAt ?? now,
       stageChangedAt: !editingDeal || (stage && editingDeal.stage !== stage.name)
         ? now
         : editingDeal.stageChangedAt ?? editingDeal.createdAt ?? now,
       client: dealClient.trim(),
-      clientId: clients.find((client) => client.name === dealClient.trim())?.id,
+      clientId: dealClientRecord?.id,
       product: selectedProduct.name,
       productCode: selectedProduct.code,
       value,
@@ -215,11 +260,13 @@ export default function DealsPage() {
       ownerId: user.id,
       closeDate: normalizedCloseDate,
       insurer: dealInsurer.trim(),
-      contactName: String(data.get('contactName') ?? '').trim(),
-      contactEmail: String(data.get('contactEmail') ?? '').trim(),
+      contactName,
+      contactEmail,
       contactPhone: dealPhone,
       whatsapp: dealWhatsapp,
       telegram: dealTelegram,
+      contactProfileId: dealContactProfile?.id,
+      contactRole: dealContactProfile?.role,
       intentTier: dealIntent,
       source: dealSource.trim(),
       notes: dealNotes.trim(),
@@ -229,6 +276,19 @@ export default function DealsPage() {
       nextActivityCreatedAt,
     };
     setDeals(editingDeal ? deals.map((item) => item.id === editingDeal.id ? deal : item) : [deal, ...deals]);
+    setClients((current) => current.map((client) => {
+      const contacts = (client.contacts ?? []).map((contact) => ({
+        ...contact,
+        linkedDealIds: (contact.linkedDealIds ?? []).filter((id) => id !== deal.id),
+      }));
+      if (client.id !== dealClientRecord?.id) return { ...client, contacts };
+      return {
+        ...client,
+        contacts: dealContactProfile
+          ? mergeContactProfiles(contacts, [linkContactProfile(dealContactProfile, deal.leadId, deal.id)])
+          : contacts,
+      };
+    }));
     if (stage && (!editingDeal || editingDeal.stage !== stage.name)) {
       const previousStage = editingDeal
         ? pipelineStages.find((item) => item.pipelineId === editingDeal.pipelineId && item.name === editingDeal.stage)

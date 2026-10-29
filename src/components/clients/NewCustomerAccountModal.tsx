@@ -7,7 +7,7 @@ import {
   type CustomerLookupKey,
   type CustomerLookups,
 } from '../../data/customerLookups';
-import type { Client, InsuredEntityDetails } from '../../types';
+import type { Client, CompanyContactProfile, InsuredEntityDetails } from '../../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../../utils/currency';
 import { formatDate } from '../../utils/date';
 import DateInput from '../ui/DateInput';
@@ -36,6 +36,16 @@ interface NewCustomerAccountModalProps {
 
 type LookupValues = Record<CustomerLookupKey, string>;
 
+interface DepartmentContactDraft {
+  id: string;
+  name: string;
+  role: string;
+  email: string;
+  phone: string;
+  whatsapp: string;
+  telegram: string;
+}
+
 function emptyLookupValues(): LookupValues {
   return Object.fromEntries(
     Object.keys(CUSTOMER_LOOKUP_DEFAULTS).map((key) => [key, '']),
@@ -52,6 +62,26 @@ export default function NewCustomerAccountModal({ onClose, onCreated }: NewCusto
   const [exchangeRate, setExchangeRate] = useState('');
   const [verificationNotice, setVerificationNotice] = useState('');
   const [formError, setFormError] = useState('');
+  const [departmentContacts, setDepartmentContacts] = useState<DepartmentContactDraft[]>([]);
+
+  const addDepartmentContact = () => setDepartmentContacts((current) => [...current, {
+    id: `contact-${crypto.randomUUID()}`,
+    name: '',
+    role: '',
+    email: '',
+    phone: '',
+    whatsapp: '',
+    telegram: '',
+  }]);
+
+  const updateDepartmentContact = (id: string, field: keyof Omit<DepartmentContactDraft, 'id'>, value: string) => {
+    setDepartmentContacts((current) => current.map((contact) =>
+      contact.id === id ? { ...contact, [field]: value } : contact));
+  };
+
+  const removeDepartmentContact = (id: string) => {
+    setDepartmentContacts((current) => current.filter((contact) => contact.id !== id));
+  };
 
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
@@ -134,6 +164,7 @@ export default function NewCustomerAccountModal({ onClose, onCreated }: NewCusto
     const tradeName = String(data.get('tradeName') ?? '').trim();
     const primaryName = String(data.get('stakeholderName') ?? '').trim();
     const email = String(data.get('stakeholderEmail') ?? '').trim();
+    const telegram = String(data.get('stakeholderTelegram') ?? '').trim();
     const amount = Number(data.get('targetPremium') || 0);
     const enteredRate = currency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
     const rate = enteredRate && Number.isFinite(enteredRate) && enteredRate > 0 ? enteredRate : undefined;
@@ -152,6 +183,25 @@ export default function NewCustomerAccountModal({ onClose, onCreated }: NewCusto
     const dueDate = String(data.get('actionDueDate') ?? '');
     const actionNotes = String(data.get('actionNotes') ?? '').trim();
     const brokeragePct = Number(data.get('brokeragePct') || 0);
+    const invalidDepartmentContact = departmentContacts.some((contact) => {
+      const hasAnyField = [contact.name, contact.role, contact.email, contact.phone, contact.whatsapp, contact.telegram]
+        .some((value) => value.trim());
+      return hasAnyField && (!contact.name.trim() || !contact.role.trim()
+        || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email.trim())
+        || !/^[+()\d\s-]{7,}$/.test(contact.phone.trim()));
+    });
+    const contactEmails = [email, ...departmentContacts.map((contact) => contact.email.trim())]
+      .filter(Boolean)
+      .map((value) => value.toLowerCase());
+
+    if (invalidDepartmentContact) {
+      setFormError('Complete each department contact name, role, valid email, and valid phone number.');
+      return;
+    }
+    if (new Set(contactEmails).size !== contactEmails.length) {
+      setFormError('Each organization contact must have a unique email address.');
+      return;
+    }
 
     if (!isDraft && (!currency || (currency === 'USD' && (!rate || !Number.isFinite(rate) || rate <= 0)))) {
       setFormError('Choose a target premium currency and enter a positive USD/MVR rate when applicable.');
@@ -218,6 +268,33 @@ export default function NewCustomerAccountModal({ onClose, onCreated }: NewCusto
         notes: actionNotes,
       },
     };
+    const organizationContact: CompanyContactProfile | undefined = primaryName || email || phone ? {
+      id: `contact-${crypto.randomUUID()}`,
+      name: primaryName,
+      role: String(data.get('stakeholderDesignation') ?? '').trim() || 'Decision Maker',
+      email,
+      phone,
+      whatsapp: phone,
+      telegram,
+      linkedLeadIds: [],
+      linkedDealIds: [],
+    } : undefined;
+    const organizationContacts: CompanyContactProfile[] = [
+      ...(organizationContact ? [organizationContact] : []),
+      ...departmentContacts
+        .filter((contact) => contact.name.trim() || contact.email.trim() || contact.phone.trim())
+        .map((contact) => ({
+          id: contact.id,
+          name: contact.name.trim(),
+          role: contact.role.trim(),
+          email: contact.email.trim(),
+          phone: contact.phone.trim(),
+          whatsapp: contact.whatsapp.trim(),
+          telegram: contact.telegram.trim(),
+          linkedLeadIds: [],
+          linkedDealIds: [],
+        })),
+    ];
     const client: Client = {
       id: `C-${crypto.randomUUID()}`,
       name,
@@ -234,6 +311,7 @@ export default function NewCustomerAccountModal({ onClose, onCreated }: NewCusto
       class: lookupValues.industrySectors[0] || 'Miscellaneous',
       ownerId: user.id,
       contactPerson: primaryName,
+      contacts: organizationContacts,
       tags: [
         ...targetLines,
         ...(!hasCompleteClientProfile({
@@ -352,6 +430,7 @@ export default function NewCustomerAccountModal({ onClose, onCreated }: NewCusto
             <Field label="Designation"><input className="input" name="stakeholderDesignation" /></Field>
             <Field label="Email *"><input className="input" name="stakeholderEmail" type="email" required /></Field>
             <Field label="WhatsApp / Mobile *"><input className="input" name="stakeholderPhone" type="tel" required /></Field>
+            <Field label="Telegram"><input className="input" name="stakeholderTelegram" placeholder="@username or phone" /></Field>
             <Field label="Identification Type">
               <select className="input" name="identificationType" defaultValue="">
                 <option value="">Select identification type</option>
@@ -369,6 +448,30 @@ export default function NewCustomerAccountModal({ onClose, onCreated }: NewCusto
               <ShieldCheck size={15} /> Status is recorded as provided; no screening provider is connected.
             </div>
           </Section>
+
+          <section className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink-600 pb-2">
+              <div>
+                <h4 className="text-sm font-semibold text-white">Department Contacts</h4>
+                <p className="mt-1 text-xs text-muted">Add Accounting, IT, or other organization contacts.</p>
+              </div>
+              <button type="button" className="btn-ghost !py-1.5 text-xs" onClick={addDepartmentContact}><Plus size={13} /> Add Contact</button>
+            </div>
+            {departmentContacts.map((contact, index) => <div key={contact.id} className="rounded-xl border border-ink-600 bg-ink-900/35 p-3">
+              <div className="mb-3 flex items-center justify-between">
+                <h5 className="text-xs font-semibold text-white">Department Contact {index + 1}</h5>
+                <button type="button" className="btn-ghost !px-2 !py-1 text-[11px] text-hot" onClick={() => removeDepartmentContact(contact.id)}><X size={12} /> Remove</button>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Name *"><input className="input" value={contact.name} onChange={(event) => updateDepartmentContact(contact.id, 'name', event.target.value)} /></Field>
+                <Field label="Role / Department *"><input className="input" value={contact.role} placeholder="Accounting, IT, etc." onChange={(event) => updateDepartmentContact(contact.id, 'role', event.target.value)} /></Field>
+                <Field label="Email *"><input className="input" type="email" value={contact.email} onChange={(event) => updateDepartmentContact(contact.id, 'email', event.target.value)} /></Field>
+                <Field label="Phone *"><input className="input" type="tel" value={contact.phone} onChange={(event) => updateDepartmentContact(contact.id, 'phone', event.target.value)} /></Field>
+                <Field label="WhatsApp"><input className="input" type="tel" value={contact.whatsapp} onChange={(event) => updateDepartmentContact(contact.id, 'whatsapp', event.target.value)} /></Field>
+                <Field label="Telegram"><input className="input" value={contact.telegram} onChange={(event) => updateDepartmentContact(contact.id, 'telegram', event.target.value)} /></Field>
+              </div>
+            </div>)}
+          </section>
 
           <Section title="Brokerage Profile & Portfolio Estimates">
             <Field label="Target Premium Currency">
