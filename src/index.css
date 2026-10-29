@@ -108,42 +108,34 @@ body {
     mask-image: linear-gradient(to right, black, transparent 82%);
   }
   .telemetry-track { position: relative; }
-  .telemetry-step { min-height: 100px; }
+  .telemetry-step { min-height: 0; }
   .telemetry-connector {
     position: absolute;
     z-index: 0;
-    top: 30px;
+    top: 11px;
     left: 50%;
     right: -50%;
     height: 1px;
     overflow: hidden;
-    background: linear-gradient(90deg, rgba(39, 194, 114, 0.72), rgba(42, 48, 55, 0.72));
+    background: #2A3037;
   }
   .telemetry-connector.is-complete {
     background: linear-gradient(90deg, rgba(39, 194, 114, 0.9), rgba(58, 167, 109, 0.42));
     box-shadow: 0 0 8px rgba(39, 194, 114, 0.2);
-  }
-  .telemetry-connector.is-warning {
-    background: linear-gradient(90deg, rgba(224, 146, 40, 0.88), rgba(42, 48, 55, 0.72));
-    box-shadow: 0 0 8px rgba(224, 146, 40, 0.18);
-  }
-  .telemetry-connector.is-overdue {
-    background: linear-gradient(90deg, rgba(255, 51, 102, 0.95), rgba(42, 48, 55, 0.72));
-    box-shadow: 0 0 10px rgba(255, 51, 102, 0.28);
   }
   .telemetry-connector::after {
     position: absolute;
     inset: 0 auto 0 -35%;
     width: 35%;
     background: linear-gradient(90deg, transparent, rgba(184, 255, 216, 0.95), transparent);
-    animation: telemetry-scan 3.8s linear infinite;
     content: "";
   }
+  .telemetry-connector.is-complete::after { animation: telemetry-scan 3.8s linear infinite; }
   .telemetry-node {
     position: relative;
     display: grid;
-    width: 22px;
-    height: 22px;
+    width: 18px;
+    height: 18px;
     place-items: center;
     border: 1px solid #343C46;
     border-radius: 9999px;
@@ -198,55 +190,6 @@ body {
   .telemetry-sla-label.is-warning { color: #E09228; }
   .telemetry-sla-label.is-overdue { color: #FF3366; text-shadow: 0 0 8px rgba(255, 51, 102, 0.38); }
   .telemetry-sla-label.is-unconfigured { color: #69717D; }
-  .telemetry-hud {
-    border: 1px solid rgba(68, 96, 79, 0.5);
-    background:
-      radial-gradient(circle at 15% 50%, rgba(39, 194, 114, 0.11), transparent 43%),
-      linear-gradient(135deg, rgba(19, 25, 23, 0.94), rgba(12, 14, 16, 0.96));
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 0 24px rgba(39, 194, 114, 0.055);
-    backdrop-filter: blur(12px);
-  }
-  .telemetry-hud.is-warning {
-    border-color: rgba(224, 146, 40, 0.55);
-    background:
-      radial-gradient(circle at 15% 50%, rgba(224, 146, 40, 0.12), transparent 43%),
-      linear-gradient(135deg, rgba(28, 22, 15, 0.96), rgba(12, 14, 16, 0.96));
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 0 24px rgba(224, 146, 40, 0.07);
-  }
-  .telemetry-hud.is-overdue {
-    border-color: rgba(255, 51, 102, 0.62);
-    background:
-      radial-gradient(circle at 15% 50%, rgba(255, 51, 102, 0.14), transparent 43%),
-      linear-gradient(135deg, rgba(32, 16, 22, 0.97), rgba(12, 14, 16, 0.96));
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 0 25px rgba(255, 51, 102, 0.12);
-  }
-  .telemetry-hud.is-healthy .telemetry-ring { filter: drop-shadow(0 0 6px rgba(39, 194, 114, 0.25)); }
-  .telemetry-hud.is-warning .telemetry-ring { filter: drop-shadow(0 0 6px rgba(224, 146, 40, 0.3)); }
-  .telemetry-hud.is-overdue .telemetry-ring { filter: drop-shadow(0 0 7px rgba(255, 51, 102, 0.4)); }
-  .telemetry-status-badge {
-    border: 1px solid rgba(58, 66, 75, 0.7);
-    border-radius: 9999px;
-    padding: 3px 7px;
-    color: #7F8995;
-    letter-spacing: 0.1em;
-  }
-  .telemetry-status-badge.is-healthy {
-    border-color: #27C272;
-    background: rgba(39, 194, 114, 0.08);
-    color: #27C272;
-  }
-  .telemetry-status-badge.is-warning {
-    border-color: #E09228;
-    background: rgba(224, 146, 40, 0.09);
-    color: #E09228;
-  }
-  .telemetry-status-badge.is-overdue {
-    border-color: #FF3366;
-    background: rgba(255, 51, 102, 0.1);
-    color: #FF3366;
-    animation: telemetry-hazard-pulse 1.8s ease-in-out infinite;
-  }
-  .telemetry-ring-progress { transition: stroke-dashoffset 700ms ease, stroke 300ms ease; }
   .telemetry-live-dot {
     width: 6px;
     height: 6px;
@@ -272,9 +215,7 @@ body {
     .telemetry-node.is-healthy,
     .telemetry-node.is-overdue,
     .telemetry-connector::after,
-    .telemetry-live-dot,
-    .telemetry-status-badge.is-overdue { animation: none; }
-    .telemetry-ring-progress { transition: none; }
+    .telemetry-live-dot { animation: none; }
   }
   .text-gradient {
     background: linear-gradient(135deg, #fff 0%, #8E8E93 100%);

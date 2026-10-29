@@ -491,9 +491,9 @@ export default function LeadsPage() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className={inspectedLeadId ? 'space-y-0' : 'space-y-5'}>
       <h2 className="sr-only">All Leads</h2>
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      {!inspectedLeadId && <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-1" role="tablist" aria-label="Lead views">
             <button type="button" role="tab" aria-label="List view" title="List view" aria-selected={view === 'list'} onClick={() => setView('list')} className={`rounded-md p-2 transition ${view === 'list' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><List size={14} /></button>
@@ -511,7 +511,7 @@ export default function LeadsPage() {
           </label>
           <button type="button" className="btn-ghost !px-3 !py-2 !text-xs" onClick={() => setFilterOpen(true)}><Filter size={13} /> Filter</button>
         </div>
-      </div>
+      </div>}
 
       {inspectedLeadId ? (
         <DealWorkspace

@@ -98,13 +98,6 @@ function formatStageDuration(milliseconds: number) {
   return `${days} ${days === 1 ? 'day' : 'days'} / ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
 }
 
-function formatStageDate(value: string | number) {
-  const date = new Date(value);
-  return Number.isFinite(date.getTime())
-    ? date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).replace(' ', '-').toUpperCase()
-    : '—';
-}
-
 function formatDays(milliseconds: number | undefined) {
   return milliseconds === undefined ? '—' : `${Math.floor(milliseconds / 86400000)}d`;
 }
@@ -258,7 +251,6 @@ export default function DealWorkspace({
   const elapsedMilliseconds = hasStageTimestamp ? Math.max(0, clockNow - stageEnteredAt) : 0;
   const activeSlaHealth = stageSlaHealth(elapsedMilliseconds, targetDays);
   const isStagnant = activeSlaHealth === 'overdue';
-  const stageTargetProgress = targetDays > 0 ? Math.min(100, (elapsedMilliseconds / (targetDays * 86400000)) * 100) : 0;
   const leadStageHistory = selectedActivities
     .filter((activity) => activity.title.startsWith('Lead stage changed:'))
     .map((activity) => {
@@ -877,14 +869,14 @@ export default function DealWorkspace({
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="space-y-2">
+      {(workspaceView === 'kanban' || !selectedItem) && <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-1 rounded-lg border border-ink-600 bg-ink-800/60 p-1" role="tablist" aria-label="Deal workspace views">
           <button type="button" role="tab" aria-selected={workspaceView === 'kanban'} onClick={() => setWorkspaceView('kanban')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'kanban' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>Kanban</button>
           <button type="button" role="tab" aria-selected={workspaceView === 'inspection'} onClick={() => setWorkspaceView('inspection')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'inspection' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>Inspection</button>
         </div>
         {onClose && <button type="button" className="btn-ghost !py-1.5" onClick={onClose}>Back to leads</button>}
-      </div>
+      </div>}
       {workspaceView === 'kanban' ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -968,134 +960,101 @@ export default function DealWorkspace({
         {onCreateDeal && <button type="button" className="btn-ghost m-3 !text-xs" onClick={onCreateDeal}>+ Deal</button>}
       </aside>}
 
-      <main className="glass min-h-[460px] min-w-0 overflow-y-auto rounded-2xl p-5 xl:min-h-0">
+      <main className="glass min-h-[460px] min-w-0 overflow-y-auto rounded-2xl p-3 sm:p-4 xl:min-h-0">
         {!selectedItem ? (
           <div className="flex h-full min-h-64 flex-col items-center justify-center text-center">
             <ShieldCheck size={30} className="text-brand-400" /><h2 className="mt-3 font-semibold text-white">Your placement workspace</h2>
             <p className="mt-1 text-sm text-muted">Select a lead or deal to see its complete lifecycle and activity.</p>
           </div>
         ) : <>
-          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-ink-600 pb-4">
-            <div className="flex items-start gap-3">
-              <div className="rounded-xl bg-brand-400/10 p-3 text-brand-300"><Building2 size={20} /></div>
-              <div>
-                <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-semibold text-white">{selectedItem.client}</h1><Badge variant={selectedDeal ? 'brand' : 'muted'}>{selectedDeal ? 'Deal' : 'Lead'}</Badge><Badge variant={stageBadgeTone(selectedDeal?.stage ?? selectedLead?.funnelStage ?? '')}>{selectedDeal?.stage ?? selectedLead?.funnelStage}</Badge>{selectedLead && <><Badge variant={selectedLead.temperature === 'HOT' ? 'hot' : selectedLead.temperature === 'COLD' ? 'cold' : 'warm'}>{selectedLead.temperature}</Badge><span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1E2024] text-[10px] font-semibold text-[#8E95A2]" title={users.find((person) => person.id === selectedLead.ownerId)?.name}>{avatarCode(users.find((person) => person.id === selectedLead.ownerId)?.name ?? '')}</span></>}</div>
-                <p className="mt-1 text-sm text-muted">{selectedDeal?.product ?? selectedProduct?.name ?? selectedLead?.productCode} · {selectedPipeline?.name ?? 'No pipeline'} · Ref {selectedItem.id}</p>
-                {progressDeal && selectedLead && <button type="button" className="mt-2 text-xs text-brand-300 hover:text-white" onClick={() => setSelectedKey(`deal:${progressDeal.id}`)}>Open linked deal</button>}
-                {selectedDeal && linkedLead && <button type="button" className="mt-2 text-xs text-brand-300 hover:text-white" onClick={() => setSelectedKey(`lead:${linkedLead.id}`)}>Open linked lead · {linkedLead.title ?? linkedLead.client}</button>}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink-600 pb-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <Building2 size={17} className="shrink-0 text-brand-300" />
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-1.5"><h1 className="text-lg font-semibold text-white">{selectedItem.client}</h1><Badge variant={selectedDeal ? 'brand' : 'muted'}>{selectedDeal ? 'Deal' : 'Lead'}</Badge><Badge variant={stageBadgeTone(selectedDeal?.stage ?? selectedLead?.funnelStage ?? '')}>{selectedDeal?.stage ?? selectedLead?.funnelStage}</Badge>{selectedLead && <><Badge variant={selectedLead.temperature === 'HOT' ? 'hot' : selectedLead.temperature === 'COLD' ? 'cold' : 'warm'}>{selectedLead.temperature}</Badge><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1E2024] text-[10px] font-semibold text-[#8E95A2]" title={users.find((person) => person.id === selectedLead.ownerId)?.name}>{avatarCode(users.find((person) => person.id === selectedLead.ownerId)?.name ?? '')}</span></>}</div>
+                <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
+                  <span>{selectedDeal?.product ?? selectedProduct?.name ?? selectedLead?.productCode} · {selectedPipeline?.name ?? 'No pipeline'} · Ref {selectedItem.id}</span>
+                  {progressDeal && selectedLead && <button type="button" className="text-brand-300 hover:text-white" onClick={() => setSelectedKey(`deal:${progressDeal.id}`)}>Open linked deal</button>}
+                  {selectedDeal && linkedLead && <button type="button" className="text-brand-300 hover:text-white" onClick={() => setSelectedKey(`lead:${linkedLead.id}`)}>Open linked lead · {linkedLead.title ?? linkedLead.client}</button>}
+                </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex gap-1 rounded-lg border border-ink-600 bg-ink-800/60 p-1" role="tablist" aria-label="Deal workspace views">
+                <button type="button" role="tab" aria-selected={false} onClick={() => setWorkspaceView('kanban')} className="rounded-md px-2.5 py-1 text-xs text-muted hover:text-white">Kanban</button>
+                <button type="button" role="tab" aria-selected={true} onClick={() => setWorkspaceView('inspection')} className="rounded-md bg-ink-700 px-2.5 py-1 text-xs text-white">Inspection</button>
+              </div>
+              {onClose && <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={onClose}>Back</button>}
               {selectedDeal && onEditDeal && <button type="button" className="btn-ghost !py-1.5 text-xs" onClick={() => onEditDeal(selectedDeal)}>Edit Deal</button>}
               {activeRole === 'admin' && selectedLead && onDeleteLead && <button type="button" className="btn-ghost !py-1.5 text-xs text-hot" onClick={() => onDeleteLead(selectedLead)}><Trash2 size={13} />Delete Lead</button>}
               {activeRole === 'admin' && selectedDeal && onDeleteDeal && <button type="button" className="btn-ghost !py-1.5 text-xs text-hot" disabled={dealHasInvoice} title={dealHasInvoice ? 'Deals linked to invoices cannot be deleted.' : undefined} onClick={() => onDeleteDeal(selectedDeal)}><Trash2 size={13} />Delete Deal</button>}
             </div>
           </div>
 
-          <section aria-label="Stage progress" className="telemetry-panel mt-4 rounded-2xl p-4 sm:p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#DCE5E0]">
-                  {progressDeal ? 'Placement telemetry' : 'Lead telemetry'}
-                </h2>
-                {progressDeal && <p className="mt-1 text-[10px] tracking-wide text-[#6C727F]">{selectedPipeline?.name ?? 'Pipeline'} · stage sequence</p>}
+          <section aria-label="Stage progress" className="telemetry-panel mt-2 rounded-xl p-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#DCE5E0]">
+                    {progressDeal ? 'Placement telemetry' : 'Lead telemetry'}
+                  </h2>
+                  {progressDeal && <span className="text-[10px] tracking-wide text-[#6C727F]">{selectedPipeline?.name ?? 'Pipeline'} · stage sequence</span>}
+                </div>
+                <span className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-[#27C272]">
+                  {telemetryOverride && <span className="text-[#E09228]">Test · {telemetryOverride.label}</span>}
+                  <span className="telemetry-live-dot" aria-hidden="true" /> Live tracking
+                </span>
               </div>
-              <span className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-[#27C272]">
-                {telemetryOverride && <span className="text-[#E09228]">Test · {telemetryOverride.label}</span>}
-                <span className="telemetry-live-dot" aria-hidden="true" /> Live tracking
-              </span>
-            </div>
-            <div className="mt-5 flex min-w-0 flex-col gap-5 xl:flex-row xl:items-center">
-              <div className="min-w-0 flex-1">
-                {stageTimeline.length ? <div className="-mx-1 max-w-full overflow-x-auto px-1 pb-2 stage-stepper-scroll">
+              <div className="mt-3 min-w-0">
+                {stageTimeline.length ? <div className="-mx-1 max-w-full overflow-x-auto px-1 pb-1 stage-stepper-scroll">
                   <ol className="telemetry-track flex w-max min-w-full items-start">
-                    {stageTimeline.map((stage) => {
-                      const pipelineStage = typeof progressStages[stage.index] === 'string'
-                        ? undefined
-                        : progressStages[stage.index] as PipelineStage;
-                      const durationMilliseconds = stage.active ? elapsedMilliseconds : stage.duration;
-                      const health = stageSlaHealth(durationMilliseconds, stage.targetDays);
-                      const stageOverdue = health === 'overdue';
-                      const healthLabel = health === 'overdue' ? 'DRAGGED'
-                        : health === 'warning' ? 'AT RISK'
-                          : health === 'healthy' ? 'ON TRACK' : 'NO SLA';
-                      const metricColor = health === 'overdue' ? 'text-[#FF3366]'
-                        : health === 'warning' ? 'text-[#E09228]'
-                          : health === 'healthy' ? 'text-[#27C272]'
-                            : stage.done ? 'text-[#74C999]' : 'text-[#69717D]';
-                      const healthColor = health === 'overdue' ? '#FF3366'
-                        : health === 'warning' ? '#E09228'
-                          : health === 'healthy' ? '#27C272' : '#A7F2C5';
-                      return <li key={stage.key} className="telemetry-step relative w-36 shrink-0 sm:w-40">
-                        {stage.index < stageTimeline.length - 1 && <span
-                          className={`telemetry-connector ${stage.done ? 'is-complete' : ''} ${health !== 'unconfigured' ? `is-${health}` : ''}`}
-                          aria-hidden="true" />}
-                        <div className="flex h-5 items-center justify-between px-1 font-mono text-[9px] uppercase tracking-[0.12em]">
-                          {stage.index === 0 && progressStartDate
-                            ? <span className="text-[#69717D]">Start: {formatStageDate(progressStartDate)}</span>
-                            : <span />}
-                          {stage.active && <span style={{ color: healthColor }}>Now {formatStageDate(clockNow)}</span>}
-                        </div>
-                        <button type="button" disabled={!progressDeal || stage.active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
-                          onClick={() => pipelineStage && progressDeal && requestStageChange(pipelineStage, progressDeal)}
-                          title={stageOverdue ? `SLA overdue: stage exceeded its ${stage.targetDays}-day target` : health === 'warning' ? `SLA warning: stage is approaching its ${stage.targetDays}-day target` : stage.name}
-                          aria-label={`${stage.name}; stage duration ${stage.active ? formatStageDuration(elapsedMilliseconds) : formatDays(stage.duration)}; total ${formatDays(stage.cumulative)}${stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
-                          aria-current={stage.active ? 'step' : undefined}
-                          className={`telemetry-stage relative z-[1] flex w-full flex-col items-center border-0 bg-transparent px-2 py-0 text-center disabled:cursor-default ${stage.active ? 'is-active' : stage.done ? 'is-complete' : 'is-pending'}`}>
-                          <span className={`telemetry-node ${stage.active || health === 'warning' || health === 'overdue' ? `is-${health}` : stage.done ? 'is-complete' : ''}`}>
-                            {health === 'overdue' || health === 'warning' ? <Clock3 size={12} aria-hidden="true" /> : stage.done ? <Check size={12} aria-hidden="true" /> : <span className="telemetry-node-core" />}
-                          </span>
-                          <span className={`mt-2 min-h-7 text-[10px] font-semibold leading-4 sm:text-[11px] ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#808896]'}`}>
-                            {stage.name}
-                          </span>
-                          <span className={`telemetry-metric mt-1 flex w-full items-center justify-center gap-2 font-mono text-[9px] ${metricColor}`}>
-                            <span>{formatDays(durationMilliseconds)}</span>
-                            <span className="text-[#424954]">/</span>
-                            <span>{formatDays(stage.cumulative)} total</span>
-                          </span>
-                          <span className={`telemetry-sla-label mt-1 font-mono text-[8px] tracking-[0.12em] is-${health}`}>
-                            {healthLabel}{stage.targetDays > 0 ? ` · ${stage.targetDays}D` : ''}
-                          </span>
-                        </button>
-                      </li>;
-                    })}
+                      {stageTimeline.map((stage) => {
+                        const pipelineStage = typeof progressStages[stage.index] === 'string'
+                          ? undefined
+                          : progressStages[stage.index] as PipelineStage;
+                        const durationMilliseconds = stage.active ? elapsedMilliseconds : stage.duration;
+                        const health = stageSlaHealth(durationMilliseconds, stage.targetDays);
+                        const stageOverdue = health === 'overdue';
+                        const healthLabel = health === 'overdue' ? 'DRAGGED'
+                          : health === 'warning' ? 'AT RISK'
+                            : health === 'healthy' ? 'ON TRACK' : 'NO SLA';
+                        const healthColor = health === 'overdue' ? '#FF3366'
+                          : health === 'warning' ? '#E09228'
+                            : health === 'healthy' ? '#27C272' : '#A7F2C5';
+                        return <li key={stage.key} className="telemetry-step relative w-32 shrink-0 sm:w-36">
+                          {stage.index < stageTimeline.length - 1 && <span
+                            className={`telemetry-connector ${stage.done ? 'is-complete' : ''}`}
+                            aria-hidden="true" />}
+                          <button type="button" disabled={!progressDeal || stage.active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
+                            onClick={() => pipelineStage && progressDeal && requestStageChange(pipelineStage, progressDeal)}
+                            title={stage.active && stageOverdue ? `SLA overdue: stage exceeded its ${stage.targetDays}-day target` : stage.active && health === 'warning' ? `SLA warning: stage is approaching its ${stage.targetDays}-day target` : stage.name}
+                            aria-label={`${stage.name}${stage.active ? `; stage duration ${formatStageDuration(elapsedMilliseconds)}; total ${formatDays(stage.cumulative)}` : stage.done ? '; completed' : '; upcoming'}${stage.active && stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : stage.active && health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
+                            aria-current={stage.active ? 'step' : undefined}
+                            className={`telemetry-stage relative z-[1] flex w-full flex-col items-center border-0 bg-transparent px-1 py-0 text-center disabled:cursor-default ${stage.active ? 'is-active' : stage.done ? 'is-complete' : 'is-pending'}`}>
+                            <span className={`telemetry-node ${stage.active ? `is-${health}` : stage.done ? 'is-complete' : ''}`}>
+                              {stage.active && (health === 'overdue' || health === 'warning') ? <Clock3 size={12} aria-hidden="true" /> : stage.done ? <Check size={12} aria-hidden="true" /> : <span className="telemetry-node-core" />}
+                            </span>
+                            <span className={`mt-1 min-h-7 text-[10px] font-semibold leading-4 sm:text-[11px] ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#808896]'}`}>
+                              {stage.name}
+                            </span>
+                            {stage.active && <>
+                              <span className="telemetry-metric mt-1 flex w-full flex-wrap items-center justify-center gap-x-1.5 font-mono text-[8px] text-[#C9D2CC]">
+                                <span>{formatDays(elapsedMilliseconds)} elapsed</span>
+                                {stage.cumulative !== undefined && <span>{formatDays(stage.cumulative)} total</span>}
+                              </span>
+                              <span className={`telemetry-sla-label mt-0.5 font-mono text-[8px] tracking-[0.08em] is-${health}`} style={{ color: healthColor }}>
+                                {healthLabel} · {stage.targetDays > 0 ? `${stage.targetDays}D TARGET` : 'NO SLA'}
+                              </span>
+                            </>}
+                          </button>
+                        </li>;
+                      })}
                   </ol>
-                </div> : <p className="py-4 text-xs text-muted">No stages are configured for this pipeline.</p>}
-              </div>
-              <div className={`telemetry-hud flex min-w-0 items-center gap-3 rounded-xl p-3 sm:gap-4 sm:p-4 xl:w-[270px] xl:shrink-0 is-${activeSlaHealth}`}
-                aria-label={isStagnant ? 'Current stage SLA overdue' : 'Current stage duration'}>
-                <div className="telemetry-ring relative grid h-14 w-14 shrink-0 place-items-center sm:h-16 sm:w-16">
-                  <svg viewBox="0 0 40 40" className="h-full w-full -rotate-90" role="progressbar"
-                    aria-label="Stage target duration progress" aria-valuemin={0} aria-valuemax={100}
-                    aria-valuenow={targetDays > 0 ? Math.floor(stageTargetProgress) : 0}>
-                    <circle cx="20" cy="20" r="16" fill="none" stroke="#252B32" strokeWidth="2.5" />
-                    {targetDays > 0 && <circle cx="20" cy="20" r="16" fill="none"
-                      stroke={activeSlaHealth === 'overdue' ? '#FF3366' : activeSlaHealth === 'warning' ? '#E09228' : '#27C272'} strokeWidth="2.5" strokeLinecap="round"
-                      strokeDasharray="100.53" strokeDashoffset={100.53 * (1 - stageTargetProgress / 100)}
-                      className="telemetry-ring-progress" />}
-                  </svg>
-                  <span className="absolute font-mono text-[10px] font-semibold" style={{ color: activeSlaHealth === 'overdue' ? '#FF3366' : activeSlaHealth === 'warning' ? '#E09228' : '#27C272' }}>
-                    {targetDays > 0 ? `${Math.floor(stageTargetProgress)}%` : '—'}
-                  </span>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-[#7F8995]">Current stage duration</p>
-                  <p className="mt-1 text-sm font-semibold leading-5 text-white sm:text-base">
-                    {hasStageTimestamp ? formatStageDuration(elapsedMilliseconds) : 'Just now'}
-                  </p>
-                  <div className="mt-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 font-mono text-[9px]">
-                    <span className="text-[#7F8995]">Target: {targetDays > 0 ? `${targetDays} days` : 'Not set'}</span>
-                    <span className={`telemetry-status-badge is-${activeSlaHealth}`}>
-                      {targetDays > 0 ? isStagnant ? 'OVERDUE / DRAGGED' : activeSlaHealth === 'warning' ? 'WARNING / AT RISK' : 'HEALTHY / ON TRACK' : 'NO SLA'}
-                    </span>
-                  </div>
-                </div>
-              </div>
+                </div> : <p className="py-2 text-xs text-muted">No stages are configured for this pipeline.</p>}
             </div>
           </section>
 
           {selectedLead ? (
-            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+            <div className="mt-3 grid gap-3 lg:grid-cols-2">
               <section className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
                 <h2 className="mb-4 text-sm font-semibold text-white">Client Details</h2>
                 <div className="grid grid-cols-2 gap-x-5 gap-y-4">
@@ -1106,7 +1065,7 @@ export default function DealWorkspace({
                   <DetailValue label="Email" value={selectedClient?.email || '—'} />
                   <DetailValue label="Phone" value={selectedClient?.phone || '—'} />
                 </div>
-                <div className="mt-5 max-h-60 space-y-4 overflow-y-auto pr-2">
+                <div className="mt-3 max-h-48 space-y-3 overflow-y-auto pr-2">
                 <div className="rounded-xl border border-brand-400/30 bg-brand-400/10 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
@@ -1167,7 +1126,7 @@ export default function DealWorkspace({
               </section>
             </div>
           ) : <>
-          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
             <section className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
               <h2 className="mb-4 text-sm font-semibold text-white">Client & Contact Details</h2>
               <div className="grid grid-cols-2 gap-x-5 gap-y-4">
@@ -1178,7 +1137,7 @@ export default function DealWorkspace({
                 <DetailValue label="Client email" value={selectedClient?.email || '—'} />
                 <DetailValue label="Client phone" value={selectedClient?.phone || '—'} />
               </div>
-              <div className="mt-5 max-h-60 space-y-4 overflow-y-auto pr-2">
+              <div className="mt-3 max-h-48 space-y-3 overflow-y-auto pr-2">
               <div className="rounded-xl border border-brand-400/30 bg-brand-400/10 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -1249,7 +1208,7 @@ export default function DealWorkspace({
             </section>
           </div>
           </>}
-          <section className="mt-7 min-w-0 border-t border-ink-600 pt-5">
+          <section className="mt-4 min-w-0 border-t border-ink-600 pt-3">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Clock3 size={15} className="text-brand-300" /> Activity Timeline</h2>
@@ -1262,7 +1221,7 @@ export default function DealWorkspace({
                 <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('task')}><Check size={13} /> Task</button>
               </div>
             </div>
-            <div className="mb-4 grid gap-3 sm:grid-cols-2">
+            <div className="mb-3 grid gap-2 sm:grid-cols-2">
               <div className="rounded-lg border border-ink-700 bg-ink-900/40 p-3">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Weekly stage progression</p>
                 <p className="mt-1 text-lg font-semibold text-white">{lastWeekProgressions}<span className="ml-1 text-xs font-normal text-muted">stage changes · last 7 days</span></p>
@@ -1289,7 +1248,7 @@ export default function DealWorkspace({
                 </button>
               ))}
             </div>
-            <div className="-mx-1 max-w-full touch-pan-x overflow-x-auto overscroll-x-contain scroll-smooth timeline-scrollbar px-1 pb-3"
+            <div className="-mx-1 max-h-60 max-w-full touch-pan-x overflow-auto overscroll-contain scroll-smooth timeline-scrollbar px-1 pb-2"
               role="region" aria-label="Activity timeline" tabIndex={0}>
               <div className="flex w-max min-w-full items-stretch gap-3">
                 {filteredTimelineEntries.map((entry, index) => <TimelineItem
@@ -1308,7 +1267,7 @@ export default function DealWorkspace({
               </div>
             </div>
           </section>
-          {selectedLead ? <section className="mt-4 rounded-xl border border-ink-600 bg-ink-900/30 p-4">
+          {selectedLead ? <section className="mt-3 rounded-xl border border-ink-600 bg-ink-900/30 p-3">
             <h2 className="text-sm font-semibold text-white">Lead progression</h2>
             {progressDeal ? <p className="mt-3 text-xs text-win">This lead is linked to deal {progressDeal.id} and follows its placement stages.</p> : <>
               <p className="mt-3 text-xs text-muted">Convert this lead to begin the placement stage workflow.</p>
