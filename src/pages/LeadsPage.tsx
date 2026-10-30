@@ -27,7 +27,7 @@ const LEAD_FUNNEL_STAGES = [
 
 type LeadBoardStage = (typeof LEAD_FUNNEL_STAGES)[number];
 
-const tableBadgeClass = 'inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-[10px] font-bold tracking-wide uppercase';
+const tableBadgeClass = 'inline-flex h-6 items-center gap-1 whitespace-nowrap rounded-full border px-1.5 text-[9px] font-bold leading-none tracking-wide uppercase';
 
 interface ContactDraft {
   id: string;
@@ -720,19 +720,31 @@ export default function LeadsPage() {
         </div>
       ) : (
         <div className="overflow-x-clip rounded-lg border border-[#1B1E22] bg-ink-950">
-          <table className="w-full table-fixed text-xs" aria-label="Leads">
-            <thead className="bg-[#111214] text-xs font-semibold text-[#D0D3D9]">
+          <table className="w-full table-fixed text-[11px] leading-tight" aria-label="Leads">
+            <colgroup>
+              <col className="w-[12%]" />
+              <col className="w-[14%]" />
+              <col className="w-[14%]" />
+              <col className="w-[10%]" />
+              <col className="w-[8%]" />
+              <col className="w-[13%]" />
+              <col className="w-[10%]" />
+              <col className="w-[8%]" />
+              <col className="w-[7%]" />
+              <col className="w-[4%]" />
+            </colgroup>
+            <thead className="bg-[#111214] text-[10px] font-semibold text-[#D0D3D9]">
               <tr>
-                <th className="w-[13%] border-b border-[#1B1E22] px-2 py-2 text-left">Lead Name</th>
-                <th className="w-[13%] border-b border-[#1B1E22] px-2 py-2 text-left">Client Name</th>
-                <th className="w-[14%] border-b border-[#1B1E22] px-2 py-2 text-left">Funnel Stage</th>
-                <th className="w-[8%] border-b border-[#1B1E22] px-2 py-2 text-left">Insurance Type</th>
-                <th className="w-[8%] border-b border-[#1B1E22] px-2 py-2 text-left">Lead Tag</th>
-                <th className="w-[12%] border-b border-[#1B1E22] px-2 py-2 pr-4 text-left">Activity Status</th>
-                <th className="w-[8%] border-b border-[#1B1E22] px-2 py-2 pl-4 text-left">Owner</th>
-                <th className="w-[10%] border-b border-[#1B1E22] px-2 py-2 text-left">Expiry / Renewal</th>
-                <th className="w-[11%] border-b border-[#1B1E22] px-2 py-2 text-left">Expected Closing</th>
-                <th className="w-[3%] border-b border-[#1B1E22] px-1 py-2 text-right"><span className="sr-only">Actions</span></th>
+                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left">Lead Name</th>
+                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left">Client Name</th>
+                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left">Funnel Stage</th>
+                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left">Insurance Type</th>
+                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left">Lead Tag</th>
+                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left">Activity Status</th>
+                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left">Owner</th>
+                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left" title="Expiry / Renewal">Renewal</th>
+                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left" title="Expected Closing">Closing</th>
+                <th className="border-b border-[#1B1E22] px-1 py-2 text-right"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -762,19 +774,19 @@ export default function LeadsPage() {
                     const draggedLead = searchedLeads.find((item) => item.id === event.dataTransfer.getData('text/lead-id'));
                     if (draggedLead) moveLeadToStage(draggedLead, stage);
                   }}>
-                  <td className="break-words px-2 py-2 font-semibold text-white">{lead.title ?? `${lead.client} lead`}</td>
-                  <td className="break-words px-2 py-2 font-normal text-[#E1E2E5]">{lead.client}</td>
-                  <td className="break-words px-2 py-2 font-normal text-[#E1E2E5]">
-                    <span className="inline-flex items-center gap-1.5">{stage}
+                  <td className="px-2 py-2 font-semibold text-white"><span className="block truncate" title={lead.title ?? `${lead.client} lead`}>{lead.title ?? `${lead.client} lead`}</span></td>
+                  <td className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={lead.client}>{lead.client}</span></td>
+                  <td className="px-2 py-2 font-normal text-[#E1E2E5]">
+                    <span className="flex min-w-0 items-center gap-1.5" title={stage}><span className="min-w-0 truncate">{stage}</span>
                       {stageSla.overdue && <span className="inline-flex items-center gap-1 rounded-full border border-hot/40 bg-hot/10 px-2 py-0.5 text-[10px] font-semibold text-hot" title={`Current stage exceeded its ${stageSla.targetDays}-day SLA`} aria-label={`SLA overdue: current stage exceeded its ${stageSla.targetDays}-day target`}>
                         <AlertTriangle size={11} /> Overdue
                       </span>}
                     </span>
                   </td>
-                  <td className="break-words px-2 py-2 font-normal"><InsuranceBadge code={lead.productCode} /></td>
-                  <td className="px-2 py-2 font-normal" onClick={(event) => event.stopPropagation()}>
+                  <td className="whitespace-nowrap px-2 py-2 font-normal"><InsuranceBadge code={lead.productCode} /></td>
+                  <td className="whitespace-nowrap px-1 py-2 font-normal" onClick={(event) => event.stopPropagation()}>
                     <label className={`relative ${tableBadgeClass} transition-shadow focus-within:ring-2 focus-within:ring-brand-400/60 ${temperatureVariant === 'hot' ? 'border-hot/50 bg-hot/10 text-hot shadow-[0_0_8px_rgba(239,68,68,0.18)]' : temperatureVariant === 'cold' ? 'border-blue-400/50 bg-blue-500/10 text-blue-300 shadow-[0_0_8px_rgba(59,130,246,0.22)]' : 'border-amber-400/50 bg-amber-500/10 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.16)]'}`}>
-                      <TemperatureIcon size={12} aria-hidden="true" />
+                      <TemperatureIcon size={12} className="shrink-0" aria-hidden="true" />
                       <span>{lead.temperature ?? 'WARM'}</span>
                       <select
                         aria-label={`Change ${lead.title ?? lead.client} temperature`}
@@ -787,14 +799,19 @@ export default function LeadsPage() {
                       </select>
                     </label>
                   </td>
-                  <td className="px-2 py-2 pr-4 font-normal">
+                  <td className="whitespace-nowrap px-2 py-2 pr-3 font-normal">
                     <span className={`${tableBadgeClass} ${statusVariant === 'todo' ? 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]' : statusVariant === 'backlog' ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]' : statusVariant === 'in-progress' ? 'border-[#25375B] bg-[#101C39] text-[#5B8DEF]' : 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]'}`}>
-                      <CheckCircle2 size={11} /> {lead.status}
+                      <CheckCircle2 size={11} className="shrink-0" /> {lead.status}
                     </span>
                   </td>
-                  <td className="px-2 py-2 pl-4 font-normal"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#292B30] text-[9px] font-semibold text-[#A4A6AE]" title={ownerName}>{avatarCode(ownerName)}</span></td>
-                  <td className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">{tableDate(lead.renewalDate)}</td>
-                  <td className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">{tableDate(lead.closeDate ?? lead.renewalDate)}</td>
+                  <td className="px-2 py-2 font-normal">
+                    <span className="flex min-w-0 items-center gap-1.5" title={ownerName}>
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#292B30] text-[9px] font-semibold text-[#A4A6AE]">{avatarCode(ownerName)}</span>
+                      <span className="truncate text-[10px] text-[#E1E2E5]">{ownerName}</span>
+                    </span>
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={tableDate(lead.renewalDate)}>{tableDate(lead.renewalDate)}</span></td>
+                  <td className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={tableDate(lead.closeDate ?? lead.renewalDate)}>{tableDate(lead.closeDate ?? lead.renewalDate)}</span></td>
                   <td className="relative px-1 py-2 text-right" onClick={(event) => event.stopPropagation()}>
                     <button type="button" className="rounded-md p-1.5 text-muted transition hover:bg-ink-700 hover:text-white" aria-label={`Actions for ${lead.title ?? lead.client}`} aria-haspopup="menu" aria-expanded={openLeadActionsId === lead.id}
                       onClick={() => setOpenLeadActionsId((current) => current === lead.id ? '' : lead.id)}>
