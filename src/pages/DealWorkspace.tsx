@@ -4,10 +4,11 @@ import {
   FileText, List, Pencil, Plus, ShieldCheck, Wallet, Trash2,
 } from 'lucide-react';
 import Badge from '../components/ui/Badge';
+import LeadTemperatureControl from '../components/LeadTemperatureControl';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
 import { TENANT_ID } from '../lib/supabase';
-import type { Activity, CompanyContactProfile, Deal, Lead, LeadTemperature, PipelineStage, StageHistoryAudit } from '../types';
+import type { Activity, CompanyContactProfile, Deal, Lead, PipelineStage, StageHistoryAudit } from '../types';
 import { formatAmount } from '../utils/currency';
 import { formatDate } from '../utils/date';
 import { calculateBrokerageCommission } from '../utils/insurance';
@@ -1142,18 +1143,14 @@ export default function DealWorkspace({
             <div className="flex min-w-0 items-center gap-2">
               <Building2 size={17} className="shrink-0 text-brand-300" />
               <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-1.5"><h1 className="text-lg font-semibold text-white">{selectedItem.client}</h1><Badge variant={selectedDeal ? 'brand' : 'muted'}>{selectedDeal ? 'Deal' : 'Lead'}</Badge><Badge variant={stageBadgeTone(selectedDeal?.stage ?? selectedLead?.funnelStage ?? '')}>{selectedDeal?.stage ?? selectedLead?.funnelStage}</Badge>{selectedLead && <><select
-                    aria-label={`Change ${selectedLead.title ?? selectedLead.client} temperature`}
-                    className={`cursor-pointer rounded-full border bg-transparent px-2 py-1 text-[10px] font-semibold ${selectedLead.temperature === 'HOT' ? 'border-hot/40 bg-hot/10 text-hot' : selectedLead.temperature === 'COLD' ? 'border-brand-300/40 bg-brand-300/10 text-brand-200' : 'border-warm/40 bg-warm/10 text-warm'}`}
-                    value={selectedLead.temperature ?? 'WARM'}
+                <div className="flex flex-wrap items-center gap-1.5"><h1 className="text-lg font-semibold text-white">{selectedItem.client}</h1><Badge variant={selectedDeal ? 'brand' : 'muted'}>{selectedDeal ? 'Deal' : 'Lead'}</Badge><Badge variant={stageBadgeTone(selectedDeal?.stage ?? selectedLead?.funnelStage ?? '')}>{selectedDeal?.stage ?? selectedLead?.funnelStage}</Badge>{selectedLead && <><LeadTemperatureControl
+                    leadName={selectedLead.title ?? selectedLead.client}
+                    temperature={selectedLead.temperature ?? 'WARM'}
                     disabled={activeRole !== 'admin' && activeRole !== 'sales'}
-                    onChange={(event) => {
-                      const temperature = event.target.value as LeadTemperature;
-                      setLeads((current) => current.map((lead) => lead.id === selectedLead.id ? { ...lead, temperature } : lead));
-                    }}
-                  >
-                    <option value="HOT">HOT</option><option value="WARM">WARM</option><option value="COLD">COLD</option>
-                  </select><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1E2024] text-[10px] font-semibold text-[#8E95A2]" title={users.find((person) => person.id === selectedLead.ownerId)?.name}>{avatarCode(users.find((person) => person.id === selectedLead.ownerId)?.name ?? '')}</span></>}</div>
+                    onChange={(temperature) => setLeads((current) => current.map((lead) =>
+                      lead.id === selectedLead.id ? { ...lead, temperature } : lead,
+                    ))}
+                  /><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1E2024] text-[10px] font-semibold text-[#8E95A2]" title={users.find((person) => person.id === selectedLead.ownerId)?.name}>{avatarCode(users.find((person) => person.id === selectedLead.ownerId)?.name ?? '')}</span></>}</div>
                 <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
                   <span>{selectedDeal?.product ?? selectedProduct?.name ?? selectedLead?.productCode} · {selectedPipeline?.name ?? 'No pipeline'} · Ref {selectedItem.id}</span>
                   {progressDeal && selectedLead && <button type="button" className="text-brand-300 hover:text-white" onClick={() => setSelectedKey(`deal:${progressDeal.id}`)}>Open linked deal</button>}

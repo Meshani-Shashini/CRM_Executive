@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
+import LeadTemperatureControl from '../components/LeadTemperatureControl';
 import { useApp } from '../store/AppContext';
-import { AlertTriangle, CalendarDays, CheckCircle2, CircleDot, Clock3, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, Snowflake, Sun, TrendingUp, UserRound, X } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CheckCircle2, CircleDot, Clock3, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, TrendingUp, UserRound, X } from 'lucide-react';
 import type { Client, CompanyContactProfile, Lead, LeadTemperature } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
@@ -667,16 +668,12 @@ export default function LeadsPage() {
                     <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#1E2024] text-[9px] font-semibold text-[#8E95A2]">{avatarCode(ownerName)}</span><span className="truncate">Rep: {ownerName}</span></div>
                     <div className="mt-2 flex flex-wrap gap-1">
                       <InsuranceBadge code={product?.code ?? lead.productCode} />
-                      <select
-                        aria-label={`Change ${lead.title ?? lead.client} temperature`}
-                        className={`cursor-pointer rounded-full border bg-transparent px-2 py-1 text-[10px] font-semibold ${lead.temperature === 'HOT' ? 'border-hot/40 bg-hot/10 text-hot' : lead.temperature === 'COLD' ? 'border-brand-300/40 bg-brand-300/10 text-brand-200' : 'border-warm/40 bg-warm/10 text-warm'}`}
-                        value={lead.temperature ?? 'WARM'}
+                      <LeadTemperatureControl
+                        leadName={lead.title ?? lead.client}
+                        temperature={lead.temperature ?? 'WARM'}
                         disabled={activeRole !== 'admin' && activeRole !== 'sales'}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) => updateLeadTemperature(lead, event.target.value as LeadTemperature)}
-                      >
-                        <option value="HOT">HOT</option><option value="WARM">WARM</option><option value="COLD">COLD</option>
-                      </select>
+                        onChange={(temperature) => updateLeadTemperature(lead, temperature)}
+                      />
                       <Badge variant={lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win'}>{lead.status}</Badge>
                       {stageSla.overdue && <Badge variant="hot"><Clock3 size={11} /> SLA overdue</Badge>}
                     </div>
@@ -753,8 +750,6 @@ export default function LeadsPage() {
                 const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId;
                 const statusVariant = lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win';
                 const stageSla = stageSlaForLead(lead);
-                const temperatureVariant = lead.temperature === 'HOT' ? 'hot' : lead.temperature === 'COLD' ? 'cold' : 'warm';
-                const TemperatureIcon = lead.temperature === 'HOT' ? Flame : lead.temperature === 'COLD' ? Snowflake : Sun;
                 return <tr key={lead.id} role="link" tabIndex={0} aria-label={`Open lead details for ${lead.title ?? lead.client}`} draggable={!lead.dealId || !linkedDealIds.has(lead.dealId)} className="cursor-pointer border-b border-[#1B1E22] last:border-0 text-xs transition-colors hover:bg-[#111214] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-400"
                   onClick={() => setInspectedLeadId(lead.id)}
                   onKeyDown={(event) => {
@@ -783,21 +778,14 @@ export default function LeadsPage() {
                       </span>}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-2 py-2 font-normal"><InsuranceBadge code={lead.productCode} /></td>
+                  <td className="whitespace-nowrap px-2 py-2 font-normal"><InsuranceBadge code={lead.productCode} />                  </td>
                   <td className="whitespace-nowrap px-1 py-2 font-normal" onClick={(event) => event.stopPropagation()}>
-                    <label className={`relative ${tableBadgeClass} transition-shadow focus-within:ring-2 focus-within:ring-brand-400/60 ${temperatureVariant === 'hot' ? 'border-hot/50 bg-hot/10 text-hot shadow-[0_0_8px_rgba(239,68,68,0.18)]' : temperatureVariant === 'cold' ? 'border-blue-400/50 bg-blue-500/10 text-blue-300 shadow-[0_0_8px_rgba(59,130,246,0.22)]' : 'border-amber-400/50 bg-amber-500/10 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.16)]'}`}>
-                      <TemperatureIcon size={12} className="shrink-0" aria-hidden="true" />
-                      <span>{lead.temperature ?? 'WARM'}</span>
-                      <select
-                        aria-label={`Change ${lead.title ?? lead.client} temperature`}
-                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
-                        value={lead.temperature ?? 'WARM'}
-                        disabled={activeRole !== 'admin' && activeRole !== 'sales'}
-                        onChange={(event) => updateLeadTemperature(lead, event.target.value as LeadTemperature)}
-                      >
-                        <option value="HOT">HOT</option><option value="WARM">WARM</option><option value="COLD">COLD</option>
-                      </select>
-                    </label>
+                    <LeadTemperatureControl
+                      leadName={lead.title ?? lead.client}
+                      temperature={lead.temperature ?? 'WARM'}
+                      disabled={activeRole !== 'admin' && activeRole !== 'sales'}
+                      onChange={(temperature) => updateLeadTemperature(lead, temperature)}
+                    />
                   </td>
                   <td className="whitespace-nowrap px-2 py-2 pr-3 font-normal">
                     <span className={`${tableBadgeClass} ${statusVariant === 'todo' ? 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]' : statusVariant === 'backlog' ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]' : statusVariant === 'in-progress' ? 'border-[#25375B] bg-[#101C39] text-[#5B8DEF]' : 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]'}`}>
