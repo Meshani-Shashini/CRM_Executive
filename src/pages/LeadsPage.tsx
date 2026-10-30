@@ -3,7 +3,7 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
 import { AlertTriangle, CalendarDays, CheckCircle2, CircleDot, Clock3, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, Snowflake, Sun, TrendingUp, UserRound, X } from 'lucide-react';
-import type { Client, CompanyContactProfile, Lead } from '../types';
+import type { Client, CompanyContactProfile, Lead, LeadTemperature } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
 import { formatDate, normalizeDateInput } from '../utils/date';
@@ -26,6 +26,8 @@ const LEAD_FUNNEL_STAGES = [
 ] as const;
 
 type LeadBoardStage = (typeof LEAD_FUNNEL_STAGES)[number];
+
+const tableBadgeClass = 'inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-[10px] font-bold tracking-wide uppercase';
 
 interface ContactDraft {
   id: string;
@@ -236,6 +238,11 @@ export default function LeadsPage() {
     setStageChangeRemarks('');
     openEditLead(lead);
     setLeadBoardStage(stage);
+  };
+
+  const updateLeadTemperature = (lead: Lead, temperature: LeadTemperature) => {
+    if (lead.temperature === temperature || (activeRole !== 'admin' && activeRole !== 'sales')) return;
+    setLeads((current) => current.map((item) => item.id === lead.id ? { ...item, temperature } : item));
   };
 
   const deleteLead = (lead: Lead) => {
@@ -557,19 +564,18 @@ export default function LeadsPage() {
         email: client.email || email,
       };
     }));
-    if (editingLead && pendingLeadStageChange) {
-      const from = pendingLeadStageChange.from;
-      const to = pendingLeadStageChange.to;
+    if (editingLead && pendingLeadStageChange && stageChangeRemarks.trim()) {
       setActivities([{
         id: `activity-${crypto.randomUUID()}`,
         clientId: selectedOrganization.id,
         leadId: editingLead.id,
         type: 'note',
-        title: `Lead stage changed: ${from} → ${to}`,
-        description: stageChangeRemarks.trim() || `Lead moved from ${from} to ${to}.`,
+        title: 'Lead stage change note',
+        description: stageChangeRemarks.trim(),
         date: now,
         createdAt: now,
         userId: user.id,
+        actorName: user.name,
       }, ...activities]);
     }
     setNewLeadOpen(false);
@@ -661,7 +667,16 @@ export default function LeadsPage() {
                     <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#1E2024] text-[9px] font-semibold text-[#8E95A2]">{avatarCode(ownerName)}</span><span className="truncate">Rep: {ownerName}</span></div>
                     <div className="mt-2 flex flex-wrap gap-1">
                       <InsuranceBadge code={product?.code ?? lead.productCode} />
-                      <Badge variant={lead.temperature === 'HOT' ? 'hot' : lead.temperature === 'COLD' ? 'cold' : 'warm'}>{lead.temperature ?? 'WARM'}</Badge>
+                      <select
+                        aria-label={`Change ${lead.title ?? lead.client} temperature`}
+                        className={`cursor-pointer rounded-full border bg-transparent px-2 py-1 text-[10px] font-semibold ${lead.temperature === 'HOT' ? 'border-hot/40 bg-hot/10 text-hot' : lead.temperature === 'COLD' ? 'border-brand-300/40 bg-brand-300/10 text-brand-200' : 'border-warm/40 bg-warm/10 text-warm'}`}
+                        value={lead.temperature ?? 'WARM'}
+                        disabled={activeRole !== 'admin' && activeRole !== 'sales'}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => updateLeadTemperature(lead, event.target.value as LeadTemperature)}
+                      >
+                        <option value="HOT">HOT</option><option value="WARM">WARM</option><option value="COLD">COLD</option>
+                      </select>
                       <Badge variant={lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win'}>{lead.status}</Badge>
                       {stageSla.overdue && <Badge variant="hot"><Clock3 size={11} /> SLA overdue</Badge>}
                     </div>
@@ -704,20 +719,20 @@ export default function LeadsPage() {
           </div>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-[#1B1E22] bg-ink-950">
-          <table className="w-full min-w-[1280px] table-fixed text-xs" aria-label="Leads">
+        <div className="overflow-x-clip rounded-lg border border-[#1B1E22] bg-ink-950">
+          <table className="w-full table-fixed text-xs" aria-label="Leads">
             <thead className="bg-[#111214] text-xs font-semibold text-[#D0D3D9]">
               <tr>
-                <th className="w-[14%] border-b border-[#1B1E22] px-3 py-2 text-left">Lead Name</th>
-                <th className="w-[14%] border-b border-[#1B1E22] px-3 py-2 text-left">Client Name</th>
-                <th className="w-[18%] border-b border-[#1B1E22] px-3 py-2 text-left">Funnel Stage</th>
-                <th className="w-[11%] border-b border-[#1B1E22] px-3 py-2 text-left">Insurance Type</th>
-                <th className="w-[7%] border-b border-[#1B1E22] px-3 py-2 text-left">Lead Tag</th>
-                <th className="w-[9%] border-b border-[#1B1E22] px-3 py-2 text-left">Activity Status</th>
-                <th className="w-[5%] border-b border-[#1B1E22] px-3 py-2 text-left">Owner</th>
-                <th className="w-[10%] border-b border-[#1B1E22] px-3 py-2 text-left">Expiry / Renewal</th>
-                <th className="w-[9%] border-b border-[#1B1E22] px-3 py-2 text-left">Expected Closing</th>
-                <th className="w-[3%] border-b border-[#1B1E22] px-2 py-2 text-right"><span className="sr-only">Actions</span></th>
+                <th className="w-[13%] border-b border-[#1B1E22] px-2 py-2 text-left">Lead Name</th>
+                <th className="w-[13%] border-b border-[#1B1E22] px-2 py-2 text-left">Client Name</th>
+                <th className="w-[14%] border-b border-[#1B1E22] px-2 py-2 text-left">Funnel Stage</th>
+                <th className="w-[8%] border-b border-[#1B1E22] px-2 py-2 text-left">Insurance Type</th>
+                <th className="w-[8%] border-b border-[#1B1E22] px-2 py-2 text-left">Lead Tag</th>
+                <th className="w-[12%] border-b border-[#1B1E22] px-2 py-2 pr-4 text-left">Activity Status</th>
+                <th className="w-[8%] border-b border-[#1B1E22] px-2 py-2 pl-4 text-left">Owner</th>
+                <th className="w-[10%] border-b border-[#1B1E22] px-2 py-2 text-left">Expiry / Renewal</th>
+                <th className="w-[11%] border-b border-[#1B1E22] px-2 py-2 text-left">Expected Closing</th>
+                <th className="w-[3%] border-b border-[#1B1E22] px-1 py-2 text-right"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -747,22 +762,40 @@ export default function LeadsPage() {
                     const draggedLead = searchedLeads.find((item) => item.id === event.dataTransfer.getData('text/lead-id'));
                     if (draggedLead) moveLeadToStage(draggedLead, stage);
                   }}>
-                  <td className="break-words px-3 py-2 font-semibold text-white">{lead.title ?? `${lead.client} lead`}</td>
-                  <td className="break-words px-3 py-2 font-normal text-[#E1E2E5]">{lead.client}</td>
-                  <td className="break-words px-3 py-2 font-normal text-[#E1E2E5]">
+                  <td className="break-words px-2 py-2 font-semibold text-white">{lead.title ?? `${lead.client} lead`}</td>
+                  <td className="break-words px-2 py-2 font-normal text-[#E1E2E5]">{lead.client}</td>
+                  <td className="break-words px-2 py-2 font-normal text-[#E1E2E5]">
                     <span className="inline-flex items-center gap-1.5">{stage}
                       {stageSla.overdue && <span className="inline-flex items-center gap-1 rounded-full border border-hot/40 bg-hot/10 px-2 py-0.5 text-[10px] font-semibold text-hot" title={`Current stage exceeded its ${stageSla.targetDays}-day SLA`} aria-label={`SLA overdue: current stage exceeded its ${stageSla.targetDays}-day target`}>
                         <AlertTriangle size={11} /> Overdue
                       </span>}
                     </span>
                   </td>
-                  <td className="break-words px-3 py-2 font-normal"><InsuranceBadge code={lead.productCode} /></td>
-                  <td className="px-3 py-2 font-normal"><Badge variant={temperatureVariant}><TemperatureIcon size={11} /> {lead.temperature}</Badge></td>
-                  <td className="px-3 py-2 font-normal"><Badge variant={statusVariant}><CheckCircle2 size={11} /> {lead.status}</Badge></td>
-                  <td className="px-3 py-2 font-normal"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#292B30] text-[9px] font-semibold text-[#A4A6AE]" title={ownerName}>{avatarCode(ownerName)}</span></td>
-                  <td className="whitespace-nowrap px-3 py-2 font-normal text-[#E1E2E5]">{tableDate(lead.renewalDate)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 font-normal text-[#E1E2E5]">{tableDate(lead.closeDate ?? lead.renewalDate)}</td>
-                  <td className="relative px-2 py-2 text-right" onClick={(event) => event.stopPropagation()}>
+                  <td className="break-words px-2 py-2 font-normal"><InsuranceBadge code={lead.productCode} /></td>
+                  <td className="px-2 py-2 font-normal" onClick={(event) => event.stopPropagation()}>
+                    <label className={`relative ${tableBadgeClass} transition-shadow focus-within:ring-2 focus-within:ring-brand-400/60 ${temperatureVariant === 'hot' ? 'border-hot/50 bg-hot/10 text-hot shadow-[0_0_8px_rgba(239,68,68,0.18)]' : temperatureVariant === 'cold' ? 'border-blue-400/50 bg-blue-500/10 text-blue-300 shadow-[0_0_8px_rgba(59,130,246,0.22)]' : 'border-amber-400/50 bg-amber-500/10 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.16)]'}`}>
+                      <TemperatureIcon size={12} aria-hidden="true" />
+                      <span>{lead.temperature ?? 'WARM'}</span>
+                      <select
+                        aria-label={`Change ${lead.title ?? lead.client} temperature`}
+                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                        value={lead.temperature ?? 'WARM'}
+                        disabled={activeRole !== 'admin' && activeRole !== 'sales'}
+                        onChange={(event) => updateLeadTemperature(lead, event.target.value as LeadTemperature)}
+                      >
+                        <option value="HOT">HOT</option><option value="WARM">WARM</option><option value="COLD">COLD</option>
+                      </select>
+                    </label>
+                  </td>
+                  <td className="px-2 py-2 pr-4 font-normal">
+                    <span className={`${tableBadgeClass} ${statusVariant === 'todo' ? 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]' : statusVariant === 'backlog' ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]' : statusVariant === 'in-progress' ? 'border-[#25375B] bg-[#101C39] text-[#5B8DEF]' : 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]'}`}>
+                      <CheckCircle2 size={11} /> {lead.status}
+                    </span>
+                  </td>
+                  <td className="px-2 py-2 pl-4 font-normal"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#292B30] text-[9px] font-semibold text-[#A4A6AE]" title={ownerName}>{avatarCode(ownerName)}</span></td>
+                  <td className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">{tableDate(lead.renewalDate)}</td>
+                  <td className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">{tableDate(lead.closeDate ?? lead.renewalDate)}</td>
+                  <td className="relative px-1 py-2 text-right" onClick={(event) => event.stopPropagation()}>
                     <button type="button" className="rounded-md p-1.5 text-muted transition hover:bg-ink-700 hover:text-white" aria-label={`Actions for ${lead.title ?? lead.client}`} aria-haspopup="menu" aria-expanded={openLeadActionsId === lead.id}
                       onClick={() => setOpenLeadActionsId((current) => current === lead.id ? '' : lead.id)}>
                       <MoreHorizontal size={15} />
@@ -1068,7 +1101,7 @@ function InsuranceBadge({ code }: { code: string }) {
       : normalizedCode === 'TL'
         ? { backgroundColor: '#10261A', color: '#3AA76D' }
         : { backgroundColor: '#1A1D21', color: '#8E95A2' };
-  return <span className="pill border border-transparent !px-2 !py-0.5" style={colors}>{normalizedCode}</span>;
+  return <span className="pill border border-transparent !px-1.5 !py-0.5" style={colors}>{normalizedCode}</span>;
 }
 
 function avatarCode(name: string) {

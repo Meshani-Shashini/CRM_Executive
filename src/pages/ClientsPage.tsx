@@ -341,6 +341,7 @@ export default function ClientsPage() {
       date: now,
       createdAt: now,
       userId: user.id,
+      actorName: user.name,
       ...(type === 'quote' && currency ? {
         quoteAmount: amount,
         quoteCurrency: currency,

@@ -78,6 +78,109 @@ interface TenantRecord {
   data: Record<string, unknown>;
 }
 
+type AuditedRecord = Lead | Deal;
+
+function auditValue(value: unknown): string {
+  if (value === undefined || value === null || value === '') return '—';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
+}
+
+function auditFieldName(field: string): string {
+  const labels: Record<string, string> = {
+    contact: 'Primary contact',
+    contactName: 'Contact name',
+    contactEmail: 'Contact email',
+    contactPhone: 'Contact phone',
+    contactRole: 'Contact role',
+    contactProfileId: 'Contact profile',
+    whatsapp: 'WhatsApp',
+    telegram: 'Telegram',
+    funnelStage: 'Lead stage',
+    temperature: 'Lead temperature',
+    status: 'Activity status',
+    stage: 'Deal stage',
+    ownerId: 'Owner',
+    closeDate: 'Expected close date',
+    renewalDate: 'Renewal date',
+    contacts: 'Contacts',
+    notes: 'Notes',
+  };
+  return labels[field] ?? field.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`).replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function auditRecordChange(
+  kind: 'Lead' | 'Deal',
+  previous: AuditedRecord | undefined,
+  current: AuditedRecord | undefined,
+  user: User,
+  now: string,
+): Activity | undefined {
+  const record = current ?? previous;
+  if (!record) return undefined;
+  const lead = kind === 'Lead' ? record as Lead : undefined;
+  const deal = kind === 'Deal' ? record as Deal : undefined;
+  const leadId = lead?.id ?? deal?.leadId;
+  const dealId = deal?.id ?? lead?.dealId;
+  const recordName = lead?.title ?? deal?.product ?? record.client;
+  let title: string;
+  let description: string;
+
+  if (!previous) {
+    title = `${kind} created`;
+    const initialChanges = [`Record: — → ${recordName}`];
+    if (lead) {
+      initialChanges.push(
+        `Lead stage: — → ${lead.funnelStage}`,
+        `Lead temperature: — → ${lead.temperature}`,
+        `Activity status: — → ${lead.status}`,
+      );
+    } else if (deal) {
+      initialChanges.push(`Deal stage: — → ${deal.stage}`);
+    }
+    description = initialChanges.join(' · ');
+  } else if (!current) {
+    title = `${kind} deleted`;
+    description = `Record: ${recordName} → —`;
+  } else {
+    const fields = new Set([...Object.keys(previous), ...Object.keys(current)]);
+    const changes = [...fields].flatMap((field) => {
+      const oldValue = (previous as unknown as Record<string, unknown>)[field];
+      const newValue = (current as unknown as Record<string, unknown>)[field];
+      return JSON.stringify(oldValue) === JSON.stringify(newValue)
+        ? []
+        : [`${auditFieldName(field)}: ${auditValue(oldValue)} → ${auditValue(newValue)}`];
+    });
+    if (!changes.length) return undefined;
+    const oldStage = kind === 'Lead' ? (previous as Lead).funnelStage : (previous as Deal).stage;
+    const newStage = kind === 'Lead' ? (current as Lead).funnelStage : (current as Deal).stage;
+    const stageChanged = oldStage !== newStage;
+    const temperatureChanged = kind === 'Lead'
+      && (previous as Lead).temperature !== (current as Lead).temperature;
+    title = stageChanged
+      ? `${kind} stage changed: ${oldStage} → ${newStage}`
+      : temperatureChanged
+        ? `Lead temperature changed: ${(previous as Lead).temperature} → ${(current as Lead).temperature}`
+        : `${kind} updated`;
+    description = changes.join(' · ');
+  }
+
+  return {
+    id: `audit-${crypto.randomUUID()}`,
+    clientId: record.clientId ?? '',
+    ...(leadId ? { leadId } : {}),
+    ...(dealId ? { dealId } : {}),
+    type: 'note',
+    title,
+    description,
+    date: now,
+    createdAt: now,
+    userId: user.id,
+    actorName: user.name,
+  };
+}
+
 const AppContext = createContext<AppState | null>(null);
 const GUEST_USER: User = { id: '', name: 'Guest', email: '', role: 'client', title: '' };
 const DEMO_USER: User = {
@@ -182,6 +285,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [dataReady, setDataReady] = useState(AUTH_BYPASS);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const auditSnapshot = useRef<{ leads: Lead[]; deals: Deal[]; clients: Client[] } | null>(null);
+  const auditUserId = useRef('');
   const setViewAsRole = useCallback((role: Role | null) => {
     if (user.role !== 'admin' && !AUTH_BYPASS) return;
     setViewAsRoleState(role === user.role ? null : role);
@@ -456,6 +561,73 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dataReady, user.id, user.role, taxRates, leads, clients, activities, deals,
     invoices, payments, pipelines, pipelineStages, stageHistory, company, emailTemplates, customerLookups, products,
   ]);
+
+  useEffect(() => {
+    if (!dataReady || !user.id || user.role === 'client') {
+      auditSnapshot.current = null;
+      auditUserId.current = user.id;
+      return;
+    }
+
+    if (!auditSnapshot.current || auditUserId.current !== user.id) {
+      auditSnapshot.current = { leads, deals, clients };
+      auditUserId.current = user.id;
+      return;
+    }
+
+    const previous = auditSnapshot.current;
+    const now = new Date().toISOString();
+    const leadAudits = [
+      ...leads.flatMap((lead) => {
+        const oldLead = previous.leads.find((item) => item.id === lead.id);
+        const audit = auditRecordChange('Lead', oldLead, lead, user, now);
+        return audit ? [audit] : [];
+      }),
+      ...previous.leads
+        .filter((lead) => !leads.some((item) => item.id === lead.id))
+        .flatMap((lead) => {
+          const audit = auditRecordChange('Lead', lead, undefined, user, now);
+          return audit ? [audit] : [];
+        }),
+    ];
+    const dealAudits = [
+      ...deals.flatMap((deal) => {
+        const oldDeal = previous.deals.find((item) => item.id === deal.id);
+        const audit = auditRecordChange('Deal', oldDeal, deal, user, now);
+        return audit ? [audit] : [];
+      }),
+      ...previous.deals
+        .filter((deal) => !deals.some((item) => item.id === deal.id))
+        .flatMap((deal) => {
+          const audit = auditRecordChange('Deal', deal, undefined, user, now);
+          return audit ? [audit] : [];
+        }),
+    ];
+    const contactAudits = clients.flatMap((client) => {
+      const oldClient = previous.clients.find((item) => item.id === client.id);
+      if (!oldClient) return [];
+      const changedFields = (['contactPerson', 'contacts', 'phone', 'email'] as const)
+        .filter((field) => JSON.stringify(oldClient[field]) !== JSON.stringify(client[field]));
+      if (!changedFields.length) return [];
+      return [{
+        id: `audit-${crypto.randomUUID()}`,
+        clientId: client.id,
+        type: 'note' as const,
+        title: 'Client contact updated',
+        description: changedFields.map((field) =>
+          `${auditFieldName(field)}: ${auditValue(oldClient[field])} → ${auditValue(client[field])}`,
+        ).join(' · '),
+        date: now,
+        createdAt: now,
+        userId: user.id,
+        actorName: user.name,
+      }];
+    });
+
+    auditSnapshot.current = { leads, deals, clients };
+    const audits = [...leadAudits, ...dealAudits, ...contactAudits];
+    if (audits.length) setActivities((current) => [...audits, ...current]);
+  }, [clients, dataReady, deals, leads, user, setActivities]);
 
   useEffect(() => {
     if (AUTH_BYPASS || authLoading || user.role !== 'admin' || user.id === DEMO_USER.id) return;

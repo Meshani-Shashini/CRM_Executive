@@ -154,6 +154,7 @@ export interface Activity {
   quoteAmount?: number;
   quoteCurrency?: 'MVR' | 'USD';
   quoteExchangeRate?: number;
+  actorName?: string;
 }
 
 export interface Insurer {

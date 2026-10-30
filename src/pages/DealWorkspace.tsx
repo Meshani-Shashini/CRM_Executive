@@ -7,7 +7,7 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
 import { TENANT_ID } from '../lib/supabase';
-import type { Activity, CompanyContactProfile, Deal, Lead, PipelineStage, StageHistoryAudit } from '../types';
+import type { Activity, CompanyContactProfile, Deal, Lead, LeadTemperature, PipelineStage, StageHistoryAudit } from '../types';
 import { formatAmount } from '../utils/currency';
 import { formatDate } from '../utils/date';
 import { calculateBrokerageCommission } from '../utils/insurance';
@@ -457,7 +457,7 @@ export default function DealWorkspace({
         activity.venue ? `Venue: ${activity.venue}` : '',
         activity.outcome ? `Outcome: ${activity.outcome}` : '',
         activity.followUpAction ? `Follow-up: ${activity.followUpAction}` : '',
-        activity.userId ? `By ${actor?.name ?? (activity.userId === user.id ? user.name : activity.userId)}` : '',
+        activity.userId ? `By ${activity.actorName ?? actor?.name ?? (activity.userId === user.id ? user.name : activity.userId)}` : '',
       ].filter(Boolean).join(' · ');
       return {
         key: activity.id,
@@ -468,7 +468,7 @@ export default function DealWorkspace({
         category: activity.type === 'meeting' ? 'appointment' as const
           : activity.type === 'quote' ? 'proposal' as const
             : activity.type === 'task' ? 'task' as const
-              : activity.title.startsWith('Lead stage changed:') ? 'stage' as const
+              : (activity.title.startsWith('Lead stage changed:') || activity.title.startsWith('Deal stage changed:')) ? 'stage' as const
                 : activity.type === 'note' ? 'note' as const : 'activity' as const,
         ...(activity.durationMinutes !== undefined ? { durationMinutes: activity.durationMinutes } : {}),
       };
@@ -551,6 +551,7 @@ export default function DealWorkspace({
       date: activityDate ? new Date(activityDate).toISOString() : createdAt,
       createdAt,
       userId: user.id,
+      actorName: user.name,
       ...(type === 'meeting' ? {
         meetingMode,
         venue: String(data.get('venue') ?? '').trim(),
@@ -828,17 +829,20 @@ export default function DealWorkspace({
         };
       }));
     }
-    setActivities([{
-      id: `activity-${crypto.randomUUID()}`,
-      clientId: selectedClient?.id ?? selectedDeal.clientId ?? '',
-      dealId: selectedDeal.id,
-      type: 'note',
-      title: `Stage changed: ${currentStage?.name ?? selectedDeal.stage} → ${target.name}`,
-      description: stageChangeRemarks.trim() || `Deal moved from ${currentStage?.name ?? selectedDeal.stage} to ${target.name}.`,
-      date: now,
-      createdAt: now,
-      userId: user.id,
-    }, ...activities]);
+    if (stageChangeRemarks.trim()) {
+      setActivities([{
+        id: `activity-${crypto.randomUUID()}`,
+        clientId: selectedClient?.id ?? selectedDeal.clientId ?? '',
+        dealId: selectedDeal.id,
+        type: 'note',
+        title: 'Deal stage change note',
+        description: stageChangeRemarks.trim(),
+        date: now,
+        createdAt: now,
+        userId: user.id,
+        actorName: user.name,
+      }, ...activities]);
+    }
     if (bound && !invoices.some((invoice) => invoice.linkedDealId === selectedDeal.id)) {
       const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
       setInvoices([...invoices, {
@@ -1138,7 +1142,18 @@ export default function DealWorkspace({
             <div className="flex min-w-0 items-center gap-2">
               <Building2 size={17} className="shrink-0 text-brand-300" />
               <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-1.5"><h1 className="text-lg font-semibold text-white">{selectedItem.client}</h1><Badge variant={selectedDeal ? 'brand' : 'muted'}>{selectedDeal ? 'Deal' : 'Lead'}</Badge><Badge variant={stageBadgeTone(selectedDeal?.stage ?? selectedLead?.funnelStage ?? '')}>{selectedDeal?.stage ?? selectedLead?.funnelStage}</Badge>{selectedLead && <><Badge variant={selectedLead.temperature === 'HOT' ? 'hot' : selectedLead.temperature === 'COLD' ? 'cold' : 'warm'}>{selectedLead.temperature}</Badge><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1E2024] text-[10px] font-semibold text-[#8E95A2]" title={users.find((person) => person.id === selectedLead.ownerId)?.name}>{avatarCode(users.find((person) => person.id === selectedLead.ownerId)?.name ?? '')}</span></>}</div>
+                <div className="flex flex-wrap items-center gap-1.5"><h1 className="text-lg font-semibold text-white">{selectedItem.client}</h1><Badge variant={selectedDeal ? 'brand' : 'muted'}>{selectedDeal ? 'Deal' : 'Lead'}</Badge><Badge variant={stageBadgeTone(selectedDeal?.stage ?? selectedLead?.funnelStage ?? '')}>{selectedDeal?.stage ?? selectedLead?.funnelStage}</Badge>{selectedLead && <><select
+                    aria-label={`Change ${selectedLead.title ?? selectedLead.client} temperature`}
+                    className={`cursor-pointer rounded-full border bg-transparent px-2 py-1 text-[10px] font-semibold ${selectedLead.temperature === 'HOT' ? 'border-hot/40 bg-hot/10 text-hot' : selectedLead.temperature === 'COLD' ? 'border-brand-300/40 bg-brand-300/10 text-brand-200' : 'border-warm/40 bg-warm/10 text-warm'}`}
+                    value={selectedLead.temperature ?? 'WARM'}
+                    disabled={activeRole !== 'admin' && activeRole !== 'sales'}
+                    onChange={(event) => {
+                      const temperature = event.target.value as LeadTemperature;
+                      setLeads((current) => current.map((lead) => lead.id === selectedLead.id ? { ...lead, temperature } : lead));
+                    }}
+                  >
+                    <option value="HOT">HOT</option><option value="WARM">WARM</option><option value="COLD">COLD</option>
+                  </select><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1E2024] text-[10px] font-semibold text-[#8E95A2]" title={users.find((person) => person.id === selectedLead.ownerId)?.name}>{avatarCode(users.find((person) => person.id === selectedLead.ownerId)?.name ?? '')}</span></>}</div>
                 <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
                   <span>{selectedDeal?.product ?? selectedProduct?.name ?? selectedLead?.productCode} · {selectedPipeline?.name ?? 'No pipeline'} · Ref {selectedItem.id}</span>
                   {progressDeal && selectedLead && <button type="button" className="text-brand-300 hover:text-white" onClick={() => setSelectedKey(`deal:${progressDeal.id}`)}>Open linked deal</button>}
