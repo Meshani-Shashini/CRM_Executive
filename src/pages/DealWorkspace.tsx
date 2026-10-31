@@ -1362,9 +1362,9 @@ export default function DealWorkspace({
                 </button>
               ))}
             </div>
-            <div className="-mx-1 max-h-60 max-w-full touch-pan-x overflow-auto overscroll-contain scroll-smooth timeline-scrollbar px-1 pb-2"
+            <div className="-mx-1 max-h-60 max-w-full overflow-y-auto overscroll-contain scroll-smooth timeline-scrollbar px-1 pb-2"
               role="region" aria-label="Activity timeline" tabIndex={0}>
-              <div className="flex w-max min-w-full items-stretch gap-3">
+              <div className="flex min-w-full flex-col gap-2">
                 {filteredTimelineEntries.map((entry, index) => <TimelineItem
                   key={entry.key}
                   title={entry.title}
@@ -1608,16 +1608,16 @@ function TimelineItem({ title, description, date, createdAt, elapsedFromPrevious
     : category === 'proposal' ? 'Proposal'
       : category === 'stage' ? 'Stage change'
         : category === 'note' ? 'Note' : category === 'task' ? 'Task' : 'Activity';
-  return <article className="timeline-card flex w-64 shrink-0 flex-col rounded-xl border border-ink-700 bg-ink-900/50 p-4 sm:w-72">
-    <div className="flex items-center justify-between gap-2">
-      <Badge variant={category === 'task' ? 'warm' : 'muted'}>{categoryLabel}</Badge>
-      <time className="text-right text-[10px] text-muted">{formattedTimestamp}</time>
+  return <article className="w-full rounded-lg border border-ink-700 bg-ink-900/50 p-3 lg:grid lg:grid-cols-[auto_minmax(8rem,1fr)_minmax(0,2fr)_minmax(0,2fr)] lg:items-center lg:gap-3 lg:rounded-none lg:border-x-0 lg:border-t-0 lg:bg-transparent lg:px-2 lg:py-2">
+    <Badge variant={category === 'task' ? 'warm' : 'muted'}>{categoryLabel}</Badge>
+    <h3 className="mt-2 truncate text-sm font-medium text-white lg:mt-0 lg:text-xs" title={title}>{title}</h3>
+    <p className="mt-2 text-xs leading-relaxed text-muted lg:mt-0 lg:truncate" title={description}>{description || '—'}</p>
+    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted lg:mt-0 lg:flex-nowrap">
+      {formattedTimestamp && <time className="whitespace-nowrap lg:min-w-0 lg:truncate" title={formattedTimestamp}>{formattedTimestamp}</time>}
+      {elapsedFromPrevious !== undefined && <span className="whitespace-nowrap lg:min-w-0 lg:truncate" title={`Since previous entry: ${formatElapsedInterval(elapsedFromPrevious)}`}>Since previous: {formatElapsedInterval(elapsedFromPrevious)}</span>}
+      {formattedCreatedTimestamp && <time className="whitespace-nowrap lg:min-w-0 lg:truncate" title={`Logged: ${formattedCreatedTimestamp}`}>Logged: {formattedCreatedTimestamp}</time>}
+      {durationMinutes !== undefined && <span className="whitespace-nowrap lg:min-w-0 lg:truncate" title={`Duration: ${durationMinutes} minutes`}>Duration: {durationMinutes} min</span>}
     </div>
-    <h3 className="mt-3 min-h-10 text-sm font-medium text-white">{title}</h3>
-    {description && <p className="mt-2 flex-1 text-xs leading-relaxed text-muted">{description}</p>}
-    {elapsedFromPrevious !== undefined && <p className="mt-3 border-t border-ink-700 pt-2 text-[10px] text-muted">Since previous entry: {formatElapsedInterval(elapsedFromPrevious)}</p>}
-    {formattedCreatedTimestamp && <p className="mt-2 text-[10px] text-muted">Logged: {formattedCreatedTimestamp}</p>}
-    {durationMinutes !== undefined && <p className="mt-3 border-t border-ink-700 pt-2 text-[10px] text-muted">Duration: {durationMinutes} minutes</p>}
   </article>;
 }
 

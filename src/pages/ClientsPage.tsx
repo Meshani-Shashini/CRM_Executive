@@ -507,26 +507,21 @@ export default function ClientsPage() {
 
           {/* Right: Activity timeline */}
           <div className="glass rounded-2xl p-5 flex flex-col">
-            <h3 className="text-white font-semibold mb-4 flex items-center gap-2"><Calendar size={16} /> Activity Timeline</h3>
-            <div className="space-y-3 flex-1 overflow-y-auto">
-              {clientActivities.map((a: Activity, i) => {
+            <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-white"><Calendar size={16} /> Activity Timeline</h3>
+            <div className="flex-1 overflow-y-auto">
+              {clientActivities.map((a: Activity) => {
                 const Icon = activityIcon[a.type];
                 return (
-                  <div key={a.id} className="relative pl-8">
-                    {i < activities.length - 1 && (
-                      <div className="absolute left-3 top-7 bottom-[-12px] w-px bg-ink-600" />
-                    )}
-                    <div className="absolute left-0 top-0 w-6 h-6 rounded-full bg-ink-700 border border-ink-600 flex items-center justify-center">
+                  <article key={a.id} className="mb-2 rounded-lg border border-ink-700 bg-ink-900/40 p-3 last:mb-0 lg:mb-0 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] lg:items-center lg:gap-3 lg:rounded-none lg:border-x-0 lg:border-t-0 lg:bg-transparent lg:px-2 lg:py-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-ink-600 bg-ink-700">
                       <Icon size={12} className="text-brand-400" />
+                      </span>
+                      <h4 className="min-w-0 truncate text-sm font-medium text-white lg:text-xs" title={a.title}>{a.title}</h4>
                     </div>
-                    <div className="bg-ink-900/40 rounded-lg p-3">
-                      <div className="flex items-center justify-between">
-                        <div className="text-sm font-medium text-white">{a.title}</div>
-                        <div className="text-[10px] text-muted">{formatDate(a.date)}</div>
-                      </div>
-                      <div className="text-xs text-muted mt-1">{a.description}</div>
-                    </div>
-                  </div>
+                    <p className="mt-2 text-xs text-muted lg:mt-0 lg:truncate" title={a.description}>{a.description}</p>
+                    <time className="mt-2 block text-[10px] text-muted lg:mt-0 lg:whitespace-nowrap">{formatDate(a.date)}</time>
+                  </article>
                 );
               })}
               {clientActivities.length === 0 && (

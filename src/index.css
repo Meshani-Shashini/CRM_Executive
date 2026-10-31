@@ -77,7 +77,6 @@ body {
   .timeline-scrollbar::-webkit-scrollbar-track { background: #111214; border-radius: 9999px; }
   .timeline-scrollbar::-webkit-scrollbar-thumb { background: #454B55; border: 1px solid #111214; border-radius: 9999px; }
   .timeline-scrollbar::-webkit-scrollbar-thumb:hover { background: #606875; }
-  .timeline-card { content-visibility: auto; contain-intrinsic-size: auto 220px; }
   .stage-stepper-scroll {
     -webkit-overflow-scrolling: touch;
     scrollbar-color: #303842 #0B0D10;
