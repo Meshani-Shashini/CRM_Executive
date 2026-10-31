@@ -63,7 +63,6 @@ const placeholders: Partial<Record<NavKey, { title: string; subtitle: string }>>
   'info-requests': { title: 'Info Requests', subtitle: 'Requests for additional underwriting information.' },
   'rate-cards': { title: 'Commission Rate Cards', subtitle: 'Insurer commission and brokerage rate cards.' },
   targets: { title: 'Targets', subtitle: 'Monthly and annual targets for sales staff.' },
-  'audit-log': { title: 'Audit Log', subtitle: 'System activity and configuration change history.' },
 };
 
 function Shell() {
@@ -116,6 +115,7 @@ function Shell() {
       case 'qslips': return <QSlipsPage />;
       case 'mira': return <MiraPage />;
       case 'settings': return <SettingsPage />;
+      case 'audit-log': return <SettingsPage initialTab="audit" />;
       case 'calendar': return <CalendarPage />;
       case 'pipelines': return <PipelinesPage />;
       case 'funnels': return <FunnelsPage />;

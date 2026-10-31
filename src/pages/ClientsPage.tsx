@@ -37,7 +37,12 @@ export default function ClientsPage() {
     ? clients.filter((client) => Boolean(portalClientId) && client.id === portalClientId)
     : clients;
   const selected = visibleClients.find((c) => c.id === selectedId) ?? visibleClients[0];
-  const clientActivities = activities.filter((a) => a.clientId === selected?.id);
+  const clientActivities = activities.filter((activity) =>
+    activity.clientId === selected?.id
+    && (!activity.id.startsWith('audit-')
+      || /^(?:Lead|Deal) created$|^(?:Lead|Deal) stage changed:|^Lead temperature changed:/.test(activity.title)
+      || (activity.title === 'Lead updated' && activity.description.includes('Activity status:'))),
+  );
   const productName = (code: string) => PRODUCT_CODES.find((p) => p.code === code)?.name ?? code;
   const owner = selected && users.find((u) => u.id === selected.ownerId);
 
@@ -354,7 +359,7 @@ export default function ClientsPage() {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4 h-[calc(100vh-8rem)]">
+    <div className="grid h-[calc(100vh-8rem)] grid-cols-1 gap-4 lg:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.8fr)]">
       {/* List */}
       <div className="glass rounded-2xl flex flex-col overflow-hidden">
         <div className="p-3 border-b border-ink-600">
@@ -384,25 +389,31 @@ export default function ClientsPage() {
               <button
                 type="button"
                 onClick={() => setSelectedId(c.id)}
-                className="w-full text-left px-3 pt-3"
+                className="w-full min-w-0 text-left px-3 pt-3"
               >
-                <div className="flex items-center gap-2.5">
+                <div className="flex min-w-0 items-start gap-2.5">
                   <div className="w-9 h-9 rounded-lg bg-ink-700 flex items-center justify-center text-xs font-bold text-white shrink-0">
                     {c.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm text-white font-medium truncate">{c.name}</div>
-                    <div className="text-[11px] text-muted">TIN: {c.tin}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="break-words text-sm font-medium text-white">{c.name}</div>
+                    <div className="break-words text-[11px] text-muted">TIN: {c.tin}</div>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-1 mt-2">
+                <div className="mt-2 flex min-w-0 flex-wrap gap-1">
                   <span className="pill bg-brand-400/10 text-brand-400 border border-brand-400/30 !px-1.5">
                     {c.productCode}
                   </span>
-                  {c.tags.filter((tag) => tag !== INCOMPLETE_COMPANY_TAG).slice(0, 1).map((t) => (
-                    <Badge key={t} variant="muted">{t}</Badge>
+                  {c.tags.filter((tag) => tag !== INCOMPLETE_COMPANY_TAG).slice(0, 1).map((tag) => (
+                    <span key={tag} className="pill max-w-full whitespace-normal break-words border border-ink-600 bg-ink-700/60 text-left text-muted [overflow-wrap:anywhere]">
+                      {tag}
+                    </span>
                   ))}
-                  {!hasCompleteClientProfile(c) && <Badge variant="warm">{INCOMPLETE_COMPANY_TAG}</Badge>}
+                  {!hasCompleteClientProfile(c) && (
+                    <span className="pill max-w-full whitespace-normal break-words border border-[#4A3217] bg-[#2C1E0D] text-left text-[#E09228] [overflow-wrap:anywhere]">
+                      {INCOMPLETE_COMPANY_TAG}
+                    </span>
+                  )}
                 </div>
               </button>
               {user.role === 'admin' && (
@@ -462,7 +473,7 @@ export default function ClientsPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
           {/* Left: Client info */}
           <div className="space-y-4">
             <div className="glass rounded-2xl p-5">
@@ -512,15 +523,15 @@ export default function ClientsPage() {
               {clientActivities.map((a: Activity) => {
                 const Icon = activityIcon[a.type];
                 return (
-                  <article key={a.id} className="mb-2 rounded-lg border border-ink-700 bg-ink-900/40 p-3 last:mb-0 lg:mb-0 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] lg:items-center lg:gap-3 lg:rounded-none lg:border-x-0 lg:border-t-0 lg:bg-transparent lg:px-2 lg:py-2">
+                  <article key={a.id} className="mb-1 rounded-lg border border-ink-700 bg-ink-900/40 p-2 last:mb-0 lg:mb-0 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] lg:items-center lg:gap-3 lg:rounded-none lg:border-x-0 lg:border-t-0 lg:bg-transparent lg:px-2 lg:py-1.5">
                     <div className="flex min-w-0 items-center gap-2">
                       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-ink-600 bg-ink-700">
                       <Icon size={12} className="text-brand-400" />
                       </span>
                       <h4 className="min-w-0 truncate text-sm font-medium text-white lg:text-xs" title={a.title}>{a.title}</h4>
                     </div>
-                    <p className="mt-2 text-xs text-muted lg:mt-0 lg:truncate" title={a.description}>{a.description}</p>
-                    <time className="mt-2 block text-[10px] text-muted lg:mt-0 lg:whitespace-nowrap">{formatDate(a.date)}</time>
+                    <p className="mt-2 text-xs font-normal text-white lg:mt-0 lg:truncate" title={a.description}>{a.description}</p>
+                    <time className="mt-2 block text-[10px] font-normal text-white lg:mt-0 lg:whitespace-nowrap">{formatDate(a.date)}</time>
                   </article>
                 );
               })}

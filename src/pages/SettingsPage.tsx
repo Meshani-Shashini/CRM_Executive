@@ -4,19 +4,20 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import {
   Settings as SettingsIcon, Percent, Mail, Users as UsersIcon, ShieldAlert,
-  Save, Plus, Pencil, Trash2, Check, Lock, Package,
+  Save, Plus, Pencil, Trash2, Check, Lock, Package, ClipboardList,
 } from 'lucide-react';
-import type { TaxRate, Role, User, ProductCode, Lead, Deal } from '../types';
+import type { Activity, TaxRate, Role, User, ProductCode, Lead, Deal } from '../types';
 import { PRODUCT_CODES } from '../data/catalogs';
 
-type Tab = 'general' | 'tax' | 'products' | 'email' | 'users';
+type Tab = 'general' | 'tax' | 'products' | 'email' | 'users' | 'audit';
 
-export default function SettingsPage() {
+export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) {
   const {
     user, hasAccess, taxRates, setTaxRates, users, createUser, updateUserProfile,
     company, setCompany, emailTemplates, setEmailTemplates, products, setProducts, leads, deals,
+    activities, setActivities,
   } = useApp();
-  const [tab, setTab] = useState<Tab>('tax');
+  const [tab, setTab] = useState<Tab>(initialTab ?? 'tax');
   const [editing, setEditing] = useState<TaxRate | null>(null);
   const [open, setOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
@@ -54,11 +55,32 @@ export default function SettingsPage() {
     { key: 'products', label: 'Item / Product Management', icon: Package },
     { key: 'email', label: 'Email Templates', icon: Mail },
     { key: 'users', label: 'Users & Roles', icon: UsersIcon },
+    { key: 'audit', label: 'Audit Trail', icon: ClipboardList },
   ];
+  const auditEntries = activities
+    .filter((activity) => activity.id.startsWith('audit-') && !isBusinessAudit(activity))
+    .sort((left, right) => Date.parse(right.createdAt ?? right.date) - Date.parse(left.createdAt ?? left.date));
+
+  const logSystemAudit = (title: string, description: string) => {
+    const now = new Date().toISOString();
+    const audit: Activity = {
+      id: `audit-system-${crypto.randomUUID()}`,
+      clientId: '',
+      type: 'note',
+      title,
+      description,
+      date: now,
+      createdAt: now,
+      userId: user.id,
+      actorName: user.name,
+    };
+    setActivities([audit, ...activities]);
+  };
 
   const saveTax = (t: TaxRate) => {
     const exists = taxRates.some((x) => x.id === t.id);
     setTaxRates(exists ? taxRates.map((x) => (x.id === t.id ? t : x)) : [...taxRates, t]);
+    logSystemAudit(exists ? 'Tax rate updated' : 'Tax rate added', t.name);
     setOpen(false);
     setEditing(null);
     setNotice('Tax rate saved.');
@@ -66,6 +88,7 @@ export default function SettingsPage() {
 
   const saveCompany = () => {
     setCompany(companyDetails);
+    logSystemAudit('Company settings updated', companyDetails.legalName);
     setNotice('Company settings updated.');
   };
 
@@ -83,6 +106,7 @@ export default function SettingsPage() {
         role: data.get('role') as Role,
         title: String(data.get('title') ?? '').trim(),
       });
+      logSystemAudit('User account created', `${name} · ${email}`);
       setUserOpen(false);
       setUserError('');
       setNotice(`User ${name} added.`);
@@ -103,6 +127,7 @@ export default function SettingsPage() {
     setUserSubmitting(true);
     try {
       await updateUserProfile({ id: editingUser.id, name, title, role });
+      logSystemAudit('User profile updated', `${editingUser.name} → ${name}`);
       setEditingUser(null);
       setUserError('');
       setNotice(`User profile for ${name} updated. Authentication email is unchanged.`);
@@ -117,6 +142,7 @@ export default function SettingsPage() {
     event.preventDefault();
     if (editingTemplate === null) return;
     setEmailTemplates({ ...emailTemplates, [editingTemplate]: templateText });
+    logSystemAudit('Email template updated', editingTemplate);
     setEditingTemplate(null);
     setNotice('Email template saved.');
   };
@@ -187,7 +213,7 @@ export default function SettingsPage() {
                 <div className="flex items-center gap-2">
                   <Badge variant={t.active ? 'win' : 'muted'} dot>{t.active ? 'Active' : 'Inactive'}</Badge>
                   <button onClick={() => { setEditing(t); setOpen(true); }} className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white"><Pencil size={14} /></button>
-                  <button onClick={() => { if (window.confirm(`Delete the ${t.name} tax rate?`)) { setTaxRates(taxRates.filter((rate) => rate.id !== t.id)); setNotice(`${t.name} deleted.`); } }} aria-label={`Delete ${t.name}`} className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-hot"><Trash2 size={14} /></button>
+                  <button onClick={() => { if (window.confirm(`Delete the ${t.name} tax rate?`)) { setTaxRates(taxRates.filter((rate) => rate.id !== t.id)); logSystemAudit('Tax rate deleted', t.name); setNotice(`${t.name} deleted.`); } }} aria-label={`Delete ${t.name}`} className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-hot"><Trash2 size={14} /></button>
                 </div>
               </div>
             ))}
@@ -196,7 +222,7 @@ export default function SettingsPage() {
       )}
 
       {tab === 'products' && (
-        <ProductManagement products={products} setProducts={setProducts} leads={leads} deals={deals} onNotice={setNotice} />
+        <ProductManagement products={products} setProducts={setProducts} leads={leads} deals={deals} onNotice={setNotice} onAudit={logSystemAudit} />
       )}
 
       {tab === 'email' && (
@@ -244,6 +270,34 @@ export default function SettingsPage() {
             ))}
           </div>
         </div>
+      )}
+
+      {tab === 'audit' && (
+        <section className="glass rounded-2xl p-5" aria-labelledby="audit-trail-heading">
+          <div className="mb-4">
+            <h3 id="audit-trail-heading" className="text-sm font-normal text-white">Audit Trail</h3>
+            <p className="mt-1 text-xs font-normal text-white">System and configuration changes recorded by this application.</p>
+          </div>
+          <p className="mb-3 rounded-lg border border-ink-700 bg-ink-900/40 p-3 text-xs font-normal text-white">
+            Sign-in and sign-out events are not currently captured by this application and are not available in this trail.
+          </p>
+          {auditEntries.length ? (
+            <div className="divide-y divide-ink-700/70">
+              {auditEntries.map((entry) => (
+                <article key={entry.id} className="rounded-lg border border-ink-700 bg-ink-900/40 p-3 lg:grid lg:grid-cols-[minmax(10rem,1fr)_minmax(0,2fr)_minmax(12rem,auto)] lg:items-center lg:gap-4 lg:rounded-none lg:border-x-0 lg:border-t-0 lg:bg-transparent lg:px-2 lg:py-2">
+                  <h4 className="text-sm font-normal text-white lg:truncate" title={entry.title}>{entry.title}</h4>
+                  <p className="mt-2 text-xs font-normal text-white lg:mt-0 lg:truncate" title={entry.description}>{entry.description || '—'}</p>
+                  <div className="mt-2 flex flex-wrap gap-x-3 text-[10px] font-normal text-white lg:mt-0 lg:justify-end">
+                    <span className="whitespace-nowrap">{entry.actorName ?? users.find((person) => person.id === entry.userId)?.name ?? entry.userId}</span>
+                    <time className="whitespace-nowrap" dateTime={entry.createdAt ?? entry.date}>{formatAuditTimestamp(entry.createdAt ?? entry.date)}</time>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="py-8 text-center text-sm font-normal text-white">No system audit events have been recorded.</p>
+          )}
+        </section>
       )}
 
       <TaxModal open={open} onClose={() => setOpen(false)} initial={editing} onSave={saveTax} />
@@ -297,6 +351,18 @@ const roleLabel: Record<Role, string> = {
   admin: 'System Admin', sales: 'Sales', finance: 'Accountant', client: 'Client',
 };
 
+function isBusinessAudit(activity: Activity) {
+  return /^(?:Lead|Deal) created$|^(?:Lead|Deal) stage changed:|^Lead temperature changed:/.test(activity.title)
+    || (activity.title === 'Lead updated' && activity.description.includes('Activity status:'));
+}
+
+function formatAuditTimestamp(value: string) {
+  const timestamp = new Date(value);
+  return Number.isFinite(timestamp.getTime())
+    ? timestamp.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+    : 'Unknown time';
+}
+
 function Labeled({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <label className="block">
@@ -311,13 +377,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function ProductManagement({
-  products, setProducts, leads, deals, onNotice,
+  products, setProducts, leads, deals, onNotice, onAudit,
 }: {
   products: ProductCode[];
   setProducts: Dispatch<SetStateAction<ProductCode[]>>;
   leads: Lead[];
   deals: Deal[];
   onNotice: (message: string) => void;
+  onAudit: (title: string, description: string) => void;
 }) {
   const [editing, setEditing] = useState<ProductCode | null>(null);
   const [form, setForm] = useState<ProductCode | null>(null);
@@ -372,6 +439,7 @@ function ProductManagement({
     setProducts((current) => editing
       ? current.map((item) => item.code === editing.code ? product : item)
       : [...current, product]);
+    onAudit(editing ? 'Product updated' : 'Product added', `${product.code} · ${product.name}`);
     onNotice(`${product.name} ${editing ? 'updated' : 'added'} and synced to the catalog.`);
     setForm(null);
     setEditing(null);
@@ -424,6 +492,7 @@ function ProductManagement({
     }
     const product = pendingProductDeletion;
     setProducts((current) => current.filter((item) => item.code !== product.code));
+    onAudit('Product deleted', `${product.code} · ${product.name}`);
     onNotice(`${product.name} deleted from the catalog and queued for Supabase sync.`);
     setPendingProductDeletion(null);
   };

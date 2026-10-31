@@ -31,7 +31,6 @@ interface TimelineEntry {
   title: string;
   description: string;
   date: string;
-  createdAt?: string;
   durationMinutes?: number;
   category: 'stage' | 'activity' | 'appointment' | 'proposal' | 'note' | 'task';
 }
@@ -158,14 +157,27 @@ function getTelemetryTimestampOverride(targetDays: number, now: number) {
   return undefined;
 }
 
-function formatElapsedInterval(milliseconds: number) {
-  const totalMinutes = Math.floor(milliseconds / 60_000);
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = Math.floor((totalMinutes % 1440) / 60);
-  const minutes = totalMinutes % 60;
-  if (days) return `${days} ${days === 1 ? 'day' : 'days'} ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
-  if (hours) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
-  return minutes ? `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}` : 'Less than a minute';
+function formatRelativeTime(date: string, now: number) {
+  const elapsedMinutes = Math.floor((now - Date.parse(date)) / 60_000);
+  if (!Number.isFinite(elapsedMinutes)) return '';
+  if (elapsedMinutes < 0) {
+    const minutes = Math.abs(elapsedMinutes);
+    if (minutes < 60) return `in ${Math.max(1, minutes)}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `in ${hours}h`;
+    return `in ${Math.floor(hours / 24)}d`;
+  }
+  if (elapsedMinutes < 60) return `${Math.max(1, elapsedMinutes)}m ago`;
+  const hours = Math.floor(elapsedMinutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function isBusinessActivity(activity: Activity) {
+  if (!activity.id.startsWith('audit-')) return true;
+  return /^(?:Lead|Deal) created$|^(?:Lead|Deal) stage changed:|^Lead temperature changed:/.test(activity.title)
+    || (activity.title === 'Lead updated' && activity.description.includes('Activity status:'));
 }
 
 export default function DealWorkspace({
@@ -281,6 +293,7 @@ export default function DealWorkspace({
     .filter((activity) => (Boolean(relatedDealId) && activity.dealId === relatedDealId)
       || (Boolean(relatedLeadId) && activity.leadId === relatedLeadId)
       || (!activity.dealId && !activity.leadId && Boolean(selectedClient) && activity.clientId === selectedClient?.id))
+    .filter(isBusinessActivity)
     .sort((left, right) => Date.parse(right.date) - Date.parse(left.date));
   const quotes = selectedActivities.filter((activity) => activity.type === 'quote' && activity.quoteAmount !== undefined);
   const selectedHistory = progressDeal
@@ -427,7 +440,6 @@ export default function DealWorkspace({
       title: 'Deal created',
       description: `${selectedDeal.product} · ${selectedDeal.stage}`,
       date: selectedDeal.createdAt,
-      createdAt: selectedDeal.createdAt,
       category: 'stage' as const,
     }] : []),
     ...(selectedDeal?.nextActivityAt ? [{
@@ -435,7 +447,6 @@ export default function DealWorkspace({
       title: selectedDeal.nextActivityTitle ?? 'Scheduled follow-up',
       description: 'Scheduled task',
       date: selectedDeal.nextActivityAt,
-      createdAt: selectedDeal.nextActivityCreatedAt,
       category: 'task' as const,
     }] : []),
     ...selectedHistory.map((entry) => {
@@ -445,7 +456,6 @@ export default function DealWorkspace({
         title: `Stage: ${target}`,
         description: entry.lossReason ? `Loss reason: ${entry.lossReason}` : entry.details ?? '',
         date: entry.enteredAt,
-        createdAt: entry.enteredAt,
         category: 'stage' as const,
       };
     }),
@@ -465,7 +475,6 @@ export default function DealWorkspace({
         title: activity.title,
         description: details,
         date: activity.date,
-        createdAt: activity.createdAt,
         category: activity.type === 'meeting' ? 'appointment' as const
           : activity.type === 'quote' ? 'proposal' as const
             : activity.type === 'task' ? 'task' as const
@@ -1364,18 +1373,15 @@ export default function DealWorkspace({
             </div>
             <div className="-mx-1 max-h-60 max-w-full overflow-y-auto overscroll-contain scroll-smooth timeline-scrollbar px-1 pb-2"
               role="region" aria-label="Activity timeline" tabIndex={0}>
-              <div className="flex min-w-full flex-col gap-2">
-                {filteredTimelineEntries.map((entry, index) => <TimelineItem
+              <div className="flex min-w-full flex-col gap-1">
+                {filteredTimelineEntries.map((entry) => <TimelineItem
                   key={entry.key}
                   title={entry.title}
                   description={entry.description}
                   date={entry.date}
-                  createdAt={entry.createdAt}
-                  elapsedFromPrevious={index > 0
-                    ? Math.max(0, Date.parse(entry.date) - Date.parse(filteredTimelineEntries[index - 1].date))
-                    : undefined}
                   durationMinutes={entry.durationMinutes}
                   category={entry.category}
+                  now={clockNow}
                 />)}
                 {!filteredTimelineEntries.length && <p className="min-w-full rounded-xl border border-ink-700 bg-ink-900/40 p-5 text-center text-sm text-muted">{timelineEntries.length ? 'No entries match this filter.' : 'No activity has been recorded yet.'}</p>}
               </div>
@@ -1587,36 +1593,33 @@ function localDateTimeInput() {
   return date.toISOString().slice(0, 16);
 }
 
-function TimelineItem({ title, description, date, createdAt, elapsedFromPrevious, durationMinutes, category }: {
+function TimelineItem({ title, description, date, durationMinutes, category, now }: {
   title: string;
   description: string;
   date?: string;
-  createdAt?: string;
-  elapsedFromPrevious?: number;
   durationMinutes?: number;
   category: TimelineEntry['category'];
+  now: number;
 }) {
   const timestamp = date ? new Date(date) : null;
   const formattedTimestamp = timestamp && Number.isFinite(timestamp.getTime())
-    ? `${formatDate(timestamp)} · ${timestamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+    ? `${formatDate(timestamp)} ${timestamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
     : '';
-  const createdTimestamp = createdAt ? new Date(createdAt) : null;
-  const formattedCreatedTimestamp = createdTimestamp && Number.isFinite(createdTimestamp.getTime())
-    ? `${formatDate(createdTimestamp)} · ${createdTimestamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+  const relativeTimestamp = date && timestamp && Number.isFinite(timestamp.getTime())
+    ? formatRelativeTime(date, now)
     : '';
   const categoryLabel = category === 'appointment' ? 'Appointment'
     : category === 'proposal' ? 'Proposal'
       : category === 'stage' ? 'Stage change'
         : category === 'note' ? 'Note' : category === 'task' ? 'Task' : 'Activity';
-  return <article className="w-full rounded-lg border border-ink-700 bg-ink-900/50 p-3 lg:grid lg:grid-cols-[auto_minmax(8rem,1fr)_minmax(0,2fr)_minmax(0,2fr)] lg:items-center lg:gap-3 lg:rounded-none lg:border-x-0 lg:border-t-0 lg:bg-transparent lg:px-2 lg:py-2">
+  const details = [description, durationMinutes !== undefined ? `Duration: ${durationMinutes} minutes` : ''].filter(Boolean).join(' · ');
+  return <article className="w-full rounded-lg border border-ink-700 bg-ink-900/50 p-2 lg:grid lg:min-h-10 lg:grid-cols-[auto_minmax(12rem,1fr)_minmax(18rem,2fr)_max-content] lg:items-center lg:gap-3 lg:rounded-none lg:border-x-0 lg:border-t-0 lg:bg-transparent lg:px-2 lg:py-1.5">
     <Badge variant={category === 'task' ? 'warm' : 'muted'}>{categoryLabel}</Badge>
-    <h3 className="mt-2 truncate text-sm font-medium text-white lg:mt-0 lg:text-xs" title={title}>{title}</h3>
-    <p className="mt-2 text-xs leading-relaxed text-muted lg:mt-0 lg:truncate" title={description}>{description || '—'}</p>
-    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted lg:mt-0 lg:flex-nowrap">
-      {formattedTimestamp && <time className="whitespace-nowrap lg:min-w-0 lg:truncate" title={formattedTimestamp}>{formattedTimestamp}</time>}
-      {elapsedFromPrevious !== undefined && <span className="whitespace-nowrap lg:min-w-0 lg:truncate" title={`Since previous entry: ${formatElapsedInterval(elapsedFromPrevious)}`}>Since previous: {formatElapsedInterval(elapsedFromPrevious)}</span>}
-      {formattedCreatedTimestamp && <time className="whitespace-nowrap lg:min-w-0 lg:truncate" title={`Logged: ${formattedCreatedTimestamp}`}>Logged: {formattedCreatedTimestamp}</time>}
-      {durationMinutes !== undefined && <span className="whitespace-nowrap lg:min-w-0 lg:truncate" title={`Duration: ${durationMinutes} minutes`}>Duration: {durationMinutes} min</span>}
+    <h3 className="mt-2 break-words text-sm font-normal text-white lg:mt-0 lg:text-xs" title={title}>{title}</h3>
+    <p className="mt-2 break-words text-xs font-normal leading-relaxed text-white lg:mt-0" title={details}>{details || '—'}</p>
+    <div className="mt-2 flex min-w-0 items-center gap-2 text-[10px] font-normal text-white lg:mt-0 lg:justify-end">
+      {formattedTimestamp && <time className="whitespace-nowrap">{formattedTimestamp}</time>}
+      {relativeTimestamp && <span className="whitespace-nowrap text-muted">{relativeTimestamp}</span>}
     </div>
   </article>;
 }
