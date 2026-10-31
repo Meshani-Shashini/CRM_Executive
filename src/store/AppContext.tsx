@@ -98,6 +98,8 @@ function auditFieldName(field: string): string {
     whatsapp: 'WhatsApp',
     telegram: 'Telegram',
     funnelStage: 'Lead stage',
+    disposition: 'Lead outcome',
+    lossReason: 'Loss reason',
     temperature: 'Lead temperature',
     status: 'Activity status',
     stage: 'Deal stage',

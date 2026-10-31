@@ -1,4 +1,5 @@
 import type { Insurer, ProductCode } from '../types';
+import { LEAD_LIFECYCLE_STAGES } from '../utils/leadLifecycle';
 
 export const INSURERS: Insurer[] = [
   { id: 'ins1', name: 'Allied Insurance Company', shortName: 'Allied', commissionRate: 15, address: '' },
@@ -124,7 +125,7 @@ export const PRODUCT_CODES: ProductCode[] = [
 }));
 
 export const FUNNELS = [
-  { id: 'f1', name: 'Broker Sales Funnel', stages: ['Lead Identified', 'Contact Made', 'Key Person Identified', 'Quoted', 'Internal Slip'] },
+  { id: 'f1', name: 'Broker Sales Funnel', stages: LEAD_LIFECYCLE_STAGES },
   { id: 'f2', name: 'Renewals Funnel', stages: ['Renewal Notice', 'Quote Sent', 'Negotiation', 'Bound', 'Closed Won'] },
 ];
 

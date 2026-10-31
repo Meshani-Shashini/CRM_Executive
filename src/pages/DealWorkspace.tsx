@@ -6,6 +6,7 @@ import {
 import Badge from '../components/ui/Badge';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
 import Modal from '../components/ui/Modal';
+import ActivityTimelineItem from '../components/ActivityTimelineItem';
 import { useApp } from '../store/AppContext';
 import { TENANT_ID } from '../lib/supabase';
 import type { Activity, CompanyContactProfile, Deal, Lead, PipelineStage, StageHistoryAudit } from '../types';
@@ -15,7 +16,9 @@ import { calculateBrokerageCommission } from '../utils/insurance';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile } from '../utils/customerProfile';
 import { isStageSlaOverdue } from '../utils/stageSla';
-import { linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
+import { linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
+import { LEAD_LIFECYCLE_STAGES, lifecycleStageForLead, lifecycleStageForName, type LeadLifecycleStage } from '../utils/leadLifecycle';
+import { formatStaffIdentifier } from '../utils/staff';
 
 const LOSS_REASONS = [
   'Price / premium',
@@ -32,7 +35,7 @@ interface TimelineEntry {
   description: string;
   date: string;
   durationMinutes?: number;
-  category: 'stage' | 'activity' | 'appointment' | 'proposal' | 'note' | 'task';
+  category: 'stage' | 'activity' | 'appointment' | 'proposal' | 'note' | 'task' | 'temperature';
 }
 
 interface ContactEditorDraft {
@@ -53,15 +56,6 @@ const EMPTY_CONTACT_DRAFT: ContactEditorDraft = {
   telegram: '',
 };
 
-const LEAD_PROGRESS_STAGES = [
-  'Lead Identified',
-  'Contact Made',
-  'Key Person Identified',
-  'Intro Email Sent',
-  'Meetings Ongoing',
-] as const;
-type LeadProgressStage = (typeof LEAD_PROGRESS_STAGES)[number];
-
 function isLostStage(name: string) {
   return name.toLowerCase().includes('lost') || name.toLowerCase().includes('declined');
 }
@@ -74,6 +68,7 @@ function isBoundStage(name: string) {
 
 function stageBadgeTone(name: string): 'hot' | 'warm' | 'win' | 'brand' {
   if (isLostStage(name)) return 'hot';
+  if (name.toLowerCase().includes('converted to deal')) return 'win';
   if (isBoundStage(name)) return 'win';
   if (requiresCommunicationChannels(name)) return 'warm';
   return 'brand';
@@ -95,35 +90,22 @@ function dateBefore(date: string, days: number) {
   return value.toISOString().slice(0, 10);
 }
 
-function progressStageForLead(lead: Lead) {
-  return progressStageForLeadName(lead.funnelStage);
-}
-
-function progressStageForLeadName(stageName: string): LeadProgressStage {
-  const stage = stageName.toLowerCase();
-  if (stage.includes('qualified') || stage.includes('bound') || stage.includes('won') || stage.includes('l3:')) return LEAD_PROGRESS_STAGES[4];
-  if (stage.includes('meeting') || stage.includes('negotiat') || stage.includes('underwriter')) return LEAD_PROGRESS_STAGES[4];
-  if (stage.includes('intro') || stage.includes('email') || stage.includes('quoted')) return LEAD_PROGRESS_STAGES[3];
-  if (stage.includes('key person') || stage.includes('comparative') || stage.includes('presentation') || stage.includes('l2:')) return LEAD_PROGRESS_STAGES[2];
-  if (stage.includes('contact') || stage.includes('market') || stage.includes('tender') || stage.includes('slip') || stage.includes('kyc') || stage.includes('l1:')) return LEAD_PROGRESS_STAGES[1];
-  return LEAD_PROGRESS_STAGES[0];
-}
-
-function pipelineStageIndexForLead(lead: Lead) {
-  const stage = lead.funnelStage.toLowerCase();
-  if (stage.includes('qualified') || stage.includes('bound') || stage.includes('won') || stage.includes('l3:')) return 5;
-  return LEAD_PROGRESS_STAGES.indexOf(progressStageForLead(lead));
-}
-
-function formatStageDuration(milliseconds: number) {
-  const totalHours = Math.floor(milliseconds / 3_600_000);
-  const days = Math.floor(totalHours / 24);
-  const hours = totalHours % 24;
-  return `${days} ${days === 1 ? 'day' : 'days'} / ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+function formatStageDuration(milliseconds: number | undefined) {
+  if (milliseconds === undefined || !Number.isFinite(milliseconds)) return undefined;
+  const elapsedMilliseconds = Math.max(0, milliseconds);
+  if (elapsedMilliseconds < 3_600_000) return '<1h';
+  const totalHours = Math.floor(elapsedMilliseconds / 3_600_000);
+  if (totalHours < 24) return `${totalHours}h`;
+  return `${Math.floor(totalHours / 24)}d`;
 }
 
 function formatDays(milliseconds: number | undefined) {
   return milliseconds === undefined ? '—' : `${Math.floor(milliseconds / 86400000)}d`;
+}
+
+function formatTelemetryDuration(milliseconds: number | undefined) {
+  if (milliseconds === undefined || !Number.isFinite(milliseconds)) return undefined;
+  return formatStageDuration(milliseconds);
 }
 
 function stageSlaHealth(durationMilliseconds: number | undefined, targetDays: number) {
@@ -155,23 +137,6 @@ function getTelemetryTimestampOverride(targetDays: number, now: number) {
   }
 
   return undefined;
-}
-
-function formatRelativeTime(date: string, now: number) {
-  const elapsedMinutes = Math.floor((now - Date.parse(date)) / 60_000);
-  if (!Number.isFinite(elapsedMinutes)) return '';
-  if (elapsedMinutes < 0) {
-    const minutes = Math.abs(elapsedMinutes);
-    if (minutes < 60) return `in ${Math.max(1, minutes)}m`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `in ${hours}h`;
-    return `in ${Math.floor(hours / 24)}d`;
-  }
-  if (elapsedMinutes < 60) return `${Math.max(1, elapsedMinutes)}m ago`;
-  const hours = Math.floor(elapsedMinutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
 }
 
 function isBusinessActivity(activity: Activity) {
@@ -257,35 +222,52 @@ export default function DealWorkspace({
   const dealHasInvoice = Boolean(selectedDeal && (selectedDeal.linkedInvoiceId
     || invoices.some((invoice) => invoice.linkedDealId === selectedDeal.id)));
   const selectedClient = selectedItem ? clientForItem(selectedItem, clients) : undefined;
-  const clientContacts = selectedClient?.contacts ?? [];
-  const itemContacts = selectedLead?.contacts ?? linkedLead?.contacts ?? [];
-  const contactProfiles = mergeContactProfiles(clientContacts, itemContacts);
-  const primaryContactName = selectedLead?.contact ?? selectedDeal?.contactName ?? selectedClient?.contactPerson ?? '';
+  const relevantLeadId = selectedLead?.id;
+  const relevantDealId = selectedDeal?.id ?? selectedLead?.dealId;
+  const assignedContactId = selectedLead?.contactProfileId ?? selectedDeal?.contactProfileId ?? linkedLead?.contactProfileId;
+  const clientContacts = selectedClient?.contacts?.filter((profile) =>
+    profile.id === assignedContactId
+    || Boolean(relevantLeadId && profile.linkedLeadIds?.includes(relevantLeadId))
+    || Boolean(relevantDealId && profile.linkedDealIds?.includes(relevantDealId))) ?? [];
+  const itemContacts = linkedLead?.contacts?.filter((profile) => selectedLead
+    || profile.id === assignedContactId
+    || Boolean(selectedDeal && profile.linkedDealIds?.includes(selectedDeal.id))) ?? [];
+  const contactProfiles = mergeContactProfiles(clientContacts, itemContacts)
+    .filter((profile) => profile.name.trim() || profile.email.trim() || profile.phone.trim()
+      || profile.whatsapp?.trim() || profile.telegram?.trim());
+  const primaryContactName = selectedLead?.contact || selectedDeal?.contactName || linkedLead?.contact || selectedClient?.contactPerson || '';
+  const primaryContactEmail = selectedLead?.contactEmail || selectedDeal?.contactEmail || linkedLead?.contactEmail || '';
+  const primaryContactNumber = normalizeContactNumber(selectedLead?.contactPhone || selectedDeal?.contactPhone || linkedLead?.contactPhone);
   const primaryContactProfile = contactProfiles.find((profile) =>
-    (selectedLead?.contactProfileId ?? selectedDeal?.contactProfileId) === profile.id
-    || profile.name.trim().toLowerCase() === primaryContactName.trim().toLowerCase());
-  const resolvedContactPhone = selectedLead?.contactPhone || selectedDeal?.contactPhone
+    assignedContactId === profile.id
+    || Boolean(primaryContactEmail && profile.email.trim().toLowerCase() === primaryContactEmail.trim().toLowerCase())
+    || Boolean(primaryContactNumber && normalizeContactNumber(profile.phone) === primaryContactNumber));
+  const resolvedContactPhone = selectedLead?.contactPhone || selectedDeal?.contactPhone || linkedLead?.contactPhone
     || primaryContactProfile?.phone || selectedClient?.phone || '';
-  const resolvedWhatsapp = selectedLead?.whatsapp || selectedDeal?.whatsapp || primaryContactProfile?.whatsapp || '';
-  const resolvedTelegram = selectedLead?.telegram || selectedDeal?.telegram || primaryContactProfile?.telegram || '';
+  const resolvedWhatsapp = selectedLead?.whatsapp || selectedDeal?.whatsapp || linkedLead?.whatsapp || primaryContactProfile?.whatsapp || '';
+  const resolvedTelegram = selectedLead?.telegram || selectedDeal?.telegram || linkedLead?.telegram || primaryContactProfile?.telegram || '';
   const primaryContact: CompanyContactProfile | undefined = primaryContactName.trim() ? {
     ...primaryContactProfile,
     id: primaryContactProfile?.id ?? selectedLead?.contactProfileId ?? selectedDeal?.contactProfileId ?? `primary-${selectedItem?.id ?? 'contact'}`,
     name: primaryContactName,
-    role: selectedLead?.contactRole ?? selectedDeal?.contactRole ?? primaryContactProfile?.role ?? 'Decision Maker',
-    email: selectedLead?.contactEmail || selectedDeal?.contactEmail || primaryContactProfile?.email || selectedClient?.email || '',
-    phone: selectedLead?.contactPhone || selectedDeal?.contactPhone || primaryContactProfile?.phone || selectedClient?.phone || '',
-    whatsapp: selectedLead?.whatsapp || selectedDeal?.whatsapp || primaryContactProfile?.whatsapp || '',
-    telegram: selectedLead?.telegram || selectedDeal?.telegram || primaryContactProfile?.telegram || '',
+    role: selectedLead?.contactRole ?? selectedDeal?.contactRole ?? linkedLead?.contactRole ?? primaryContactProfile?.role ?? 'Decision Maker',
+    email: selectedLead?.contactEmail || selectedDeal?.contactEmail || linkedLead?.contactEmail || primaryContactProfile?.email || '',
+    phone: selectedLead?.contactPhone || selectedDeal?.contactPhone || linkedLead?.contactPhone || primaryContactProfile?.phone || '',
+    whatsapp: selectedLead?.whatsapp || selectedDeal?.whatsapp || linkedLead?.whatsapp || primaryContactProfile?.whatsapp || '',
+    telegram: selectedLead?.telegram || selectedDeal?.telegram || linkedLead?.telegram || primaryContactProfile?.telegram || '',
   } : undefined;
-  const detailContacts = mergeContactProfiles(primaryContact ? [primaryContact] : undefined, contactProfiles);
+  const detailContacts = mergeContactProfiles(primaryContact ? [primaryContact] : undefined, contactProfiles)
+    .filter((profile) => profile.name.trim() || profile.email.trim() || profile.phone.trim()
+      || profile.whatsapp?.trim() || profile.telegram?.trim());
   const selectedProduct = products.find((product) => product.code === selectedItem?.productCode)
     ?? products.find((product) => product.name === (selectedDeal?.product ?? ''));
   const selectedPipeline = pipelines.find((pipeline) => pipeline.id === selectedItem?.pipelineId);
   const stages = pipelineStages.filter((stage) => stage.pipelineId === progressDeal?.pipelineId)
     .sort((left, right) => left.stageOrder - right.stageOrder);
-  const leadPipelineStages = pipelineStages.filter((stage) => stage.pipelineId === selectedLead?.pipelineId)
-    .sort((left, right) => left.stageOrder - right.stageOrder);
+  const selectedLeadProbability = selectedLead && progressDeal
+    ? stages.find((stage) => stage.name === progressDeal.stage)?.winProbabilityPct
+      ?? (Number.isFinite(progressDeal.probability) ? progressDeal.probability : undefined)
+    : undefined;
   const currentStage = stages.find((stage) => stage.name === progressDeal?.stage);
   const relatedLeadId = selectedDeal?.leadId ?? selectedLead?.id;
   const relatedDealId = selectedDeal?.id ?? selectedLead?.dealId ?? progressDeal?.id;
@@ -304,12 +286,10 @@ export default function DealWorkspace({
     .find((timestamp): timestamp is string => Boolean(timestamp && Number.isFinite(Date.parse(timestamp))));
   const activeProgressStage = progressDeal
     ? progressDeal.stage
-    : selectedLead ? progressStageForLead(selectedLead) : '';
-  const progressStages: readonly (PipelineStage | string)[] = progressDeal ? stages : LEAD_PROGRESS_STAGES;
+    : selectedLead ? lifecycleStageForLead(selectedLead) : '';
+  const progressStages: readonly (PipelineStage | string)[] = progressDeal ? stages : LEAD_LIFECYCLE_STAGES;
   const activeProgressIndex = progressStages.findIndex((stage) => (typeof stage === 'string' ? stage : stage.name) === activeProgressStage);
-  const activeTargetStage = currentStage ?? (!progressDeal && selectedLead
-    ? leadPipelineStages[pipelineStageIndexForLead(selectedLead)]
-    : undefined);
+  const activeTargetStage = currentStage;
   const targetDays = activeTargetStage?.stagnationDaysThreshold ?? 0;
   const telemetryOverride = getTelemetryTimestampOverride(targetDays, clockNow);
   const stageEnteredAt = telemetryOverride?.timestamp ?? (enteredAt ? Date.parse(enteredAt) : Number.NaN);
@@ -322,10 +302,10 @@ export default function DealWorkspace({
     .map((activity) => {
       const transition = /^Lead stage changed:\s*(.*?)\s*→\s*(.*?)\s*$/.exec(activity.title);
       return transition
-        ? { from: progressStageForLeadName(transition[1]), to: progressStageForLeadName(transition[2]), date: activity.date }
+        ? { from: lifecycleStageForName(transition[1]), to: lifecycleStageForName(transition[2]), date: activity.date }
         : undefined;
     })
-    .filter((transition): transition is { from: LeadProgressStage; to: LeadProgressStage; date: string } => Boolean(transition))
+    .filter((transition): transition is { from: LeadLifecycleStage; to: LeadLifecycleStage; date: string } => Boolean(transition))
     .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
   const progressStartDate = progressDeal
     ? selectedHistory[selectedHistory.length - 1]?.enteredAt ?? progressDeal.createdAt ?? enteredAt
@@ -355,9 +335,13 @@ export default function DealWorkspace({
         active: isCurrent,
         done: activeProgressIndex >= 0 && index < activeProgressIndex,
         enteredAt: stageStart,
-        duration: Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : undefined,
+        duration: Number.isFinite(startMs) && Number.isFinite(endMs)
+          ? Math.max(0, endMs - startMs)
+          : typeof history?.durationSeconds === 'number' && Number.isFinite(history.durationSeconds)
+            ? Math.max(0, history.durationSeconds * 1000)
+            : undefined,
         cumulative,
-        targetDays: pipelineStage?.stagnationDaysThreshold ?? leadPipelineStages[index]?.stagnationDaysThreshold ?? 0,
+        targetDays: pipelineStage?.stagnationDaysThreshold ?? 0,
       };
     }
 
@@ -380,9 +364,11 @@ export default function DealWorkspace({
       active: isCurrent,
       done: activeProgressIndex >= 0 && index < activeProgressIndex,
       enteredAt: stageStart,
-      duration: Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : undefined,
+      duration: Number.isFinite(startMs) && Number.isFinite(endMs)
+        ? Math.max(0, endMs - startMs)
+        : undefined,
       cumulative,
-      targetDays: leadPipelineStages[index]?.stagnationDaysThreshold ?? 0,
+      targetDays: 0,
     };
   });
   const recordSlaStatus = (record: typeof records[number]) => {
@@ -395,11 +381,7 @@ export default function DealWorkspace({
     const recordStages = pipelineStages
       .filter((stage) => stage.pipelineId === (recordDeal?.pipelineId ?? recordLead?.pipelineId))
       .sort((left, right) => left.stageOrder - right.stageOrder);
-    const recordStage = recordDeal
-      ? recordStages.find((stage) => stage.name === recordDeal.stage)
-      : recordLead
-        ? recordStages[pipelineStageIndexForLead(recordLead)]
-        : undefined;
+    const recordStage = recordDeal ? recordStages.find((stage) => stage.name === recordDeal.stage) : undefined;
     if (!recordStage) return { overdue: false, targetDays: 0 };
     const activeHistory = recordDeal && stageHistory.find((entry) =>
       entry.dealId === recordDeal.id && entry.toStageId === recordStage.id && !entry.exitedAt);
@@ -468,14 +450,15 @@ export default function DealWorkspace({
         activity.venue ? `Venue: ${activity.venue}` : '',
         activity.outcome ? `Outcome: ${activity.outcome}` : '',
         activity.followUpAction ? `Follow-up: ${activity.followUpAction}` : '',
-        activity.userId ? `By ${activity.actorName ?? actor?.name ?? (activity.userId === user.id ? user.name : activity.userId)}` : '',
+        activity.userId ? `By ${activity.actorName ?? actor?.name ?? (activity.userId === user.id ? user.name : formatStaffIdentifier(activity.userId))}` : '',
       ].filter(Boolean).join(' · ');
       return {
         key: activity.id,
         title: activity.title,
         description: details,
         date: activity.date,
-        category: activity.type === 'meeting' ? 'appointment' as const
+        category: activity.title.startsWith('Lead temperature changed:') ? 'temperature' as const
+          : activity.type === 'meeting' ? 'appointment' as const
           : activity.type === 'quote' ? 'proposal' as const
             : activity.type === 'task' ? 'task' as const
               : (activity.title.startsWith('Lead stage changed:') || activity.title.startsWith('Deal stage changed:')) ? 'stage' as const
@@ -578,6 +561,10 @@ export default function DealWorkspace({
 
   const convertLead = () => {
     if (!selectedLead) return;
+    if (selectedLead.disposition === 'lost') {
+      setContactError('A Lost lead cannot be converted to a deal.');
+      return;
+    }
     const contactChannels = {
       contactPhone: resolvedContactPhone,
       whatsapp: resolvedWhatsapp,
@@ -593,6 +580,18 @@ export default function DealWorkspace({
     }
     const existing = allDeals.find((deal) => deal.leadId === selectedLead.id || deal.id === selectedLead.dealId);
     if (existing) {
+      const enteredAt = new Date().toISOString();
+      setLeads((current) => current.map((lead) => lead.id === selectedLead.id
+        ? {
+          ...lead,
+          dealId: existing.id,
+          funnelStage: 'Converted to deal',
+          disposition: 'converted',
+          stageChangedAt: lead.disposition === 'converted' && lead.funnelStage === 'Converted to deal'
+            ? lead.stageChangedAt
+            : enteredAt,
+        }
+        : lead));
       setSelectedKey(`deal:${existing.id}`);
       return;
     }
@@ -646,6 +645,9 @@ export default function DealWorkspace({
       ? {
         ...lead,
         dealId: deal.id,
+        funnelStage: 'Converted to deal',
+        disposition: 'converted',
+        stageChangedAt: enteredAt,
         contactProfileId: lead.contactProfileId ?? primaryContactProfile?.id,
         contactEmail: lead.contactEmail || primaryContactProfile?.email || '',
         ...contactChannels,
@@ -900,7 +902,7 @@ export default function DealWorkspace({
   }));
 
   const assignContactProfile = (profileId: string) => {
-    const profile = contactProfiles.find((contact) => contact.id === profileId);
+    const profile = detailContacts.find((contact) => contact.id === profileId);
     if (!profile) return;
     if (selectedDeal) {
       setDeals((current) => current.map((deal) => deal.id === selectedDeal.id
@@ -980,9 +982,11 @@ export default function DealWorkspace({
       setAddContactError('Enter a name, role, valid email address, and valid phone number.');
       return;
     }
+    const phoneNumber = normalizeContactNumber(phone);
     if (detailContacts.some((contact) => contact.id !== editingContactId
-      && contact.email.trim().toLowerCase() === email.toLowerCase())) {
-      setAddContactError('A contact with this email is already linked to this lead.');
+      && (contact.email.trim().toLowerCase() === email.toLowerCase()
+        || (phoneNumber && normalizeContactNumber(contact.phone) === phoneNumber)))) {
+      setAddContactError('A contact with this email address or phone number is already linked to this record.');
       return;
     }
     const contact: CompanyContactProfile = linkContactProfile({
@@ -1113,6 +1117,10 @@ export default function DealWorkspace({
           {records.map((record) => {
             const { kind, item, key } = record;
             const slaStatus = recordSlaStatus(record);
+            const itemStage = kind === 'deal'
+              ? (item as Deal).stage
+              : lifecycleStageForLead(item as Lead, Boolean(allDeals.some((deal) =>
+                deal.id === (item as Lead).dealId || deal.leadId === (item as Lead).id)));
             return (
             <button key={key} type="button" onClick={() => setSelectedKey(key)}
               className={`w-full border-b border-ink-700/60 p-3 text-left transition ${selected?.key === key ? 'border-l-2 border-l-brand-400 bg-brand-500/10' : 'hover:bg-ink-750/40'}`}>
@@ -1125,9 +1133,7 @@ export default function DealWorkspace({
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-1">
                 <span className="pill border border-ink-600 bg-ink-800 text-muted !px-2 !py-0.5">{item.productCode ?? 'No product'}</span>
-                <Badge variant={stageBadgeTone(kind === 'deal' ? (item as Deal).stage : (item as Lead).funnelStage)}>
-                  {kind === 'deal' ? (item as Deal).stage : (item as Lead).funnelStage}
-                </Badge>
+                <Badge variant={stageBadgeTone(itemStage)}>{itemStage}</Badge>
                 {slaStatus.overdue && <Badge variant="hot"><Clock3 size={11} /> SLA overdue</Badge>}
               </div>
               <div className="mt-2 text-xs text-brand-300">
@@ -1152,14 +1158,14 @@ export default function DealWorkspace({
             <div className="flex min-w-0 items-center gap-2">
               <Building2 size={17} className="shrink-0 text-brand-300" />
               <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-1.5"><h1 className="text-lg font-semibold text-white">{selectedItem.client}</h1><Badge variant={selectedDeal ? 'brand' : 'muted'}>{selectedDeal ? 'Deal' : 'Lead'}</Badge><Badge variant={stageBadgeTone(selectedDeal?.stage ?? selectedLead?.funnelStage ?? '')}>{selectedDeal?.stage ?? selectedLead?.funnelStage}</Badge>{selectedLead && <><LeadTemperatureControl
+                <div className="flex flex-wrap items-center gap-1.5"><h1 className="text-lg font-semibold text-white">{selectedItem.client}</h1><Badge variant={selectedDeal ? 'brand' : 'muted'}>{selectedDeal ? 'Deal' : 'Lead'}</Badge><Badge variant={stageBadgeTone(selectedDeal?.stage ?? (selectedLead ? lifecycleStageForLead(selectedLead, Boolean(progressDeal)) : ''))}>{selectedDeal?.stage ?? (selectedLead ? lifecycleStageForLead(selectedLead, Boolean(progressDeal)) : '')}</Badge>{selectedLead && <><LeadTemperatureControl
                     leadName={selectedLead.title ?? selectedLead.client}
                     temperature={selectedLead.temperature ?? 'WARM'}
                     disabled={activeRole !== 'admin' && activeRole !== 'sales'}
                     onChange={(temperature) => setLeads((current) => current.map((lead) =>
                       lead.id === selectedLead.id ? { ...lead, temperature } : lead,
                     ))}
-                  /><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1E2024] text-[10px] font-semibold text-[#8E95A2]" title={users.find((person) => person.id === selectedLead.ownerId)?.name}>{avatarCode(users.find((person) => person.id === selectedLead.ownerId)?.name ?? '')}</span></>}</div>
+                  /><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1E2024] text-[10px] font-semibold text-[#8E95A2]" title={users.find((person) => person.id === selectedLead.ownerId)?.name ?? formatStaffIdentifier(selectedLead.ownerId)}>{users.find((person) => person.id === selectedLead.ownerId) ? avatarCode(users.find((person) => person.id === selectedLead.ownerId)?.name ?? '') : formatStaffIdentifier(selectedLead.ownerId).slice(0, 2)}</span></>}</div>
                 <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
                   <span>{selectedDeal?.product ?? selectedProduct?.name ?? selectedLead?.productCode} · {selectedPipeline?.name ?? 'No pipeline'} · Ref {selectedItem.id}</span>
                   {progressDeal && selectedLead && <button type="button" className="text-brand-300 hover:text-white" onClick={() => setSelectedKey(`deal:${progressDeal.id}`)}>Open linked deal</button>}
@@ -1190,21 +1196,31 @@ export default function DealWorkspace({
                 <span className="sr-only">Live tracking</span>
                 {telemetryOverride && <span className="ml-auto max-w-24 truncate font-mono text-[9px] uppercase tracking-wider text-[#E09228]" title={`Test · ${telemetryOverride.label}`}>Test · {telemetryOverride.label}</span>}
               </div>
-              <div className="w-full min-w-0">
-                <ol className="telemetry-track flex w-full items-start justify-between">
+              <div className="w-full min-w-0 overflow-x-auto">
+                <ol className="telemetry-track flex min-w-[700px] items-start justify-between xl:min-w-0">
                       {stageTimeline.map((stage) => {
                         const pipelineStage = typeof progressStages[stage.index] === 'string'
                           ? undefined
                           : progressStages[stage.index] as PipelineStage;
-                        const stageEnteredAtMilliseconds = stage.enteredAt ? Date.parse(stage.enteredAt) : Number.NaN;
+                        const stageEnteredAtMilliseconds = stage.enteredAt
+                          ? Date.parse(stage.enteredAt)
+                          : stage.active && enteredAt
+                            ? Date.parse(enteredAt)
+                            : Number.NaN;
                         const stageElapsedMilliseconds = stage.active
                           ? Number.isFinite(stageEnteredAtMilliseconds)
                             ? Math.max(0, clockNow - stageEnteredAtMilliseconds)
-                            : 0
+                            : undefined
                           : stage.duration;
                         const durationMilliseconds = stage.active && telemetryOverride
                           ? Math.max(0, clockNow - telemetryOverride.timestamp)
                           : stageElapsedMilliseconds;
+                        const durationLabel = stage.active
+                          ? formatTelemetryDuration(durationMilliseconds)
+                          : stage.done
+                            ? formatTelemetryDuration(stage.duration)
+                            : '';
+                        const activeDurationLabel = stage.active ? formatStageDuration(stageElapsedMilliseconds) : undefined;
                         const health = stageSlaHealth(durationMilliseconds, stage.targetDays);
                         const stageOverdue = health === 'overdue';
                         const activeDateLabel = stage.active && Number.isFinite(stageEnteredAtMilliseconds)
@@ -1213,14 +1229,14 @@ export default function DealWorkspace({
                             .replace(' ', '-')
                             .toUpperCase()
                           : '';
-                        return <li key={stage.key} className="telemetry-step relative min-w-0 flex-1">
+                        return <li key={stage.key} className="telemetry-step relative flex min-w-0 flex-1 flex-col items-center">
                           <button type="button" disabled={!progressDeal || stage.active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
                             onClick={() => pipelineStage && progressDeal && requestStageChange(pipelineStage, progressDeal)}
                             title={stage.active && stageOverdue ? `SLA overdue: stage exceeded its ${stage.targetDays}-day target` : stage.active && health === 'warning' ? `SLA warning: stage is approaching its ${stage.targetDays}-day target` : stage.name}
-                            aria-label={`${stage.name}${stage.active ? `; stage duration ${formatStageDuration(stageElapsedMilliseconds ?? 0)}; total ${formatDays(stage.cumulative)}` : stage.done ? '; completed' : '; upcoming'}${stage.active && stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : stage.active && health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
+                            aria-label={`${stage.name}${durationLabel ? `; stage duration ${durationLabel}` : ''}${stage.active ? `${activeDurationLabel ? `; elapsed ${activeDurationLabel}` : ''}; total ${formatDays(stage.cumulative)}` : stage.done ? '; completed' : '; upcoming'}${stage.active && stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : stage.active && health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
                             aria-current={stage.active ? 'step' : undefined}
                             className={`telemetry-stage relative z-[1] flex w-full flex-col items-center border-0 bg-transparent px-0.5 py-0 text-center disabled:cursor-default ${stage.active ? 'is-active' : stage.done ? 'is-complete' : 'is-pending'}`}>
-                            <span className={`flex h-7 w-full items-center justify-center whitespace-nowrap text-xs font-semibold leading-4 tracking-normal ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#89919C]'}`}>
+                            <span className={`flex h-7 w-full items-center justify-center px-1 text-[10px] font-semibold leading-3 tracking-normal sm:text-xs ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#89919C]'}`}>
                               {stage.name}
                             </span>
                             <span className={`flex h-4 items-center justify-center whitespace-nowrap font-mono text-[10px] font-semibold leading-none tracking-[0.08em] ${stage.active ? 'text-[#A7F2C5]' : 'text-transparent'}`}>
@@ -1230,6 +1246,12 @@ export default function DealWorkspace({
                               {stage.done ? <Check size={11} aria-hidden="true" /> : <span className="telemetry-node-core" />}
                             </span>
                           </button>
+                          {durationLabel && <span
+                            className={`relative z-[1] mt-1 whitespace-nowrap text-center font-mono text-[10px] leading-4 sm:text-xs ${stage.active ? 'text-emerald-400/80' : 'text-[#A8B1BC]'}`}
+                            title={`${durationLabel} in ${stage.name}`}
+                          >
+                            {durationLabel}
+                          </span>}
                           {stage.index < stageTimeline.length - 1 && <span className={`telemetry-connector ${stage.done ? 'is-complete' : ''}`} aria-hidden="true" />}
                         </li>;
                       })}
@@ -1241,61 +1263,60 @@ export default function DealWorkspace({
             <>
             <div className="order-2 mt-3 grid gap-3 lg:grid-cols-2">
               <section className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
-                <h2 className="mb-4 text-sm font-semibold text-white">Client Details</h2>
-                <div className="grid grid-cols-2 gap-x-5 gap-y-4">
+                <h2 className="mb-3 text-sm font-semibold text-white">Client Details</h2>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                   <DetailValue label="Name" value={selectedClient?.name ?? selectedLead.client} />
-                  <DetailValue label="Identification" value={selectedClient?.tin || '—'} />
-                  <DetailValue label="Address" value={selectedClient?.address || '—'} />
-                  <DetailValue label="Country" value={selectedClient?.country || selectedLead.country || '—'} />
-                  <DetailValue label="Email" value={selectedClient?.email || '—'} />
-                  <DetailValue label="Phone" value={selectedClient?.phone || '—'} />
+                  <DetailValue label="Identification" value={selectedClient?.tin} />
+                  <DetailValue label="Address" value={selectedClient?.address} />
+                  <DetailValue label="Country" value={selectedClient?.country || selectedLead.country} />
+                  <DetailValue label="Email" value={selectedClient?.email} />
+                  <DetailValue label="Phone" value={selectedClient?.phone} />
                 </div>
-                <div className="mt-4 border-t border-ink-700 pt-4">
-                  <h3 className="mb-3 text-xs font-semibold text-white">Lead Details</h3>
-                  <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2">
-                    <DetailValue label="Lead Owner" value={users.find((person) => person.id === selectedLead.ownerId)?.name ?? selectedLead.ownerId} />
-                    <DetailValue label="Lead Stage" value={selectedLead.funnelStage} />
+                <div className="mt-3 border-t border-ink-700 pt-3">
+                  <h3 className="mb-2 text-xs font-semibold text-white">Lead Details</h3>
+                  <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+                    <DetailValue label="Lead Owner" value={users.find((person) => person.id === selectedLead.ownerId)?.name ?? formatStaffIdentifier(selectedLead.ownerId)} />
+                    <DetailValue label="Lead Stage" value={lifecycleStageForLead(selectedLead, Boolean(progressDeal))} />
+                    {selectedLead.lossReason && <DetailValue label="Loss reason" value={selectedLead.lossReason} />}
                     <DetailValue label="Expected Closing Date" value={formatDate(selectedLead.closeDate ?? selectedLead.renewalDate)} />
-                    <DetailValue label="Remarks / Notes" value={selectedLead.notes || '—'} />
+                    <DetailValue label="Remarks / Notes" value={selectedLead.notes} />
                   </div>
                 </div>
               </section>
               <section className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
-                <h2 className="mb-4 text-sm font-semibold text-white">Policy Details</h2>
-                <div className="grid grid-cols-2 gap-x-5 gap-y-4">
-                  <DetailValue label="Probability Percentage" value="—" />
+                <h2 className="mb-3 text-sm font-semibold text-white">Policy Details</h2>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                  <DetailValue label="Probability Percentage" value={selectedLeadProbability === undefined ? undefined : `${selectedLeadProbability}%`} />
                   <DetailValue label="Insurance Type" value={selectedProduct?.name ?? selectedLead.insuranceClass} />
-                  <DetailValue label="Current Insurer" value={selectedClient?.insurer || '—'} />
-                  <DetailValue label="Current Broker" value="—" />
-                  <DetailValue label="Sum Insured" value={formatAmount(selectedLead.sumInsured, selectedLead.currency ?? 'MVR')} />
-                  <DetailValue label="Premium Value" value={formatAmount(selectedLead.premium, selectedLead.currency ?? 'MVR')} />
-                  <DetailValue label="Currency" value={selectedLead.currency ?? 'MVR'} />
+                  <DetailValue label="Current Insurer" value={selectedClient?.insurer} />
+                  <DetailValue label="Sum Insured" value={Number.isFinite(selectedLead.sumInsured) && selectedLead.sumInsured > 0 ? formatAmount(selectedLead.sumInsured, selectedLead.currency ?? 'MVR') : undefined} />
+                  <DetailValue label="Premium Value" value={Number.isFinite(selectedLead.premium) && selectedLead.premium > 0 ? formatAmount(selectedLead.premium, selectedLead.currency ?? 'MVR') : undefined} />
                   <DetailValue label="Expiry / Renewal Date" value={formatDate(selectedLead.renewalDate)} />
                 </div>
               </section>
             </div>
             <section className="order-3 mt-3 min-w-0 rounded-xl border border-ink-600 bg-ink-900/30 p-3">
               <ContactDirectory contacts={detailContacts} primaryContactId={primaryContact?.id}
-                assignedContactId={selectedLead.contactProfileId} onAssign={assignContactProfile}
+                assignedContactId={primaryContact?.id ?? selectedLead.contactProfileId} onAssign={assignContactProfile}
                 onEditContact={openEditContact} compact />
             </section>
             </>
           ) : <>
           <div className="mt-3 grid gap-3 lg:grid-cols-2">
             <section className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
-              <h2 className="mb-4 text-sm font-semibold text-white">Client & Contact Details</h2>
-              <div className="grid grid-cols-2 gap-x-5 gap-y-4">
-                <DetailValue label="Client" value={selectedClient?.name ?? selectedDeal?.client ?? '—'} />
-                <DetailValue label="Identification" value={selectedClient?.tin || '—'} />
-                <DetailValue label="Address" value={selectedClient?.address || '—'} />
-                <DetailValue label="Country" value={selectedClient?.country || '—'} />
-                <DetailValue label="Client email" value={selectedClient?.email || '—'} />
-                <DetailValue label="Client phone" value={selectedClient?.phone || '—'} />
+              <h2 className="mb-3 text-sm font-semibold text-white">Client & Contact Details</h2>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+              <DetailValue label="Client" value={selectedClient?.name ?? selectedDeal?.client} />
+              <DetailValue label="Identification" value={selectedClient?.tin} />
+              <DetailValue label="Address" value={selectedClient?.address} />
+              <DetailValue label="Country" value={selectedClient?.country} />
+              <DetailValue label="Client email" value={selectedClient?.email} />
+              <DetailValue label="Client phone" value={selectedClient?.phone} />
               </div>
               <ContactDirectory contacts={detailContacts} primaryContactId={primaryContact?.id}
-                assignedContactId={selectedDeal?.contactProfileId} onAssign={assignContactProfile}
+                assignedContactId={primaryContact?.id ?? selectedDeal?.contactProfileId} onAssign={assignContactProfile}
                 onEditContact={openEditContact} />
-              <form className="mt-4 rounded-xl border border-ink-600 bg-ink-950/40 p-4" onSubmit={saveContactChannels}>
+              <form className="mt-3 rounded-xl border border-ink-600 bg-ink-950/40 p-3" onSubmit={saveContactChannels}>
                 <h3 className="mb-3 text-xs font-semibold text-white">Update communication channels</h3>
                 <div className="grid grid-cols-2 gap-2">
                   <input className="input col-span-2" aria-label="Contact name" placeholder="Contact name" value={contactName} onChange={(event) => setContactName(event.target.value)} />
@@ -1309,17 +1330,25 @@ export default function DealWorkspace({
             </section>
 
             <section className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
-              <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-white"><FileText size={15} className="text-brand-300" /> Policy Details</h2>
-              <div className="grid grid-cols-2 gap-x-5 gap-y-4">
-                <DetailValue label="Insurance Type" value={selectedProduct?.name ?? selectedDeal?.product ?? '—'} />
-                <DetailValue label="Current Insurer" value={selectedDeal?.insurer || selectedClient?.insurer || '—'} />
-                <DetailValue label="Sum Insured" value={formatAmount(selectedClient?.sumInsured ?? selectedDeal?.value ?? 0, selectedDeal?.currency ?? 'MVR')} />
-                <DetailValue label="Premium" value={formatAmount(selectedClient?.premium ?? selectedDeal?.value ?? 0, selectedDeal?.currency ?? 'MVR')} />
-                <DetailValue label="Probability" value={`${selectedDeal?.probability ?? '—'}%`} />
-                <DetailValue label="Expected Close" value={formatDate(selectedDeal?.closeDate ?? '')} />
-                <DetailValue label="Policy Expiry" value={formatDate(selectedDeal?.policyExpiry ?? selectedClient?.expiry ?? '')} />
-                <DetailValue label="Brokerage Estimate" value={formatAmount(selectedDeal?.brokerageCommission ?? 0, selectedDeal?.currency ?? 'MVR')} />
-                <DetailValue label="Owner / Representative" value={users.find((person) => person.id === selectedItem.ownerId)?.name ?? selectedItem.ownerId} />
+              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><FileText size={15} className="text-brand-300" /> Policy Details</h2>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                <DetailValue label="Insurance Type" value={selectedProduct?.name ?? selectedDeal?.product} />
+                <DetailValue label="Current Insurer" value={selectedDeal?.insurer?.toLowerCase() === 'not assigned' ? selectedClient?.insurer : selectedDeal?.insurer || selectedClient?.insurer} />
+                <DetailValue label="Sum Insured" value={selectedClient && selectedClient.sumInsured > 0
+                  ? formatAmount(selectedClient.sumInsured, 'MVR')
+                  : selectedDeal && Number.isFinite(selectedDeal.value) && selectedDeal.value > 0 ? formatAmount(selectedDeal.value, selectedDeal.currency)
+                    : linkedLead && Number.isFinite(linkedLead.sumInsured) && linkedLead.sumInsured > 0
+                      ? formatAmount(linkedLead.sumInsured, linkedLead.currency ?? 'MVR') : undefined} />
+                <DetailValue label="Premium" value={selectedClient && Number.isFinite(selectedClient.premium) && selectedClient.premium > 0
+                  ? formatAmount(selectedClient.premium, 'MVR')
+                  : linkedLead && Number.isFinite(linkedLead.premium) && linkedLead.premium > 0
+                    ? formatAmount(linkedLead.premium, linkedLead.currency ?? 'MVR') : undefined} />
+                <DetailValue label="Probability" value={selectedDeal && Number.isFinite(selectedDeal.probability) ? `${selectedDeal.probability}%` : undefined} />
+                <DetailValue label="Expected Close" value={formatDate(selectedDeal?.closeDate)} />
+                <DetailValue label="Policy Expiry" value={formatDate(selectedDeal?.policyExpiry ?? selectedClient?.expiry)} />
+                <DetailValue label="Brokerage Estimate" value={selectedDeal?.brokerageCommission !== undefined && Number.isFinite(selectedDeal.brokerageCommission)
+                  ? formatAmount(selectedDeal.brokerageCommission, selectedDeal.currency) : undefined} />
+                <DetailValue label="Owner / Representative" value={users.find((person) => person.id === selectedItem.ownerId)?.name ?? formatStaffIdentifier(selectedItem.ownerId)} />
               </div>
               {selectedProduct && <div className="mt-4 rounded-xl border border-ink-600 bg-ink-950/40 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1358,6 +1387,7 @@ export default function DealWorkspace({
               {([
                 ['all', 'All'],
                 ['stage', 'Stage changes'],
+                ['temperature', 'Temperature'],
                 ['activity', 'Activity'],
                 ['appointment', 'Appointments'],
                 ['proposal', 'Proposals'],
@@ -1374,14 +1404,13 @@ export default function DealWorkspace({
             <div className="-mx-1 max-h-60 max-w-full overflow-y-auto overscroll-contain scroll-smooth timeline-scrollbar px-1 pb-2"
               role="region" aria-label="Activity timeline" tabIndex={0}>
               <div className="flex min-w-full flex-col gap-1">
-                {filteredTimelineEntries.map((entry) => <TimelineItem
+                {filteredTimelineEntries.map((entry) => <ActivityTimelineItem
                   key={entry.key}
                   title={entry.title}
                   description={entry.description}
                   date={entry.date}
                   durationMinutes={entry.durationMinutes}
                   category={entry.category}
-                  now={clockNow}
                 />)}
                 {!filteredTimelineEntries.length && <p className="min-w-full rounded-xl border border-ink-700 bg-ink-900/40 p-5 text-center text-sm text-muted">{timelineEntries.length ? 'No entries match this filter.' : 'No activity has been recorded yet.'}</p>}
               </div>
@@ -1390,9 +1419,11 @@ export default function DealWorkspace({
           {selectedLead ? <section className="order-4 mt-3 rounded-xl border border-ink-600 bg-ink-900/30 p-3">
             <h2 className="text-sm font-semibold text-white">Lead progression</h2>
             {progressDeal ? <p className="mt-3 text-xs text-win">This lead is linked to deal {progressDeal.id} and follows its placement stages.</p> : <>
-              <p className="mt-3 text-xs text-muted">Convert this lead to begin the placement stage workflow.</p>
+              {selectedLead.disposition === 'lost'
+                ? <p className="mt-3 text-xs text-hot">This lead is Lost and cannot be converted to a deal.</p>
+                : <p className="mt-3 text-xs text-muted">Convert this lead to begin the placement stage workflow.</p>}
               {!hasCompleteCommunicationChannels(selectedLead) && <p className="mt-2 text-xs text-warm">Complete valid phone, WhatsApp, and Telegram details first.</p>}
-              <button type="button" className="btn-primary mt-3 !py-1.5" onClick={convertLead}><ArrowRight size={13} /> Convert to deal</button>
+              {selectedLead.disposition !== 'lost' && <button type="button" className="btn-primary mt-3 !py-1.5" onClick={convertLead}><ArrowRight size={13} /> Convert to deal</button>}
             </>}
           </section> : <section className="mt-4 grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
             <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
@@ -1523,8 +1554,10 @@ export default function DealWorkspace({
   );
 }
 
-function DetailValue({ label, value }: { label: string; value: string }) {
-  return <div className="min-w-0"><div className="text-xs text-muted">{label}</div><div className="mt-1 break-words text-sm text-white">{value}</div></div>;
+function DetailValue({ label, value }: { label: string; value?: string }) {
+  const displayValue = value?.trim();
+  if (!displayValue || displayValue === '—' || displayValue === '-' || displayValue.toLowerCase() === 'not assigned') return null;
+  return <div className="min-w-0"><div className="text-xs text-muted">{label}</div><div className="mt-1 break-words text-sm text-white">{displayValue}</div></div>;
 }
 
 function ContactDirectory({
@@ -1555,7 +1588,7 @@ function ContactDirectory({
     </div>
     <div className="max-h-40 overflow-x-auto overflow-y-auto pr-1">
       {contacts.length > 0 ? <div className="min-w-[740px]">
-        <dl className={`grid grid-cols-[minmax(130px,1.2fr)_minmax(150px,1.5fr)_repeat(3,minmax(115px,1fr))_32px] gap-3 px-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#B9C1CC] ${compact ? 'py-1' : 'pb-1.5'}`}>
+        <dl className={`grid grid-cols-[minmax(130px,1.2fr)_minmax(150px,1.5fr)_repeat(3,minmax(115px,1fr))_32px] gap-3 px-2 text-[11px] font-medium normal-case tracking-normal text-muted ${compact ? 'py-1' : 'pb-1.5'}`}>
           <dt>Name</dt><dt>Email</dt><dt>Phone</dt><dt>WhatsApp</dt><dt>Telegram</dt><dt><span className="sr-only">Edit</span></dt>
         </dl>
         <div className="divide-y divide-ink-700/70">
@@ -1567,10 +1600,10 @@ function ContactDirectory({
                 <span className="min-w-0 truncate text-[10px] text-muted">{contact.role}</span>
                 {primary && <span className="shrink-0 text-[9px] uppercase tracking-wide text-brand-300">Primary</span>}
               </div>
-              <span className="truncate text-[#DCE5E0]" title={contact.email || '—'}>{contact.email || '—'}</span>
-              <span className="truncate text-[#DCE5E0]" title={contact.phone || '—'}>{contact.phone || '—'}</span>
-              <span className="truncate text-[#DCE5E0]" title={contact.whatsapp || '—'}>{contact.whatsapp || '—'}</span>
-              <span className="truncate text-[#DCE5E0]" title={contact.telegram || '—'}>{contact.telegram || '—'}</span>
+              <span className="truncate text-white" title={contact.email || undefined}>{contact.email}</span>
+              <span className="truncate text-white" title={contact.phone || undefined}>{contact.phone}</span>
+              <span className="truncate text-white" title={contact.whatsapp || undefined}>{contact.whatsapp}</span>
+              <span className="truncate text-white" title={contact.telegram || undefined}>{contact.telegram}</span>
               <button type="button" className="rounded-md p-1 text-muted transition hover:bg-ink-700 hover:text-white"
                 aria-label={`Edit ${contact.name}`} title={`Edit ${contact.name}`}
                 onClick={() => onEditContact(contact)}><Pencil size={13} /></button>
@@ -1591,37 +1624,6 @@ function localDateTimeInput() {
   const date = new Date();
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
   return date.toISOString().slice(0, 16);
-}
-
-function TimelineItem({ title, description, date, durationMinutes, category, now }: {
-  title: string;
-  description: string;
-  date?: string;
-  durationMinutes?: number;
-  category: TimelineEntry['category'];
-  now: number;
-}) {
-  const timestamp = date ? new Date(date) : null;
-  const formattedTimestamp = timestamp && Number.isFinite(timestamp.getTime())
-    ? `${formatDate(timestamp)} ${timestamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-    : '';
-  const relativeTimestamp = date && timestamp && Number.isFinite(timestamp.getTime())
-    ? formatRelativeTime(date, now)
-    : '';
-  const categoryLabel = category === 'appointment' ? 'Appointment'
-    : category === 'proposal' ? 'Proposal'
-      : category === 'stage' ? 'Stage change'
-        : category === 'note' ? 'Note' : category === 'task' ? 'Task' : 'Activity';
-  const details = [description, durationMinutes !== undefined ? `Duration: ${durationMinutes} minutes` : ''].filter(Boolean).join(' · ');
-  return <article className="w-full rounded-lg border border-ink-700 bg-ink-900/50 p-2 lg:grid lg:min-h-10 lg:grid-cols-[auto_minmax(12rem,1fr)_minmax(18rem,2fr)_max-content] lg:items-center lg:gap-3 lg:rounded-none lg:border-x-0 lg:border-t-0 lg:bg-transparent lg:px-2 lg:py-1.5">
-    <Badge variant={category === 'task' ? 'warm' : 'muted'}>{categoryLabel}</Badge>
-    <h3 className="mt-2 break-words text-sm font-normal text-white lg:mt-0 lg:text-xs" title={title}>{title}</h3>
-    <p className="mt-2 break-words text-xs font-normal leading-relaxed text-white lg:mt-0" title={details}>{details || '—'}</p>
-    <div className="mt-2 flex min-w-0 items-center gap-2 text-[10px] font-normal text-white lg:mt-0 lg:justify-end">
-      {formattedTimestamp && <time className="whitespace-nowrap">{formattedTimestamp}</time>}
-      {relativeTimestamp && <span className="whitespace-nowrap text-muted">{relativeTimestamp}</span>}
-    </div>
-  </article>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

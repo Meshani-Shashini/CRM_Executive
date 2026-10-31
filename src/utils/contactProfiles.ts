@@ -1,9 +1,28 @@
 import type { Client, CompanyContactProfile, Deal, Lead } from '../types';
 
+export function normalizeContactNumber(phone: string | undefined) {
+  const digits = phone?.replace(/\D/g, '') ?? '';
+  return digits.length >= 7 ? digits : '';
+}
+
+export function findMatchingContactProfile(
+  contacts: CompanyContactProfile[] | undefined,
+  candidate: Pick<CompanyContactProfile, 'id' | 'email' | 'phone'>,
+) {
+  const phone = normalizeContactNumber(candidate.phone);
+  return contacts?.find((contact) =>
+    contact.id === candidate.id
+    || Boolean(candidate.email.trim() && contact.email.trim().toLowerCase() === candidate.email.trim().toLowerCase())
+    || Boolean(phone && normalizeContactNumber(contact.phone) === phone));
+}
+
 function sameContact(left: CompanyContactProfile, right: CompanyContactProfile) {
+  const leftPhone = normalizeContactNumber(left.phone);
+  const rightPhone = normalizeContactNumber(right.phone);
   return left.id === right.id
     || Boolean(left.email.trim() && right.email.trim()
-      && left.email.trim().toLowerCase() === right.email.trim().toLowerCase());
+      && left.email.trim().toLowerCase() === right.email.trim().toLowerCase())
+    || Boolean(leftPhone && rightPhone && leftPhone === rightPhone);
 }
 
 export function mergeContactProfiles(...groups: (CompanyContactProfile[] | undefined)[]) {
@@ -16,6 +35,12 @@ export function mergeContactProfiles(...groups: (CompanyContactProfile[] | undef
       ...existing,
       ...contact,
       id: existing.id,
+      name: contact.name.trim() ? contact.name : existing.name,
+      role: contact.role.trim() ? contact.role : existing.role,
+      email: contact.email.trim() ? contact.email : existing.email,
+      phone: contact.phone.trim() ? contact.phone : existing.phone,
+      whatsapp: contact.whatsapp?.trim() ? contact.whatsapp : existing.whatsapp,
+      telegram: contact.telegram?.trim() ? contact.telegram : existing.telegram,
       linkedLeadIds: [...new Set([...(existing.linkedLeadIds ?? []), ...(contact.linkedLeadIds ?? [])])],
       linkedDealIds: [...new Set([...(existing.linkedDealIds ?? []), ...(contact.linkedDealIds ?? [])])],
     };

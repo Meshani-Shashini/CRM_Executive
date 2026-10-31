@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import type { Activity, TaxRate, Role, User, ProductCode, Lead, Deal } from '../types';
 import { PRODUCT_CODES } from '../data/catalogs';
+import { formatStaffIdentifier } from '../utils/staff';
 
 type Tab = 'general' | 'tax' | 'products' | 'email' | 'users' | 'audit';
 
@@ -253,7 +254,7 @@ export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) 
               <div key={u.id} className="flex items-center justify-between bg-ink-900/50 rounded-lg p-3 border border-ink-600">
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-xs font-bold text-white">
-                    {u.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
+                    {u.name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase()}
                   </div>
                   <div>
                     <div className="text-sm text-white">{u.name}</div>
@@ -288,7 +289,7 @@ export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) 
                   <h4 className="text-sm font-normal text-white lg:truncate" title={entry.title}>{entry.title}</h4>
                   <p className="mt-2 text-xs font-normal text-white lg:mt-0 lg:truncate" title={entry.description}>{entry.description || '—'}</p>
                   <div className="mt-2 flex flex-wrap gap-x-3 text-[10px] font-normal text-white lg:mt-0 lg:justify-end">
-                    <span className="whitespace-nowrap">{entry.actorName ?? users.find((person) => person.id === entry.userId)?.name ?? entry.userId}</span>
+                    <span className="whitespace-nowrap">{entry.actorName ?? users.find((person) => person.id === entry.userId)?.name ?? formatStaffIdentifier(entry.userId)}</span>
                     <time className="whitespace-nowrap" dateTime={entry.createdAt ?? entry.date}>{formatAuditTimestamp(entry.createdAt ?? entry.date)}</time>
                   </div>
                 </article>

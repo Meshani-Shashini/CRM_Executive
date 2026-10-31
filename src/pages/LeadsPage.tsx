@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
+import StageSlaBadges from '../components/StageSlaBadges';
 import { useApp } from '../store/AppContext';
 import { AlertTriangle, CalendarDays, CheckCircle2, CircleDot, Clock3, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, TrendingUp, UserRound, X } from 'lucide-react';
 import type { Client, CompanyContactProfile, Lead, LeadTemperature } from '../types';
@@ -11,22 +12,15 @@ import { formatDate, normalizeDateInput } from '../utils/date';
 import DateInput from '../components/ui/DateInput';
 import ProductSelect from '../components/ui/ProductSelect';
 import { calculateBrokerageCommission } from '../utils/insurance';
-import { hasCompleteCommunicationChannels } from '../utils/communication';
-import { hasCompleteClientProfile, INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
-import { isStageSlaOverdue } from '../utils/stageSla';
-import { linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
+import { INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
+import { getStageSlaElapsedDays, isStageSlaOverdue } from '../utils/stageSla';
+import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
 import DealWorkspace from './DealWorkspace';
-
-const LEAD_FUNNEL_STAGES = [
-  'Lead Identified',
-  'Contact Made',
-  'Key Person Identified',
-  'Intro Email Sent',
-  'Meetings Ongoing',
-  'Qualified to Deals',
-] as const;
-
-type LeadBoardStage = (typeof LEAD_FUNNEL_STAGES)[number];
+import {
+  isTerminalLeadStage, LEAD_ACTIVE_STAGES, LEAD_LIFECYCLE_STAGES, lifecycleStageForLead,
+  type LeadLifecycleStage,
+} from '../utils/leadLifecycle';
+import { formatStaffIdentifier } from '../utils/staff';
 
 const tableBadgeClass = 'inline-flex h-6 items-center gap-1 whitespace-nowrap rounded-full border px-1.5 text-[9px] font-bold leading-none tracking-wide uppercase';
 
@@ -52,26 +46,23 @@ function contactDraft(profile?: CompanyContactProfile): ContactDraft {
   };
 }
 
-function boardStageForLead(lead: Lead, linkedDealIds: ReadonlySet<string>): LeadBoardStage {
-  if (lead.dealId && linkedDealIds.has(lead.dealId)) return 'Qualified to Deals';
-  const stage = lead.funnelStage.toLowerCase();
-  if (stage.includes('qualified to deal') || stage.includes('qualified opportunity') || stage.includes('bound') || stage.includes('won')) return 'Qualified to Deals';
-  if (stage.includes('meeting') || stage.includes('negotiat') || stage.includes('underwriter')) return 'Meetings Ongoing';
-  if (stage.includes('intro') || stage.includes('email') || stage.includes('quoted')) return 'Intro Email Sent';
-  if (stage.includes('key person') || stage.includes('comparative') || stage.includes('presentation') || stage.includes('quote comparison') || stage.includes('lob scoping')) return 'Key Person Identified';
-  if (stage.includes('contact') || stage.includes('market') || stage.includes('tender') || stage.includes('slip') || stage.includes('kyc')) return 'Contact Made';
-  if (stage.includes('l3:')) return 'Qualified to Deals';
-  if (stage.includes('l2:')) return 'Key Person Identified';
-  if (stage.includes('l1:')) return 'Contact Made';
-  return 'Lead Identified';
+function boardStageForLead(
+  lead: Lead,
+  linkedDealIds: ReadonlySet<string>,
+  linkedLeadIds: ReadonlySet<string>,
+): LeadLifecycleStage {
+  return lifecycleStageForLead(lead, Boolean(
+    (lead.dealId && linkedDealIds.has(lead.dealId)) || linkedLeadIds.has(lead.id),
+  ));
 }
 
-function boardStageIcon(stage: LeadBoardStage) {
+function boardStageIcon(stage: LeadLifecycleStage) {
   if (stage === 'Lead Identified') return CircleDot;
   if (stage === 'Contact Made') return UserRound;
   if (stage === 'Key Person Identified') return ShieldCheck;
   if (stage === 'Intro Email Sent') return Mail;
   if (stage === 'Meetings Ongoing') return CalendarDays;
+  if (stage === 'Lost') return AlertTriangle;
   return CheckCircle2;
 }
 
@@ -89,7 +80,7 @@ export default function LeadsPage() {
   const [newLeadOpen, setNewLeadOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [inspectedLeadId, setInspectedLeadId] = useState('');
-  const [pendingLeadStageChange, setPendingLeadStageChange] = useState<{ from: LeadBoardStage; to: LeadBoardStage } | null>(null);
+  const [pendingLeadStageChange, setPendingLeadStageChange] = useState<{ from: LeadLifecycleStage; to: LeadLifecycleStage } | null>(null);
   const [stageChangeRemarks, setStageChangeRemarks] = useState('');
   const [newOrganizationOpen, setNewOrganizationOpen] = useState(false);
   const [organizationQuery, setOrganizationQuery] = useState('');
@@ -107,7 +98,8 @@ export default function LeadsPage() {
   const [productCode, setProductCode] = useState('');
   const [closeDate, setCloseDate] = useState('');
   const [ownerId, setOwnerId] = useState('');
-  const [leadBoardStage, setLeadBoardStage] = useState<LeadBoardStage>('Lead Identified');
+  const [leadBoardStage, setLeadBoardStage] = useState<LeadLifecycleStage>('Lead Identified');
+  const [leadLossReason, setLeadLossReason] = useState('');
   const [leadCurrency, setLeadCurrency] = useState<Currency | ''>('');
   const [leadValue, setLeadValue] = useState('');
   const [exchangeRate, setExchangeRate] = useState('');
@@ -125,6 +117,7 @@ export default function LeadsPage() {
   const [clockNow, setClockNow] = useState(Date.now());
   const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
   const linkedDealIds = useMemo(() => new Set(deals.map((deal) => deal.id)), [deals]);
+  const linkedLeadIds = useMemo(() => new Set(deals.flatMap((deal) => deal.leadId ? [deal.leadId] : [])), [deals]);
   const selectedPipeline = activePipelines.find((pipeline) => pipeline.id === selectedPipelineId);
   const selectedOrganization = clients.find(
     (client) => client.name.trim().toLowerCase() === organizationQuery.trim().toLowerCase(),
@@ -151,7 +144,9 @@ export default function LeadsPage() {
       ? '' : 'Enter a positive exchange rate for USD.',
   };
   const staffOptions = useMemo(() => {
-    const staff = users.filter((candidate) => candidate.role === 'admin' || candidate.role === 'sales');
+    const staff = [...new Map(users
+      .filter((candidate) => candidate.role === 'admin' || candidate.role === 'sales')
+      .map((candidate) => [candidate.id, candidate])).values()];
     if ((user.role === 'admin' || user.role === 'sales') && !staff.some((candidate) => candidate.id === user.id)) {
       return [...staff, user];
     }
@@ -192,50 +187,51 @@ export default function LeadsPage() {
   const matchesLeadFilters = (lead: Lead) =>
     (user.role === 'admin' || (user.role === 'sales' && lead.ownerId === user.id)) &&
     (!temperatureFilter || lead.temperature === temperatureFilter) &&
-    (!stageFilter || lead.funnelStage === stageFilter || boardStageForLead(lead, linkedDealIds) === stageFilter) &&
+    (!stageFilter || lead.funnelStage === stageFilter || boardStageForLead(lead, linkedDealIds, linkedLeadIds) === stageFilter) &&
     (!ownerFilter || lead.ownerId === ownerFilter) &&
     (!leadIdFilter || lead.id === leadIdFilter) &&
     (!insuranceClassFilter || lead.insuranceClass === insuranceClassFilter) &&
     (!statusFilter || (statusFilter === 'active' ? lead.status !== 'COMPLETED' : lead.status === statusFilter));
   const visibleLeads = leads.filter(matchesLeadFilters);
   const searchedLeads = visibleLeads.filter((lead) => {
-    const owner = staffOptions.find((candidate) => candidate.id === lead.ownerId)?.name ?? lead.ownerId;
+    const owner = staffOptions.find((candidate) => candidate.id === lead.ownerId)?.name ?? formatStaffIdentifier(lead.ownerId);
     const product = products.find((candidate) => candidate.code === lead.productCode);
     const search = `${lead.title ?? ''} ${lead.client} ${lead.contact} ${owner} ${lead.insuranceClass} ${lead.productCode} ${product?.name ?? ''}`.toLowerCase();
     return search.includes(searchQuery.trim().toLowerCase());
   });
-  const leadsByBoardStage = LEAD_FUNNEL_STAGES.map((stage) => ({
+  const leadsByBoardStage = LEAD_LIFECYCLE_STAGES.map((stage) => ({
     stage,
-    leads: searchedLeads.filter((lead) => boardStageForLead(lead, linkedDealIds) === stage),
+    leads: searchedLeads.filter((lead) => boardStageForLead(lead, linkedDealIds, linkedLeadIds) === stage),
   }));
   const stageSlaForLead = (lead: Lead) => {
     const linkedDeal = deals.find((deal) => deal.id === lead.dealId || deal.leadId === lead.id);
-    const configuredStages = pipelineStages
-      .filter((stage) => stage.pipelineId === (linkedDeal?.pipelineId ?? lead.pipelineId))
-      .sort((left, right) => left.stageOrder - right.stageOrder);
-    const leadStage = boardStageForLead(lead, linkedDealIds);
-    const leadStageIndex = LEAD_FUNNEL_STAGES.indexOf(leadStage);
     const stage = linkedDeal
-      ? configuredStages.find((item) => item.name === linkedDeal.stage)
-      : configuredStages[leadStageIndex];
-    if (!stage) return { overdue: false, targetDays: 0 };
-    const activeHistory = linkedDeal && stageHistory.find((entry) =>
-      entry.dealId === linkedDeal.id && entry.toStageId === stage.id && !entry.exitedAt);
+      ? pipelineStages.find((item) => item.pipelineId === linkedDeal.pipelineId && item.name === linkedDeal.stage)
+      : undefined;
+    const activeHistory = linkedDeal && stage
+      ? stageHistory.find((entry) => entry.dealId === linkedDeal.id && entry.toStageId === stage.id && !entry.exitedAt)
+      : undefined;
     const enteredAt = activeHistory?.enteredAt
       ?? linkedDeal?.stageChangedAt
+      ?? linkedDeal?.createdAt
       ?? lead.stageChangedAt
       ?? lead.routedAt
-      ?? linkedDeal?.createdAt
       ?? lead.createdAt;
+    const targetDays = stage?.stagnationDaysThreshold ?? 0;
     return {
-      overdue: isStageSlaOverdue(enteredAt, stage.stagnationDaysThreshold, clockNow),
-      targetDays: stage.stagnationDaysThreshold,
+      overdue: isStageSlaOverdue(enteredAt, targetDays, clockNow),
+      targetDays,
+      elapsedDays: getStageSlaElapsedDays(enteredAt, clockNow) ?? 0,
     };
   };
-  const moveLeadToStage = (lead: Lead, stage: LeadBoardStage) => {
-    if (stage === boardStageForLead(lead, linkedDealIds)) return;
-    if (lead.dealId && linkedDealIds.has(lead.dealId)) return;
-    setPendingLeadStageChange({ from: boardStageForLead(lead, linkedDealIds), to: stage });
+  const moveLeadToStage = (lead: Lead, stage: LeadLifecycleStage) => {
+    const currentStage = boardStageForLead(lead, linkedDealIds, linkedLeadIds);
+    if (stage === currentStage || isTerminalLeadStage(currentStage)) return;
+    if (stage === 'Converted to deal') {
+      setInspectedLeadId(lead.id);
+      return;
+    }
+    setPendingLeadStageChange({ from: boardStageForLead(lead, linkedDealIds, linkedLeadIds), to: stage });
     setStageChangeRemarks('');
     openEditLead(lead);
     setLeadBoardStage(stage);
@@ -292,6 +288,7 @@ export default function LeadsPage() {
     setCloseDate('');
     setOwnerId(user.id);
     setLeadBoardStage('Lead Identified');
+    setLeadLossReason('');
     setPersonName(user.name);
     setLeadCurrency('');
     setLeadValue('');
@@ -339,7 +336,8 @@ export default function LeadsPage() {
     setProductCode(lead.productCode);
     setCloseDate(lead.closeDate ?? lead.renewalDate);
     setOwnerId(lead.ownerId);
-    setLeadBoardStage(boardStageForLead(lead, linkedDealIds));
+    setLeadBoardStage(boardStageForLead(lead, linkedDealIds, linkedLeadIds));
+    setLeadLossReason(lead.lossReason ?? '');
     setSelectedPipelineId(lead.pipelineId ?? boardPipeline?.id ?? '');
     setLeadCurrency(lead.currency ?? 'MVR');
     setLeadValue(String(lead.value ?? lead.premium));
@@ -401,9 +399,11 @@ export default function LeadsPage() {
     const phone = contactPhone.trim();
     const whatsapp = String(data.get('whatsapp') ?? '').trim();
     const telegram = String(data.get('telegram') ?? '').trim();
-    const matchingProfile = selectedOrganization?.contacts?.find((profile) =>
-      profile.email.trim().toLowerCase() === email.toLowerCase(),
-    );
+    const matchingProfile = findMatchingContactProfile(selectedOrganization?.contacts, {
+      id: contactProfileId,
+      email,
+      phone,
+    });
     const profileId = contactProfileId || matchingProfile?.id || `contact-${crypto.randomUUID()}`;
     const additionalContactErrors = additionalContactDrafts.some((contact) => {
       const contactName = contact.name.trim();
@@ -417,6 +417,10 @@ export default function LeadsPage() {
       .filter(Boolean)
       .map((value) => value.toLowerCase());
     const duplicateContactEmails = new Set(normalizedEmails).size !== normalizedEmails.length;
+    const normalizedPhones = [phone, ...additionalContactDrafts.map((contact) => contact.phone.trim())]
+      .map(normalizeContactNumber)
+      .filter(Boolean);
+    const duplicateContactPhones = new Set(normalizedPhones).size !== normalizedPhones.length;
     const person = users.find((candidate) =>
       candidate.role === 'sales' && candidate.name.trim().toLowerCase() === selectedPersonName.toLowerCase(),
     );
@@ -441,20 +445,21 @@ export default function LeadsPage() {
       setFormError('Enter a valid contact phone number.');
       return;
     }
-    if (additionalContactErrors || duplicateContactEmails) {
-      setFormError(duplicateContactEmails
-        ? 'Each lead contact must have a unique email address.'
+    if (additionalContactErrors || duplicateContactEmails || duplicateContactPhones) {
+      setFormError(duplicateContactEmails || duplicateContactPhones
+        ? 'Each lead contact must have a unique email address and phone number.'
         : 'Complete each additional contact name, role, valid email, and valid phone number.');
       return;
     }
-    if (leadBoardStage === 'Qualified to Deals' &&
-      (!hasCompleteCommunicationChannels({ contactPhone: phone, whatsapp, telegram }) || !hasCompleteClientProfile(selectedOrganization))) {
-      setFormError('Complete the company profile and enter valid phone, WhatsApp, and Telegram details before qualifying this lead for a deal.');
+    const hasLinkedDeal = Boolean(editingLead
+      && deals.some((deal) => deal.id === editingLead.dealId || deal.leadId === editingLead.id));
+    if (leadBoardStage === 'Converted to deal' && !hasLinkedDeal) {
+      setFormError('Use the Convert to Deal action in the lead workspace to create and link a deal.');
       return;
     }
-    if (pendingLeadStageChange && pendingLeadStageChange.to === 'Qualified to Deals'
-      && (!hasCompleteCommunicationChannels({ contactPhone: phone, whatsapp, telegram }) || !hasCompleteClientProfile(selectedOrganization))) {
-      setFormError('Complete client details and valid phone, WhatsApp, and Telegram information before saving this stage change.');
+    if (editingLead && isTerminalLeadStage(boardStageForLead(editingLead, linkedDealIds, linkedLeadIds))
+      && leadBoardStage !== boardStageForLead(editingLead, linkedDealIds, linkedLeadIds)) {
+      setFormError('Converted and Lost are terminal lead stages and cannot be changed.');
       return;
     }
     if (!leadCurrency || !leadValue.trim() || !Number.isFinite(amount) || amount < 0 ||
@@ -465,10 +470,13 @@ export default function LeadsPage() {
 
     const valueMvr = toMvr(amount, leadCurrency, rate);
     const now = new Date().toISOString();
-    const stageChanged = Boolean(editingLead && leadBoardStage !== boardStageForLead(editingLead, linkedDealIds));
+    const stageChanged = Boolean(editingLead && leadBoardStage !== boardStageForLead(editingLead, linkedDealIds, linkedLeadIds));
     const leadId = editingLead?.id ?? `L-${crypto.randomUUID()}`;
-    const primaryExistingProfile = selectedOrganization.contacts?.find((profile) =>
-      profile.id === profileId || profile.email.trim().toLowerCase() === email.toLowerCase());
+    const primaryExistingProfile = findMatchingContactProfile(selectedOrganization.contacts, {
+      id: profileId,
+      email,
+      phone,
+    });
     const primaryProfile: CompanyContactProfile = {
       id: primaryExistingProfile?.id ?? profileId,
       name: primaryContact,
@@ -482,8 +490,11 @@ export default function LeadsPage() {
     };
     const additionalProfiles = additionalContactDrafts.map((draft): CompanyContactProfile => {
       const contactEmail = draft.email.trim();
-      const existing = selectedOrganization.contacts?.find((profile) =>
-        profile.id === draft.id || profile.email.trim().toLowerCase() === contactEmail.toLowerCase());
+      const existing = findMatchingContactProfile(selectedOrganization.contacts, {
+        id: draft.id,
+        email: contactEmail,
+        phone: draft.phone.trim(),
+      });
       return {
         id: existing?.id ?? draft.id,
         name: draft.name.trim(),
@@ -533,12 +544,14 @@ export default function LeadsPage() {
       temperature: editingLead?.temperature ?? 'WARM',
       status: editingLead?.status ?? 'TO-DO',
       funnelStage: leadBoardStage,
+      disposition: leadBoardStage === 'Lost' ? 'lost' : leadBoardStage === 'Converted to deal' ? 'converted' : undefined,
+      lossReason: leadBoardStage === 'Lost' ? leadLossReason.trim() || undefined : undefined,
       renewalDate: expectedCloseDate,
       sumInsured: valueMvr,
       premium: valueMvr,
       ownerId: owner.id,
       lastActivity: editingLead?.lastActivity ?? 'Just now',
-      ...(leadBoardStage === 'Qualified to Deals' ? { leadFunnelStage: 'L3: Qualified Opportunity' as const } : { leadFunnelStage: undefined }),
+      ...(leadBoardStage === 'Meetings Ongoing' ? { leadFunnelStage: 'L3: Qualified Opportunity' as const } : { leadFunnelStage: undefined }),
       ...(editingLead?.dealId ? { dealId: editingLead.dealId } : {}),
       routedAt: stageChanged ? now : editingLead?.routedAt ?? now,
     };
@@ -623,7 +636,7 @@ export default function LeadsPage() {
           <button type="button" className="text-xs text-muted hover:text-white" onClick={() => setView('forecast')}><TrendingUp size={13} className="mr-1 inline" />Forecast</button>
         </div>
         <div className="overflow-x-auto pb-3">
-        <div className="grid min-w-[1560px] grid-cols-6 gap-3">
+        <div className="grid min-w-[1820px] grid-cols-7 gap-3">
           {leadsByBoardStage.map(({ stage, leads: stageLeads }) => {
             const StageIcon = boardStageIcon(stage);
             const aggregateMvr = stageLeads.reduce((total, lead) => total + (lead.valueMvr ?? toMvr(lead.value ?? lead.premium, lead.currency ?? 'MVR', lead.exchangeRate)), 0);
@@ -646,12 +659,14 @@ export default function LeadsPage() {
               </div>}
               <div className="max-h-[calc(100vh-300px)] min-h-48 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
                 {stageLeads.map((lead) => {
-                  const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId;
+                  const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? formatStaffIdentifier(lead.ownerId);
                   const product = PRODUCT_CODES.find((item) => item.code === lead.productCode);
                   const CompanyIcon = lead.status === 'COMPLETED' ? CheckCircle2 : CircleDot;
-                  const isLinked = Boolean(lead.dealId && linkedDealIds.has(lead.dealId));
+                  const isLinked = Boolean((lead.dealId && linkedDealIds.has(lead.dealId)) || linkedLeadIds.has(lead.id));
+                  const currentStage = boardStageForLead(lead, linkedDealIds, linkedLeadIds);
+                  const isTerminal = isTerminalLeadStage(currentStage);
                   const stageSla = stageSlaForLead(lead);
-                  return <article key={lead.id} draggable={!isLinked}
+                  return <article key={lead.id} draggable={!isLinked && !isTerminal}
                     onDragStart={(event) => {
                       event.dataTransfer.setData('text/lead-id', lead.id);
                       event.dataTransfer.effectAllowed = 'move';
@@ -684,8 +699,8 @@ export default function LeadsPage() {
                     <div className="mt-1 text-[10px] text-muted">Expected close {formatDate(lead.closeDate ?? lead.renewalDate)}</div>
                     <label className="mt-2 block">
                       <span className="sr-only">Move {lead.title ?? lead.client} to stage</span>
-                      <select className="input !min-h-8 !py-1 text-[11px]" value={boardStageForLead(lead, linkedDealIds)} disabled={isLinked} onClick={(event) => event.stopPropagation()} onChange={(event) => moveLeadToStage(lead, event.target.value as LeadBoardStage)}>
-                        {LEAD_FUNNEL_STAGES.map((item) => <option key={item} value={item}>{item}</option>)}
+                      <select className="input !min-h-8 !py-1 text-[11px]" value={currentStage} disabled={isLinked || isTerminal} onClick={(event) => event.stopPropagation()} onChange={(event) => moveLeadToStage(lead, event.target.value as LeadLifecycleStage)}>
+                        {LEAD_LIFECYCLE_STAGES.map((item) => <option key={item} value={item}>{item}</option>)}
                       </select>
                     </label>
                     {(user.role === 'admin' || user.role === 'sales') && <div className="mt-2 flex justify-between border-t border-ink-700/80 pt-2">
@@ -716,18 +731,18 @@ export default function LeadsPage() {
           </div>
         </div>
       ) : (
-        <div className="overflow-x-clip rounded-lg border border-[#1B1E22] bg-ink-950">
-          <table className="w-full table-fixed text-[11px] leading-tight" aria-label="Leads">
+        <div className="overflow-x-auto overscroll-x-contain rounded-lg border border-[#1B1E22] bg-ink-950">
+          <table className="w-full min-w-[1120px] table-fixed text-[11px] leading-tight" aria-label="Leads">
             <colgroup>
               <col className="w-[12%]" />
               <col className="w-[14%]" />
-              <col className="w-[14%]" />
+              <col className="w-[19%]" />
               <col className="w-[10%]" />
-              <col className="w-[8%]" />
-              <col className="w-[13%]" />
-              <col className="w-[10%]" />
-              <col className="w-[8%]" />
               <col className="w-[7%]" />
+              <col className="w-[12%]" />
+              <col className="w-[10%]" />
+              <col className="w-[6%]" />
+              <col className="w-[6%]" />
               <col className="w-[4%]" />
             </colgroup>
             <thead className="bg-[#111214] text-[10px] font-semibold text-[#D0D3D9]">
@@ -746,11 +761,11 @@ export default function LeadsPage() {
             </thead>
             <tbody>
               {searchedLeads.map((lead) => {
-                const stage = boardStageForLead(lead, linkedDealIds);
-                const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? lead.ownerId;
+                const stage = boardStageForLead(lead, linkedDealIds, linkedLeadIds);
+                const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? formatStaffIdentifier(lead.ownerId);
                 const statusVariant = lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win';
                 const stageSla = stageSlaForLead(lead);
-                return <tr key={lead.id} role="link" tabIndex={0} aria-label={`Open lead details for ${lead.title ?? lead.client}`} draggable={!lead.dealId || !linkedDealIds.has(lead.dealId)} className="cursor-pointer border-b border-[#1B1E22] last:border-0 text-xs transition-colors hover:bg-[#111214] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-400"
+                return <tr key={lead.id} role="link" tabIndex={0} aria-label={`Open lead details for ${lead.title ?? lead.client}`} draggable={!isTerminalLeadStage(stage) && !((lead.dealId && linkedDealIds.has(lead.dealId)) || linkedLeadIds.has(lead.id))} className="cursor-pointer border-b border-[#1B1E22] last:border-0 text-xs transition-colors hover:bg-[#111214] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-400"
                   onClick={() => setInspectedLeadId(lead.id)}
                   onKeyDown={(event) => {
                     if (event.target !== event.currentTarget) return;
@@ -771,9 +786,13 @@ export default function LeadsPage() {
                   }}>
                   <td className="px-2 py-2 font-semibold text-white"><span className="block truncate" title={lead.title ?? `${lead.client} lead`}>{lead.title ?? `${lead.client} lead`}</span></td>
                   <td className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={lead.client}>{lead.client}</span></td>
-                  <td className="px-2 py-2 font-normal text-[#E1E2E5]">
-                    <span className="flex min-w-0 items-center gap-1.5" title={stage}><span className="min-w-0 truncate">{stage}</span>
-                      {stageSla.overdue && <span className="inline-flex items-center gap-1 rounded-full border border-hot/40 bg-hot/10 px-2 py-0.5 text-[10px] font-semibold text-hot" title={`Current stage exceeded its ${stageSla.targetDays}-day SLA`} aria-label={`SLA overdue: current stage exceeded its ${stageSla.targetDays}-day target`}>
+                  <td className="min-w-0 overflow-hidden px-2 py-2 font-normal text-[#E1E2E5]">
+                    <span className="flex min-w-0 flex-nowrap items-center gap-1" title={stage}>
+                      {isTerminalLeadStage(stage)
+                        ? <span className={`pill min-w-0 flex-1 truncate border ${stage === 'Lost' ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]' : 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]'}`} title={stage}>{stage}</span>
+                        : <span className="min-w-0 flex-1 truncate">{stage}</span>}
+                      <StageSlaBadges elapsedDays={stageSla.elapsedDays} targetDays={stageSla.targetDays} />
+                      {stageSla.overdue && <span className="pill max-w-full !gap-1 !px-1.5 border border-hot/40 bg-hot/10 text-hot" title={`Current stage exceeded its ${stageSla.targetDays}-day SLA`} aria-label={`SLA overdue: current stage exceeded its ${stageSla.targetDays}-day target`}>
                         <AlertTriangle size={11} /> Overdue
                       </span>}
                     </span>
@@ -971,17 +990,23 @@ export default function LeadsPage() {
           <SectionHeading title="Pipeline & Progress" />
           <Field label="Funnel stage">
             <select className="input" value={leadBoardStage} onChange={(event) => {
-              const nextStage = event.target.value as LeadBoardStage;
+              const nextStage = event.target.value as LeadLifecycleStage;
               if (editingLead) {
-                const from = boardStageForLead(editingLead, linkedDealIds);
+                const from = boardStageForLead(editingLead, linkedDealIds, linkedLeadIds);
                 setPendingLeadStageChange(nextStage === from ? null : { from, to: nextStage });
                 setStageChangeRemarks('');
               }
               setLeadBoardStage(nextStage);
-            }}>
-              {LEAD_FUNNEL_STAGES.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
+            }} disabled={Boolean(editingLead && isTerminalLeadStage(boardStageForLead(editingLead, linkedDealIds, linkedLeadIds)))}>
+              {(editingLead && isTerminalLeadStage(boardStageForLead(editingLead, linkedDealIds, linkedLeadIds))
+                ? [leadBoardStage]
+                : editingLead ? [...LEAD_ACTIVE_STAGES, 'Lost' as const] : LEAD_ACTIVE_STAGES)
+                .map((stage) => <option key={stage} value={stage}>{stage}</option>)}
             </select>
           </Field>
+          {leadBoardStage === 'Lost' && <Field label="Loss reason (optional)">
+            <textarea className="input min-h-16" value={leadLossReason} onChange={(event) => setLeadLossReason(event.target.value)} maxLength={1000} placeholder="Add context for why this lead was lost." />
+          </Field>}
           {pendingLeadStageChange && <div className="sm:col-span-2 rounded-lg border border-brand-400/20 bg-brand-400/5 p-3">
             <p className="mb-2 text-xs text-muted">Stage change: <span className="text-white">{pendingLeadStageChange.from} → {pendingLeadStageChange.to}</span></p>
             <Field label="Remarks / Notes (optional)"><textarea className="input min-h-20" value={stageChangeRemarks} onChange={(event) => setStageChangeRemarks(event.target.value)} placeholder="Add stage-change notes to the activity timeline." maxLength={2000} /></Field>
@@ -1027,7 +1052,7 @@ export default function LeadsPage() {
               if (nextOwner) setPersonName(nextOwner.name);
             }} aria-invalid={Boolean(fieldErrors.ownerId)}>
               <option value="">Select owner</option>
-              {staffOptions.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}{owner.id === user.id ? ' (You)' : ''}</option>)}
+              {staffOptions.map((owner) => <option key={owner.id} value={owner.id}>{owner.name} · {formatStaffIdentifier(owner.id)}{owner.id === user.id ? ' (You)' : ''}</option>)}
             </select>
             {fieldErrors.ownerId && <p className="mt-1 text-xs text-red-400">{fieldErrors.ownerId}</p>}
           </Field>
@@ -1056,9 +1081,9 @@ export default function LeadsPage() {
 
       <Modal open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Leads" size="sm" footer={<><button type="button" className="btn-ghost" onClick={() => { setTemperatureFilter(''); setStageFilter(''); setOwnerFilter(''); setInsuranceClassFilter(''); setStatusFilter(''); setLeadIdFilter(''); }}>Clear</button><button type="button" className="btn-primary" onClick={() => setFilterOpen(false)}>Apply Filter</button></>}>
         <div className="space-y-3">
-          <Field label="Funnel stage"><select className="input" value={stageFilter} onChange={(event) => setStageFilter(event.target.value)}><option value="">All stages</option>{LEAD_FUNNEL_STAGES.map((stage) => <option key={stage} value={stage}>{stage}</option>)}</select></Field>
+          <Field label="Funnel stage"><select className="input" value={stageFilter} onChange={(event) => setStageFilter(event.target.value)}><option value="">All stages</option>{LEAD_LIFECYCLE_STAGES.map((stage) => <option key={stage} value={stage}>{stage}</option>)}</select></Field>
           <Field label="Temperature"><select className="input" value={temperatureFilter} onChange={(event) => setTemperatureFilter(event.target.value)}><option value="">All temperatures</option><option>HOT</option><option>WARM</option><option>COLD</option></select></Field>
-          <Field label="Owner"><select className="input" value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)}><option value="">All owners</option>{staffOptions.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></Field>
+          <Field label="Owner"><select className="input" value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)}><option value="">All owners</option>{staffOptions.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} · {formatStaffIdentifier(candidate.id)}</option>)}</select></Field>
           <Field label="Line of business"><select className="input" value={insuranceClassFilter} onChange={(event) => setInsuranceClassFilter(event.target.value)}><option value="">All lines</option>{[...new Set(products.map((product) => product.category))].map((category) => <option key={category} value={category}>{category}</option>)}</select></Field>
           <Field label="Status"><select className="input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="TO-DO">To do</option><option value="IN-PROGRESS">In progress</option><option value="BACKLOG">Backlog</option><option value="COMPLETED">Completed</option></select></Field>
         </div>

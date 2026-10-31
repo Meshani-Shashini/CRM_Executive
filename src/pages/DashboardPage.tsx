@@ -8,6 +8,7 @@ import { formatAmount, toMvr } from '../utils/currency';
 import { dashboardHref } from '../utils/navigation';
 import { formatDate } from '../utils/date';
 import { isStageSlaOverdue } from '../utils/stageSla';
+import { LEAD_LIFECYCLE_STAGES, lifecycleStageForLead } from '../utils/leadLifecycle';
 
 const tabs = ['Company', 'Leads', 'Deals', 'Staff'] as const;
 type DashboardTab = typeof tabs[number];
@@ -42,9 +43,12 @@ export default function DashboardPage() {
     count: leads.filter((lead) => lead.insuranceClass === name).length,
   }));
   const maxClassCount = Math.max(1, ...leadClasses.map((item) => item.count));
-  const stages = [...new Set(leads.map((lead) => lead.funnelStage))].map((stage) => ({
+  const stages = LEAD_LIFECYCLE_STAGES.map((stage) => ({
     name: stage,
-    count: leads.filter((lead) => lead.funnelStage === stage).length,
+    count: leads.filter((lead) => lifecycleStageForLead(
+      lead,
+      Boolean(deals.some((deal) => deal.id === lead.dealId || deal.leadId === lead.id)),
+    ) === stage).length,
   }));
   const recentActivities = [...activities].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
 
@@ -109,7 +113,7 @@ export default function DashboardPage() {
 
             <div className="glass rounded-2xl p-5">
               <h3 className="text-white font-semibold mb-4">Leads by Funnel Stage</h3>
-              {stages.length === 0 ? <EmptyState /> : (
+              {leads.length === 0 ? <EmptyState /> : (
                 <div className="space-y-2">
                   {stages.map((stage) => (
                     <div key={stage.name} className="flex items-center justify-between rounded-lg bg-ink-900/50 px-3 py-2 text-sm">
@@ -153,35 +157,27 @@ function LeadsDashboard() {
   }, []);
   const activeLeads = leads.filter((lead) => lead.status !== 'COMPLETED');
   const hotLeads = leads.filter((lead) => lead.temperature === 'HOT');
-  const stages = [...new Set(leads.map((lead) => lead.funnelStage))].map((stage) => ({
+  const stages = LEAD_LIFECYCLE_STAGES.map((stage) => ({
     name: stage,
-    count: leads.filter((lead) => lead.funnelStage === stage).length,
+    count: leads.filter((lead) => lifecycleStageForLead(
+      lead,
+      Boolean(deals.some((deal) => deal.id === lead.dealId || deal.leadId === lead.id)),
+    ) === stage).length,
   }));
   const maxStageCount = Math.max(1, ...stages.map((stage) => stage.count));
   const leadSlaOverdue = (lead: typeof leads[number]) => {
     const deal = deals.find((item) => item.id === lead.dealId || item.leadId === lead.id);
+    if (!deal) return false;
     const configuredStages = pipelineStages
-      .filter((stage) => stage.pipelineId === (deal?.pipelineId ?? lead.pipelineId))
+      .filter((stage) => stage.pipelineId === deal.pipelineId)
       .sort((left, right) => left.stageOrder - right.stageOrder);
-    const currentLeadStage = lead.funnelStage.toLowerCase();
-    const leadStageOrder = currentLeadStage.includes('qualified') || currentLeadStage.includes('l3:')
-      ? 5
-      : currentLeadStage.includes('meeting') || currentLeadStage.includes('negotiat') ? 4
-        : currentLeadStage.includes('intro') || currentLeadStage.includes('email') ? 3
-          : currentLeadStage.includes('key person') || currentLeadStage.includes('l2:') ? 2
-            : currentLeadStage.includes('contact') || currentLeadStage.includes('l1:') ? 1 : 0;
-    const stage = deal
-      ? configuredStages.find((item) => item.name === deal.stage)
-      : configuredStages[leadStageOrder];
+    const stage = configuredStages.find((item) => item.name === deal.stage);
     if (!stage) return false;
     const activeHistory = deal && stageHistory.find((entry) =>
       entry.dealId === deal.id && entry.toStageId === stage.id && !entry.exitedAt);
     const enteredAt = activeHistory?.enteredAt
-      ?? deal?.stageChangedAt
-      ?? lead.stageChangedAt
-      ?? lead.routedAt
-      ?? deal?.createdAt
-      ?? lead.createdAt;
+      ?? deal.stageChangedAt
+      ?? deal.createdAt;
     return isStageSlaOverdue(enteredAt, stage.stagnationDaysThreshold, now);
   };
 
@@ -191,12 +187,12 @@ function LeadsDashboard() {
         <KpiCard href={dashboardHref('leads')} label="Total Leads" value={`${leads.length}`} detail="Current records" icon={Users} accent="brand" />
         <KpiCard href={dashboardHref('leads', { status: 'active' })} label="Active Leads" value={`${activeLeads.length}`} detail="Not completed" icon={TrendingUp} accent="cold" />
         <KpiCard href={dashboardHref('leads', { temperature: 'HOT' })} label="Hot Leads" value={`${hotLeads.length}`} detail="Priority follow-up" icon={AlertTriangle} accent="hot" />
-        <KpiCard href={dashboardHref('leads', { stage: 'Quoted' })} label="Quoted" value={`${leads.filter((lead) => lead.funnelStage === 'Quoted').length}`} detail="In quotation stage" icon={CheckCircle2} accent="win" />
+        <KpiCard href={dashboardHref('leads', { stage: 'Intro Email Sent' })} label="Quoted" value={`${stages.find((stage) => stage.name === 'Intro Email Sent')?.count ?? 0}`} detail="In quotation stage" icon={CheckCircle2} accent="win" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="glass rounded-2xl p-5">
           <h3 className="text-white font-semibold mb-4">Leads by Funnel Stage</h3>
-          {stages.length === 0 ? <EmptyState /> : <div className="space-y-3">
+          {leads.length === 0 ? <EmptyState /> : <div className="space-y-3">
             {stages.map((stage) => (
               <div key={stage.name}>
                 <div className="flex justify-between text-xs mb-1">
@@ -217,7 +213,7 @@ function LeadsDashboard() {
               <a key={lead.id} href={dashboardHref('leads', { id: lead.id })} className="flex items-center justify-between gap-3 border-b border-ink-700/60 pb-3 last:border-0 last:pb-0 hover:bg-ink-800/40 rounded-lg px-2">
                 <div className="min-w-0">
                   <div className="text-sm text-white truncate">{lead.client}</div>
-                  <div className="text-[11px] text-muted">{lead.funnelStage} · {lead.lastActivity}</div>
+                  <div className="text-[11px] text-muted">{lifecycleStageForLead(lead, Boolean(deals.some((deal) => deal.id === lead.dealId || deal.leadId === lead.id)))} · {lead.lastActivity}</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {leadSlaOverdue(lead) && <Badge variant="hot"><Clock3 size={11} /> SLA overdue</Badge>}
@@ -338,7 +334,7 @@ function StaffDashboard() {
             return (
               <div key={user.id} className="flex flex-wrap items-center gap-3 px-5 py-4">
                 <div className="w-9 h-9 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-xs font-bold text-white shrink-0">
-                  {user.name.split(' ').map((part) => part[0]).slice(0, 2).join('')}
+                  {user.name.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-40">
                   <div className="text-sm text-white">{user.name}</div>

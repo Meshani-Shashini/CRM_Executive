@@ -124,7 +124,7 @@ export function createSampleLeads(ownerIds: string[], today = new Date()): Lead[
       closeInDays: 18,
       temperature: 'HOT',
       status: 'IN-PROGRESS',
-      stage: 'Quoted',
+      stage: 'Intro Email Sent',
     },
     {
       id: 'sample-lead-oceanic-logistics',
@@ -194,7 +194,7 @@ export function createSampleLeads(ownerIds: string[], today = new Date()): Lead[
       closeInDays: 24,
       temperature: 'HOT',
       status: 'IN-PROGRESS',
-      stage: 'Quoted',
+      stage: 'Intro Email Sent',
     },
     {
       id: 'sample-lead-seafood-export',

@@ -243,25 +243,6 @@ export function createSampleWorkspace(owner: User): {
     };
   });
 
-  const stageHistory: StageHistoryAudit[] = deals.map((deal, index) => {
-    const stage = stages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
-    if (!stage) {
-      throw new Error(`Could not create stage history for sample deal ${deal.id}: its current stage is missing.`);
-    }
-    const durationDays = leadDefinitions[index].durationDays;
-    const enteredAt = durationDays === 0 ? deal.stageChangedAt ?? new Date().toISOString() : daysAgo(durationDays);
-    return {
-      id: `ui-test-stage-history-${deal.id}`,
-      tenantId: TENANT_ID,
-      dealId: deal.id,
-      fromStageId: null,
-      toStageId: stage.id,
-      enteredAt,
-      exitedAt: null,
-      durationSeconds: null,
-    };
-  });
-
   const activityFixtures: Activity[] = [
     { id: 'ui-test-activity-cf-meeting-old', clientId: clients[0].id, leadId: leads[0].id, dealId: deals[0].id, type: 'meeting', title: 'Initial placement meeting', description: 'Reviewed locations, asset values and renewal requirements.', date: daysAgo(5, 2), userId: owner.id, meetingMode: 'Physical Meeting', venue: 'Male office', personsMet: 'Aishath Mariyam, Key Person 2', outcome: 'Risk schedule requested', followUpAction: 'Collect updated asset list', durationMinutes: 45 },
     { id: 'ui-test-activity-cf-note', clientId: clients[0].id, leadId: leads[0].id, dealId: deals[0].id, type: 'note', title: 'Risk schedule received', description: 'Client supplied the updated property schedule.', date: daysAgo(3, 4), userId: owner.id },
@@ -276,5 +257,5 @@ export function createSampleWorkspace(owner: User): {
     createdAt: activity.createdAt ?? activity.date,
   }));
 
-  return { leads, deals, clients, activities, pipelines: DEMO_PIPELINES, pipelineStages: stages, stageHistory };
+  return { leads, deals, clients, activities, pipelines: DEMO_PIPELINES, pipelineStages: stages, stageHistory: [] };
 }

@@ -11,7 +11,7 @@ import ProductSelect from '../components/ui/ProductSelect';
 import { calculateBrokerageCommission } from '../utils/insurance';
 import { normalizeDateInput } from '../utils/date';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
-import { linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
+import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
 import DealWorkspace from './DealWorkspace';
 import { TENANT_ID } from '../lib/supabase';
 
@@ -220,9 +220,11 @@ export default function DealsPage() {
     const dealClientRecord = clients.find((client) => client.name === dealClient.trim());
     const contactName = String(data.get('contactName') ?? '').trim();
     const contactEmail = String(data.get('contactEmail') ?? '').trim();
-    const matchingContact = dealClientRecord?.contacts?.find((contact) =>
-      contact.id === editingDeal?.contactProfileId
-      || (contactEmail && contact.email.trim().toLowerCase() === contactEmail.toLowerCase()));
+    const matchingContact = findMatchingContactProfile(dealClientRecord?.contacts, {
+      id: editingDeal?.contactProfileId ?? '',
+      email: contactEmail,
+      phone: dealPhone,
+    });
     const validContact = Boolean(contactName
       && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)
       && /^[+()\d\s-]{7,}$/.test(dealPhone));

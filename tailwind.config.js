@@ -28,8 +28,8 @@ export default {
         win: '#27C272',
       },
       fontFamily: {
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+        sans: ['Inter', 'Roboto', '-apple-system', 'sans-serif'],
+        mono: ['Inter', 'Roboto', '-apple-system', 'sans-serif'],
       },
       boxShadow: {
         glass: '0 8px 32px rgba(0,0,0,0.45)',

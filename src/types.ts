@@ -51,6 +51,8 @@ export interface Lead {
   temperature: LeadTemperature;
   status: ActivityStatus;
   funnelStage: string;
+  disposition?: 'converted' | 'lost';
+  lossReason?: string;
   renewalDate: string;
   sumInsured: number;
   premium: number;

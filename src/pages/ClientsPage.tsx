@@ -2,22 +2,20 @@ import { useState, type FormEvent } from 'react';
 import { INSURERS, PRODUCT_CODES } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
+import ActivityTimelineItem from '../components/ActivityTimelineItem';
 import { useApp } from '../store/AppContext';
 import { supabase } from '../lib/supabase';
 import {
-  Phone, Mail, MapPin, Calendar, FileText, MessageSquare, Upload,
-  Building2, Briefcase, ShieldCheck, Plus, Search, Pencil, Trash2, CheckCircle2,
+  Phone, Mail, MapPin, Calendar, FileText,
+  Building2, Briefcase, ShieldCheck, Plus, Search, Pencil, Trash2,
 } from 'lucide-react';
 import type { Activity, Client, CompanyContactProfile } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { formatDate } from '../utils/date';
 import DateInput from '../components/ui/DateInput';
 import { hasCompleteClientProfile, INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
-import { linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
-
-const activityIcon: Record<Activity['type'], typeof Phone> = {
-  call: Phone, meeting: Calendar, email: Mail, upload: Upload, note: MessageSquare, quote: FileText, task: CheckCircle2,
-};
+import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
+import { formatStaffIdentifier } from '../utils/staff';
 
 export default function ClientsPage() {
   const { clients, setClients, leads, setLeads, deals, setDeals, invoices, activities, setActivities, user, users } = useApp();
@@ -45,6 +43,9 @@ export default function ClientsPage() {
   );
   const productName = (code: string) => PRODUCT_CODES.find((p) => p.code === code)?.name ?? code;
   const owner = selected && users.find((u) => u.id === selected.ownerId);
+  const selectedContacts = mergeContactProfiles(selected?.contacts)
+    .filter((contact) => contact.name.trim() || contact.email.trim() || contact.phone.trim()
+      || contact.whatsapp?.trim() || contact.telegram?.trim());
 
   const updateOrganizationPrimaryContact = (
     client: Client,
@@ -54,9 +55,11 @@ export default function ClientsPage() {
     role: string,
   ) => {
     if (!name && !email && !phone) return;
-    const existing = client.contacts?.find((contact) =>
-      (email && contact.email.trim().toLowerCase() === email.toLowerCase())
-      || (name && contact.name.trim().toLowerCase() === name.toLowerCase()));
+    const existing = findMatchingContactProfile(client.contacts, {
+      id: '',
+      email,
+      phone,
+    }) ?? client.contacts?.find((contact) => name && contact.name.trim().toLowerCase() === name.toLowerCase());
     const linkedDealIds = deals.filter((deal) => (deal.clientId === client.id
       || deal.client.trim().toLowerCase() === client.name.trim().toLowerCase())
       && (deal.contactProfileId === existing?.id
@@ -79,11 +82,14 @@ export default function ClientsPage() {
       const belongsToClient = lead.clientId === client.id
         || lead.client.trim().toLowerCase() === client.name.trim().toLowerCase();
       const matchingContact = lead.contacts?.find((contact) =>
-        contact.id === profile.id
-        || (profile.email && contact.email.trim().toLowerCase() === profile.email.toLowerCase()));
+        contact.id === existing?.id
+        || (profile.email && contact.email.trim().toLowerCase() === profile.email.toLowerCase())
+        || (profile.phone && contact.phone.replace(/\D/g, '') === profile.phone.replace(/\D/g, '')));
       const isPrimary = Boolean(lead.contactProfileId === matchingContact?.id
+        || lead.contactProfileId === existing?.id
         || (profile.email && lead.contactEmail?.trim().toLowerCase() === profile.email.toLowerCase())
-        || lead.contact.trim().toLowerCase() === profile.name.trim().toLowerCase());
+        || (profile.phone && lead.contactPhone?.replace(/\D/g, '') === profile.phone.replace(/\D/g, ''))
+        || (existing && lead.contact.trim().toLowerCase() === existing.name.trim().toLowerCase()));
       if (!belongsToClient || (!matchingContact && !isPrimary)) return lead;
       const linkedProfile = linkContactProfile({
         ...(matchingContact ?? {}),
@@ -111,7 +117,8 @@ export default function ClientsPage() {
         || deal.client.trim().toLowerCase() === client.name.trim().toLowerCase();
       const isPrimary = deal.contactProfileId === existing?.id
         || (profile.email && deal.contactEmail?.trim().toLowerCase() === profile.email.toLowerCase())
-        || deal.contactName?.trim().toLowerCase() === profile.name.trim().toLowerCase();
+        || (profile.phone && deal.contactPhone?.replace(/\D/g, '') === profile.phone.replace(/\D/g, ''))
+        || (existing && deal.contactName?.trim().toLowerCase() === existing.name.trim().toLowerCase());
       return !belongsToClient || !isPrimary ? deal : {
         ...deal,
         contactProfileId: profile.id,
@@ -432,9 +439,9 @@ export default function ClientsPage() {
       </div>
 
       {/* Detail */}
-      {selected ? <div className="flex flex-col gap-4 overflow-y-auto">
+      {selected ? <div className="flex flex-col gap-3 overflow-y-auto">
         {/* Header */}
-        <div className="glass rounded-2xl p-5">
+        <div className="glass rounded-2xl p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex items-start gap-3">
               <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white font-bold text-lg">
@@ -442,7 +449,9 @@ export default function ClientsPage() {
               </div>
               <div>
                 <h2 className="text-xl font-bold text-white">{selected.name}</h2>
-                <div className="text-sm text-muted mt-0.5">TIN: {selected.tin} · {selected.country}</div>
+                {(selected.tin || selected.country) && <div className="text-sm text-muted mt-0.5">
+                  {[selected.tin && `TIN: ${selected.tin}`, selected.country].filter(Boolean).join(' · ')}
+                </div>}
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   <Badge variant="brand" dot>{selected.class}</Badge>
                   {selected.accountStatus === 'draft' && <Badge variant="muted">Draft</Badge>}
@@ -473,66 +482,55 @@ export default function ClientsPage() {
           </div>
         </div>
 
-        <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
+        <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
           {/* Left: Client info */}
-          <div className="space-y-4">
-            <div className="glass rounded-2xl p-5">
-              <h3 className="text-white font-semibold mb-4 flex items-center gap-2"><Building2 size={16} /> Client Information</h3>
-              <div className="space-y-3 text-sm">
+          <div className="space-y-3">
+            <div className="glass rounded-2xl p-4">
+              <h3 className="text-white font-semibold mb-3 flex items-center gap-2"><Building2 size={16} /> Client Information</h3>
+              <div className="space-y-2 text-sm">
                 <InfoRow icon={Phone} label="Phone" value={selected.phone} />
                 <InfoRow icon={Mail} label="Email" value={selected.email} />
                 <InfoRow icon={MapPin} label="Address" value={selected.address} />
-                {(selected.contactPerson || selected.insuredEntity?.primaryStakeholder.fullName) && (
-                  <InfoRow icon={Briefcase} label="Contact Person" value={selected.contactPerson || selected.insuredEntity?.primaryStakeholder.fullName || ''} />
-                )}
-                <InfoRow icon={Briefcase} label="Account Owner" value={owner?.name ?? '—'} />
+                <InfoRow icon={Briefcase} label="Contact Person" value={selected.contactPerson || selected.insuredEntity?.primaryStakeholder.fullName} />
+                <InfoRow icon={Briefcase} label="Account Owner" value={owner?.name ?? formatStaffIdentifier(selected.ownerId)} />
               </div>
-              {selected.contacts?.length ? <div className="mt-4 border-t border-ink-700 pt-4">
-                <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Company Contacts</h4>
-                <div className="space-y-2">
-                  {selected.contacts.map((contact) => <div key={contact.id} className="rounded-lg border border-ink-700 bg-ink-900/40 p-3">
+              {selectedContacts.length ? <div className="mt-3 border-t border-ink-700 pt-3">
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Company Contacts</h4>
+                <div className="space-y-1.5">
+                  {selectedContacts.map((contact) => <div key={contact.id} className="rounded-lg border border-ink-700 bg-ink-900/40 p-2.5">
                     <div className="flex items-center justify-between gap-2 text-sm"><span className="font-medium text-white">{contact.name}</span><Badge variant="muted">{contact.role}</Badge></div>
-                    <div className="mt-1 text-xs text-muted">{contact.email} · {contact.phone}</div>
+                    {(contact.email || contact.phone) && <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-white">
+                      {contact.email && <span>{contact.email}</span>}
+                      {contact.phone && <span>{contact.phone}</span>}
+                    </div>}
                   </div>)}
                 </div>
               </div> : null}
             </div>
 
-            <div className="glass rounded-2xl p-5">
-              <h3 className="text-white font-semibold mb-4 flex items-center gap-2"><ShieldCheck size={16} /> Policy Details</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <Metric label="Sum Insured" value={`MVR ${selected.sumInsured.toLocaleString()}`} />
-                <Metric label="Premium" value={`MVR ${selected.premium.toLocaleString()}`} />
+            <div className="glass rounded-2xl p-4">
+              <h3 className="text-white font-semibold mb-3 flex items-center gap-2"><ShieldCheck size={16} /> Policy Details</h3>
+              <div className="grid grid-cols-2 gap-2">
+                <Metric label="Sum Insured" value={selected.sumInsured > 0 ? `MVR ${selected.sumInsured.toLocaleString()}` : ''} />
+                <Metric label="Premium" value={selected.premium > 0 ? `MVR ${selected.premium.toLocaleString()}` : ''} />
                 <Metric
                   label="Expiry"
-                  value={selected.expiry
-                    ? formatDate(selected.expiry)
-                    : '—'}
+                  value={formatDate(selected.expiry)}
                 />
                 <Metric label="Insurer" value={selected.insurer} />
-                <Metric label="Class" value={selected.class} />
-                <Metric label="Product" value={`${selected.productCode} · ${productName(selected.productCode)}`} />
+                <Metric label="Class" value={selected.class !== 'Miscellaneous' ? selected.class : ''} />
+                <Metric label="Product" value={selected.productCode ? `${selected.productCode} · ${productName(selected.productCode)}` : ''} />
               </div>
             </div>
           </div>
 
           {/* Right: Activity timeline */}
-          <div className="glass rounded-2xl p-5 flex flex-col">
-            <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-white"><Calendar size={16} /> Activity Timeline</h3>
+          <div className="glass rounded-2xl p-4 flex flex-col">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><Calendar size={16} /> Activity Timeline</h3>
             <div className="flex-1 overflow-y-auto">
               {clientActivities.map((a: Activity) => {
-                const Icon = activityIcon[a.type];
                 return (
-                  <article key={a.id} className="mb-1 rounded-lg border border-ink-700 bg-ink-900/40 p-2 last:mb-0 lg:mb-0 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] lg:items-center lg:gap-3 lg:rounded-none lg:border-x-0 lg:border-t-0 lg:bg-transparent lg:px-2 lg:py-1.5">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-ink-600 bg-ink-700">
-                      <Icon size={12} className="text-brand-400" />
-                      </span>
-                      <h4 className="min-w-0 truncate text-sm font-medium text-white lg:text-xs" title={a.title}>{a.title}</h4>
-                    </div>
-                    <p className="mt-2 text-xs font-normal text-white lg:mt-0 lg:truncate" title={a.description}>{a.description}</p>
-                    <time className="mt-2 block text-[10px] font-normal text-white lg:mt-0 lg:whitespace-nowrap">{formatDate(a.date)}</time>
-                  </article>
+                  <ActivityTimelineItem key={a.id} title={a.title} description={a.description} date={a.date} category={a.type} />
                 );
               })}
               {clientActivities.length === 0 && (
@@ -640,19 +638,22 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label className="block"><div className="text-xs text-muted mb-1.5">{label}</div>{children}</label>;
 }
 
-function InfoRow({ icon: Icon, label, value }: { icon:  typeof Phone; label: string; value: string }) {
+function InfoRow({ icon: Icon, label, value }: { icon:  typeof Phone; label: string; value?: string }) {
+  const displayValue = value?.trim();
+  if (!displayValue || displayValue === '—' || displayValue === '-') return null;
   return (
     <div className="flex items-start gap-3">
       <Icon size={15} className="text-muted mt-0.5 shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="text-[11px] text-muted">{label}</div>
-        <div className="text-white text-sm break-words">{value}</div>
+        <div className="text-white text-sm break-words">{displayValue}</div>
       </div>
     </div>
   );
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
+  if (!value.trim() || value === '—' || value === '-' || value.toLowerCase() === 'not assigned') return null;
   return (
     <div className="bg-ink-900/50 rounded-lg p-3">
       <div className="text-[11px] text-muted mb-1">{label}</div>

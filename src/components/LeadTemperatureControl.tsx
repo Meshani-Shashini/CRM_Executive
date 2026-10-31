@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Flame, Snowflake, Sun } from 'lucide-react';
 import type { LeadTemperature } from '../types';
 
-const tableBadgeClass = 'inline-flex h-6 items-center gap-1 whitespace-nowrap rounded-full border px-1.5 text-[9px] font-bold leading-none tracking-wide uppercase';
+const tableBadgeClass = 'pill pill-compact border';
 
 const temperatureOptions: { value: LeadTemperature; Icon: typeof Flame; className: string; menuClassName: string }[] = [
   { value: 'HOT', Icon: Flame, className: 'border-hot/50 bg-hot/10 text-hot shadow-[0_0_8px_rgba(239,68,68,0.18)]', menuClassName: 'text-hot' },
@@ -22,29 +22,56 @@ export default function LeadTemperatureControl({
   onChange: (temperature: LeadTemperature) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [pendingTemperature, setPendingTemperature] = useState<LeadTemperature | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmationTitleId = useId();
   const selected = temperatureOptions.find((option) => option.value === temperature) ?? temperatureOptions[1];
   const TemperatureIcon = selected.Icon;
 
   useEffect(() => {
-    if (!open) return;
+    if (pendingTemperature) cancelRef.current?.focus();
+  }, [pendingTemperature]);
+
+  useEffect(() => {
+    if (!open && !pendingTemperature) return;
     const closeOnOutsideClick = (event: PointerEvent) => {
       if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') {
+        setOpen(false);
+        setPendingTemperature(null);
+        triggerRef.current?.focus();
+      }
     };
-    document.addEventListener('pointerdown', closeOnOutsideClick);
+    if (open) document.addEventListener('pointerdown', closeOnOutsideClick);
     window.addEventListener('keydown', closeOnEscape);
     return () => {
       document.removeEventListener('pointerdown', closeOnOutsideClick);
       window.removeEventListener('keydown', closeOnEscape);
     };
-  }, [open]);
+  }, [open, pendingTemperature]);
+
+  const confirmTemperatureChange = () => {
+    if (disabled || !pendingTemperature || pendingTemperature === temperature) {
+      dismissConfirmation();
+      return;
+    }
+    onChange(pendingTemperature);
+    dismissConfirmation();
+  };
+
+  const dismissConfirmation = () => {
+    setPendingTemperature(null);
+    triggerRef.current?.focus();
+  };
 
   return (
     <div ref={rootRef} className="relative inline-flex" onClick={(event) => event.stopPropagation()}>
       <button
+        ref={triggerRef}
         type="button"
         aria-label={`Change ${leadName} temperature`}
         aria-haspopup="menu"
@@ -67,13 +94,39 @@ export default function LeadTemperatureControl({
             className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-[10px] font-semibold transition-colors hover:bg-ink-700 ${menuClassName} ${temperature === value ? 'bg-ink-700/70' : ''}`}
             onClick={() => {
               setOpen(false);
-              onChange(value);
+              if (value !== temperature) setPendingTemperature(value);
             }}
           >
             <Icon size={13} aria-hidden="true" />
             {value}
           </button>
         ))}
+      </div>}
+      {pendingTemperature && <div
+        className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+        onClick={dismissConfirmation}
+      >
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={confirmationTitleId}
+          className="w-full max-w-sm rounded-xl border border-ink-600 bg-ink-900 p-4 shadow-2xl"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <h2 id={confirmationTitleId} className="text-sm font-semibold text-white">Confirm temperature change</h2>
+          <p className="mt-2 text-sm text-muted">
+            Lead temperature: <span className={selected.menuClassName}>{temperature}</span>
+            {' -> '}
+            <span className={temperatureOptions.find((option) => option.value === pendingTemperature)?.menuClassName}>
+              {pendingTemperature}
+            </span>
+            ?
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <button ref={cancelRef} type="button" className="btn-ghost" onClick={dismissConfirmation}>No</button>
+            <button type="button" className="btn-primary" disabled={disabled} onClick={confirmTemperatureChange}>Yes</button>
+          </div>
+        </section>
       </div>}
     </div>
   );

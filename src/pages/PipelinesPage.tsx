@@ -764,7 +764,7 @@ export default function PipelinesPage() {
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 text-sm font-semibold text-white">{deal.client}</div>
                           <div
-                            className={`shrink-0 flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold ${
+                            className={`pill shrink-0 !gap-1 border ${
                               score >= 75 ? 'border-win/40 bg-win/10 text-win' : score >= 45 ? 'border-warm/40 bg-warm/10 text-warm' : 'border-hot/40 bg-hot/10 text-hot'
                             }`}
                             title="Rule-based health estimate from win probability and stage-age threshold; not an AI-generated prediction."

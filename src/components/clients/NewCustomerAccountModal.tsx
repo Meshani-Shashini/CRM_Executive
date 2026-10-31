@@ -12,6 +12,7 @@ import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../
 import { formatDate } from '../../utils/date';
 import DateInput from '../ui/DateInput';
 import { hasCompleteClientProfile, INCOMPLETE_COMPANY_TAG } from '../../utils/customerProfile';
+import { normalizeContactNumber } from '../../utils/contactProfiles';
 
 const TARGET_LINES = [
   'Marine Hull',
@@ -97,7 +98,9 @@ export default function NewCustomerAccountModal({ onClose, onCreated }: NewCusto
   }, [onClose, quickAddKey]);
 
   const assignedUsers = useMemo(() => {
-    const options = users.filter((candidate) => candidate.role === 'admin' || candidate.role === 'sales');
+    const options = [...new Map(users
+      .filter((candidate) => candidate.role === 'admin' || candidate.role === 'sales')
+      .map((candidate) => [candidate.id, candidate])).values()];
     if (
       (user.role === 'admin' || user.role === 'sales')
       && user.id
@@ -193,6 +196,9 @@ export default function NewCustomerAccountModal({ onClose, onCreated }: NewCusto
     const contactEmails = [email, ...departmentContacts.map((contact) => contact.email.trim())]
       .filter(Boolean)
       .map((value) => value.toLowerCase());
+    const contactNumbers = [phone, ...departmentContacts.map((contact) => contact.phone.trim())]
+      .map(normalizeContactNumber)
+      .filter(Boolean);
 
     if (invalidDepartmentContact) {
       setFormError('Complete each department contact name, role, valid email, and valid phone number.');
@@ -200,6 +206,10 @@ export default function NewCustomerAccountModal({ onClose, onCreated }: NewCusto
     }
     if (new Set(contactEmails).size !== contactEmails.length) {
       setFormError('Each organization contact must have a unique email address.');
+      return;
+    }
+    if (new Set(contactNumbers).size !== contactNumbers.length) {
+      setFormError('Each organization contact must have a unique phone number.');
       return;
     }
 
