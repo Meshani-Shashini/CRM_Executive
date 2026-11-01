@@ -100,7 +100,9 @@ function formatStageDuration(milliseconds: number | undefined) {
 }
 
 function formatDays(milliseconds: number | undefined) {
-  return milliseconds === undefined ? '—' : `${Math.floor(milliseconds / 86400000)}d`;
+  return milliseconds === undefined || !Number.isFinite(milliseconds)
+    ? undefined
+    : `${Math.floor(milliseconds / 86400000)}d`;
 }
 
 function formatTelemetryDuration(milliseconds: number | undefined) {
@@ -294,7 +296,7 @@ export default function DealWorkspace({
   const telemetryOverride = getTelemetryTimestampOverride(targetDays, clockNow);
   const stageEnteredAt = telemetryOverride?.timestamp ?? (enteredAt ? Date.parse(enteredAt) : Number.NaN);
   const hasStageTimestamp = Number.isFinite(stageEnteredAt);
-  const elapsedMilliseconds = hasStageTimestamp ? Math.max(0, clockNow - stageEnteredAt) : 0;
+  const elapsedMilliseconds = hasStageTimestamp ? Math.max(0, clockNow - stageEnteredAt) : undefined;
   const activeSlaHealth = stageSlaHealth(elapsedMilliseconds, targetDays);
   const isStagnant = activeSlaHealth === 'overdue';
   const leadStageHistory = selectedActivities
@@ -1191,10 +1193,10 @@ export default function DealWorkspace({
             {stageTimeline.length ? <>
               <div className="mb-1.5 flex items-center gap-1.5">
                 <ActivityIcon size={13} className="text-[#A7F2C5]" aria-hidden="true" />
-                <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#A7F2C5]">{progressDeal ? selectedPipeline?.name ?? 'Pipeline' : 'Lead Telemetry'}</span>
+                <span className="text-[9px] tracking-[0.14em] text-[#A7F2C5]">{progressDeal ? selectedPipeline?.name ?? 'Pipeline' : 'Lead Telemetry'}</span>
                 <span className="telemetry-live-dot" aria-hidden="true" />
                 <span className="sr-only">Live tracking</span>
-                {telemetryOverride && <span className="ml-auto max-w-24 truncate font-mono text-[9px] uppercase tracking-wider text-[#E09228]" title={`Test · ${telemetryOverride.label}`}>Test · {telemetryOverride.label}</span>}
+                {telemetryOverride && <span className="ml-auto max-w-24 truncate text-[9px] tracking-wider text-[#E09228]" title={`Test · ${telemetryOverride.label}`}>Test · {telemetryOverride.label}</span>}
               </div>
               <div className="w-full min-w-0 overflow-x-auto">
                 <ol className="telemetry-track flex min-w-[700px] items-start justify-between xl:min-w-0">
@@ -1221,25 +1223,25 @@ export default function DealWorkspace({
                             ? formatTelemetryDuration(stage.duration)
                             : '';
                         const activeDurationLabel = stage.active ? formatStageDuration(stageElapsedMilliseconds) : undefined;
+                        const cumulativeLabel = formatDays(stage.cumulative);
                         const health = stageSlaHealth(durationMilliseconds, stage.targetDays);
                         const stageOverdue = health === 'overdue';
                         const activeDateLabel = stage.active && Number.isFinite(stageEnteredAtMilliseconds)
                           ? new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' })
                             .format(stageEnteredAtMilliseconds)
                             .replace(' ', '-')
-                            .toUpperCase()
                           : '';
                         return <li key={stage.key} className="telemetry-step relative flex min-w-0 flex-1 flex-col items-center">
                           <button type="button" disabled={!progressDeal || stage.active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
                             onClick={() => pipelineStage && progressDeal && requestStageChange(pipelineStage, progressDeal)}
                             title={stage.active && stageOverdue ? `SLA overdue: stage exceeded its ${stage.targetDays}-day target` : stage.active && health === 'warning' ? `SLA warning: stage is approaching its ${stage.targetDays}-day target` : stage.name}
-                            aria-label={`${stage.name}${durationLabel ? `; stage duration ${durationLabel}` : ''}${stage.active ? `${activeDurationLabel ? `; elapsed ${activeDurationLabel}` : ''}; total ${formatDays(stage.cumulative)}` : stage.done ? '; completed' : '; upcoming'}${stage.active && stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : stage.active && health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
+                            aria-label={`${stage.name}${durationLabel ? `; stage duration ${durationLabel}` : ''}${stage.active ? `${activeDurationLabel ? `; elapsed ${activeDurationLabel}` : ''}${cumulativeLabel ? `; total ${cumulativeLabel}` : ''}` : stage.done ? '; completed' : '; upcoming'}${stage.active && stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : stage.active && health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
                             aria-current={stage.active ? 'step' : undefined}
                             className={`telemetry-stage relative z-[1] flex w-full flex-col items-center border-0 bg-transparent px-0.5 py-0 text-center disabled:cursor-default ${stage.active ? 'is-active' : stage.done ? 'is-complete' : 'is-pending'}`}>
                             <span className={`flex h-7 w-full items-center justify-center px-1 text-[10px] font-semibold leading-3 tracking-normal sm:text-xs ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#89919C]'}`}>
                               {stage.name}
                             </span>
-                            <span className={`flex h-4 items-center justify-center whitespace-nowrap font-mono text-[10px] font-semibold leading-none tracking-[0.08em] ${stage.active ? 'text-[#A7F2C5]' : 'text-transparent'}`}>
+                            <span className={`flex h-4 items-center justify-center whitespace-nowrap text-[10px] font-semibold leading-none tracking-[0.08em] ${stage.active ? 'text-[#A7F2C5]' : 'text-transparent'}`}>
                               {stage.active ? `NOW${activeDateLabel ? ` ${activeDateLabel}` : ''}` : '\u00a0'}
                             </span>
                             <span className={`telemetry-node ${stage.active ? `is-${health}` : stage.done ? 'is-complete' : ''}`}>
@@ -1247,7 +1249,7 @@ export default function DealWorkspace({
                             </span>
                           </button>
                           {durationLabel && <span
-                            className={`relative z-[1] mt-1 whitespace-nowrap text-center font-mono text-[10px] leading-4 sm:text-xs ${stage.active ? 'text-emerald-400/80' : 'text-[#A8B1BC]'}`}
+                            className={`relative z-[1] mt-1 whitespace-nowrap text-center text-[10px] leading-4 sm:text-xs ${stage.active ? 'text-emerald-400/80' : 'text-[#A8B1BC]'}`}
                             title={`${durationLabel} in ${stage.name}`}
                           >
                             {durationLabel}
@@ -1375,11 +1377,11 @@ export default function DealWorkspace({
             </div>
             <div className="mb-3 grid gap-2 sm:grid-cols-2">
               <div className="rounded-lg border border-ink-700 bg-ink-900/40 p-3">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Weekly stage progression</p>
+                <p className="text-[10px] font-semibold tracking-wide text-muted">Weekly stage progression</p>
                 <p className="mt-1 text-lg font-semibold text-white">{lastWeekProgressions}<span className="ml-1 text-xs font-normal text-muted">stage changes · last 7 days</span></p>
               </div>
               <div className="rounded-lg border border-ink-700 bg-ink-900/40 p-3">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Monthly stage progression</p>
+                <p className="text-[10px] font-semibold tracking-wide text-muted">Monthly stage progression</p>
                 <p className="mt-1 text-lg font-semibold text-white">{lastMonthProgressions}<span className="ml-1 text-xs font-normal text-muted">stage changes · last 30 days</span></p>
               </div>
             </div>
@@ -1443,7 +1445,7 @@ export default function DealWorkspace({
                 <button type="button" className="btn-ghost !px-2 !py-1" onClick={() => setActivityModal('quote')}><Plus size={12} /> Quote</button>
               </div>
               {visibleQuotes.length ? <div className="overflow-x-auto"><table className="w-full min-w-52 text-left text-xs">
-                <thead className="text-[10px] uppercase text-muted"><tr><th className="pb-2 font-medium">Insurer</th><th className="pb-2 text-right font-medium">Premium</th><th className="pb-2 text-right font-medium">Date</th></tr></thead>
+                <thead className="text-[10px] text-muted"><tr><th className="pb-2 font-medium">Insurer</th><th className="pb-2 text-right font-medium">Premium</th><th className="pb-2 text-right font-medium">Date</th></tr></thead>
                 <tbody>{visibleQuotes.map((quote) => <tr key={quote.id} className="border-t border-ink-700/60"><td className="py-2 text-white">{quote.insurer}</td><td className="py-2 text-right text-brand-300">{formatAmount(quote.quoteAmount ?? 0, quote.quoteCurrency ?? 'MVR')}</td><td className="py-2 text-right text-muted">{formatDate(quote.date)}</td></tr>)}</tbody>
               </table></div> : <p className="text-xs text-muted">No insurer quotes recorded. Add quotes to compare premium and terms.</p>}
             </div>
@@ -1598,7 +1600,7 @@ function ContactDirectory({
               <div className="flex min-w-0 items-center gap-1.5" title={`${contact.name}${contact.role ? ` · ${contact.role}` : ''}`}>
                 <span className="min-w-0 truncate font-semibold text-white">{contact.name}</span>
                 <span className="min-w-0 truncate text-[10px] text-muted">{contact.role}</span>
-                {primary && <span className="shrink-0 text-[9px] uppercase tracking-wide text-brand-300">Primary</span>}
+                {primary && <span className="shrink-0 text-[9px] tracking-wide text-brand-300">Primary</span>}
               </div>
               <span className="truncate text-white" title={contact.email || undefined}>{contact.email}</span>
               <span className="truncate text-white" title={contact.phone || undefined}>{contact.phone}</span>

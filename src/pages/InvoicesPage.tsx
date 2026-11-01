@@ -37,6 +37,7 @@ export default function InvoicesPage() {
     : tab === 'outstanding'
       ? invoices.filter((i) => i.status !== 'Paid')
       : invoices.filter((i) => i.status === tab);
+  const activeGstRate = taxRates.find((rate) => rate.name === 'Standard GST')?.rate;
 
   const computeTotals = (inv: Invoice) => {
     const subtotal = inv.items.reduce((s, it) => s + it.unitPrice * it.qty, 0);
@@ -99,12 +100,12 @@ export default function InvoicesPage() {
         <Stat label="Outstanding" value={`MVR ${invoices.filter((i) => i.status !== 'Paid').reduce((s, i) => s + computeTotals(i).total, 0).toLocaleString()}`} variant="warm" />
         <Stat label="Overdue" value={`MVR ${invoices.filter((i) => i.status === 'Overdue').reduce((s, i) => s + computeTotals(i).total, 0).toLocaleString()}`} variant="hot" />
         <Stat label="Collected" value={`MVR ${invoices.filter((i) => i.status === 'Paid').reduce((s, i) => s + computeTotals(i).total, 0).toLocaleString()}`} variant="win" />
-        <Stat label="Active GST" value={`${taxRates.find((t) => t.name === 'Standard GST')?.rate ?? '—'}%`} variant="brand" />
+        <Stat label="Active GST" value={activeGstRate !== undefined ? `${activeGstRate}%` : 'Not configured'} variant="brand" />
       </div>
 
       <div className="glass rounded-2xl overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-ink-900/60 text-muted text-[11px] uppercase tracking-wider">
+          <thead className="bg-ink-900/60 text-muted text-[11px] tracking-wider">
             <tr>
               <th className="text-left px-4 py-3 font-medium">Invoice #</th>
               <th className="text-left px-4 py-3 font-medium">Client</th>
@@ -121,10 +122,10 @@ export default function InvoicesPage() {
               const t = computeTotals(inv);
               return (
                 <tr key={inv.id} className="table-row">
-                  <td className="px-4 py-3 font-mono text-brand-400">{inv.number}</td>
+                  <td className="px-4 py-3 text-brand-400">{inv.number}</td>
                   <td className="px-4 py-3 text-white">{inv.clientName}</td>
                   <td className="px-4 py-3 text-muted">{inv.insurer}</td>
-                  <td className="px-4 py-3 text-muted font-mono text-xs">{inv.policyNo}</td>
+                  <td className="px-4 py-3 text-muted text-xs">{inv.policyNo}</td>
                   <td className="px-4 py-3 text-muted text-xs">{formatDate(inv.issueDate)}</td>
                   <td className="px-4 py-3"><Badge variant={statusVariant[inv.status]} dot>{inv.status}</Badge></td>
                   <td className="px-4 py-3 text-right text-white font-medium">{inv.currency} {t.total.toLocaleString()}</td>
@@ -164,17 +165,17 @@ export default function InvoicesPage() {
                 <div className="text-xs text-muted mt-1">Reg: {company.registration}</div>
               </div>
               <div className="text-right">
-                <div className="text-[10px] uppercase tracking-wider text-muted">Bill To</div>
+                <div className="text-[10px] tracking-wider text-muted">Bill To</div>
                 <div className="text-white font-semibold">{selected.clientName}</div>
                 <div className="text-xs text-muted">{selected.insurer}</div>
-                <div className="text-xs text-muted font-mono mt-1">{selected.policyNo}</div>
+                <div className="text-xs text-muted mt-1">{selected.policyNo}</div>
                 <div className="mt-2"><Badge variant={statusVariant[selected.status]} dot>{selected.status}</Badge></div>
               </div>
             </div>
 
             <div className="rounded-xl border border-ink-600 overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="bg-ink-800 text-muted text-[11px] uppercase">
+                <thead className="bg-ink-800 text-muted text-[11px]">
                   <tr>
                     <th className="text-left px-3 py-2">Description</th>
                     <th className="text-right px-3 py-2">Qty</th>
@@ -200,7 +201,7 @@ export default function InvoicesPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-3">
                 <div>
-                  <div className="text-xs text-muted uppercase mb-2">Installment Schedule</div>
+                  <div className="text-xs text-muted mb-2">Installment Schedule</div>
                   <div className="space-y-2">
                     {selected.installments.map((inst) => (
                       <div key={inst.id} className="flex items-center justify-between bg-ink-900/50 rounded-lg p-2.5 border border-ink-600">
@@ -218,14 +219,14 @@ export default function InvoicesPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <div className="text-xs text-muted uppercase mb-1">Summary</div>
+                <div className="text-xs text-muted mb-1">Summary</div>
                 <Row label="Subtotal" value={`MVR ${computeTotals(selected).subtotal.toLocaleString()}`} />
                 <Row label="VAT / GST" value={`MVR ${computeTotals(selected).vat.toLocaleString()}`} />
                 <div className="border-t border-ink-600 pt-2 flex justify-between text-white font-bold text-lg">
                   <span>Total</span><span>MVR {computeTotals(selected).total.toLocaleString()}</span>
                 </div>
                 <div className="mt-4 p-3 bg-ink-900/50 rounded-lg border border-ink-600 text-xs space-y-1">
-                  <div className="text-muted uppercase text-[10px] mb-1">Remittance</div>
+                  <div className="text-muted text-[10px] mb-1">Remittance</div>
                   <div className="text-white">{BANK_DETAILS.bankName}</div>
                   <div className="text-muted">MVR: {BANK_DETAILS.mvrAccount}</div>
                   <div className="text-muted">USD: {BANK_DETAILS.usdAccount}</div>
@@ -257,7 +258,7 @@ function Stat({ label, value, variant }: { label: string; value: string; variant
   const c = { warm: 'text-warm', hot: 'text-hot', win: 'text-win', brand: 'text-brand-400' }[variant];
   return (
     <div className="glass rounded-xl p-3">
-      <div className="text-[11px] text-muted uppercase tracking-wider">{label}</div>
+      <div className="text-[11px] text-muted tracking-wider">{label}</div>
       <div className={`text-lg font-bold mt-1 ${c}`}>{value}</div>
     </div>
   );

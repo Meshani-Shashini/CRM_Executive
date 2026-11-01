@@ -82,7 +82,7 @@ export default function QSlipsPage() {
           </div>
 
           <div>
-            <div className="text-xs text-muted uppercase mb-2">Product Class</div>
+            <div className="text-xs text-muted mb-2">Product Class</div>
             <div className="flex gap-1 bg-ink-800/60 border border-ink-600 rounded-lg p-1 mb-3 overflow-x-auto no-scrollbar">
               {categories.map((category) => (
                 <button
@@ -100,7 +100,7 @@ export default function QSlipsPage() {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {PRODUCT_CODES.filter((product) => product.category === activeCat).map((product) => (
                 <div key={product.code} className="flex items-center gap-2 bg-ink-900/50 rounded-lg p-2.5 border border-ink-600">
-                  <span className="font-mono text-xs text-brand-400 w-7">{product.code}</span>
+                  <span className="text-xs text-brand-400 w-7">{product.code}</span>
                   <span className="text-xs text-white">{product.name}</span>
                 </div>
               ))}
@@ -108,7 +108,7 @@ export default function QSlipsPage() {
           </div>
 
           <div>
-            <div className="text-xs text-muted uppercase mb-2">Coverage / Perils</div>
+            <div className="text-xs text-muted mb-2">Coverage / Perils</div>
             <div className="flex flex-wrap gap-2">
               {perilOptions.map((peril) => (
                 <button
@@ -136,7 +136,7 @@ export default function QSlipsPage() {
 function SlipCount({ label, value, color }: { label: string; value: number; color: string }) {
   return (
     <div className="glass rounded-2xl p-4">
-      <div className="text-xs text-muted uppercase">{label}</div>
+      <div className="text-xs text-muted">{label}</div>
       <div className={`text-2xl font-bold mt-1 ${color}`}>{value}</div>
     </div>
   );

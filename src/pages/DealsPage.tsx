@@ -328,7 +328,7 @@ export default function DealsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h1 className="text-xl font-semibold text-white">Deals pipeline</h1><p className="mt-1 text-xs text-muted">Kanban stage progression, validation, activity timeline, and placement inspection.</p></div>
         <div className="flex items-center gap-3">
-          <div className="hidden text-right sm:block"><div className="text-[10px] uppercase text-muted">Open deals</div><div className="text-sm font-semibold text-white">{deals.length}</div></div>
+          <div className="hidden text-right sm:block"><div className="text-[10px] text-muted">Open deals</div><div className="text-sm font-semibold text-white">{deals.length}</div></div>
           <button type="button" className="btn-ghost !py-1.5" onClick={() => setFilterOpen(true)}><Filter size={14} /> Filter</button>
           <button type="button" className="btn-primary !py-1.5 !text-xs" onClick={openCreate} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding deals' : undefined}>+ Deal</button>
         </div>

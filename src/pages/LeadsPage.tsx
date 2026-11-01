@@ -221,7 +221,7 @@ export default function LeadsPage() {
     return {
       overdue: isStageSlaOverdue(enteredAt, targetDays, clockNow),
       targetDays,
-      elapsedDays: getStageSlaElapsedDays(enteredAt, clockNow) ?? 0,
+      elapsedDays: getStageSlaElapsedDays(enteredAt, clockNow),
     };
   };
   const moveLeadToStage = (lead: Lead, stage: LeadLifecycleStage) => {
@@ -654,7 +654,7 @@ export default function LeadsPage() {
                 <Badge variant="muted">{stageLeads.length}</Badge>
               </header>
               {showAggregate && <div className="mb-2 rounded-lg border border-brand-400/15 bg-brand-400/5 px-2.5 py-2">
-                <div className="text-[10px] uppercase tracking-wide text-muted">Aggregate MVR value</div>
+                <div className="text-[10px] tracking-wide text-muted">Aggregate MVR value</div>
                 <div className="text-sm font-semibold text-brand-200">{formatAmount(aggregateMvr, 'MVR')}</div>
               </div>}
               <div className="max-h-[calc(100vh-300px)] min-h-48 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
@@ -787,14 +787,18 @@ export default function LeadsPage() {
                   <td className="px-2 py-2 font-semibold text-white"><span className="block truncate" title={lead.title ?? `${lead.client} lead`}>{lead.title ?? `${lead.client} lead`}</span></td>
                   <td className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={lead.client}>{lead.client}</span></td>
                   <td className="min-w-0 overflow-hidden px-2 py-2 font-normal text-[#E1E2E5]">
-                    <span className="flex min-w-0 flex-nowrap items-center gap-1" title={stage}>
+                    <span className="flex min-w-0 flex-nowrap items-center gap-1" title={stage} aria-label={`Stage: ${stage}`}>
                       {isTerminalLeadStage(stage)
-                        ? <span className={`pill min-w-0 flex-1 truncate border ${stage === 'Lost' ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]' : 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]'}`} title={stage}>{stage}</span>
+                        ? <span className={`pill min-w-0 flex-1 truncate whitespace-nowrap border uppercase ${stage === 'Lost' ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]' : 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]'}`} title={stage}>
+                          {stage === 'Converted to deal' ? 'CONVERTED' : stage}
+                        </span>
                         : <span className="min-w-0 flex-1 truncate">{stage}</span>}
-                      <StageSlaBadges elapsedDays={stageSla.elapsedDays} targetDays={stageSla.targetDays} />
-                      {stageSla.overdue && <span className="pill max-w-full !gap-1 !px-1.5 border border-hot/40 bg-hot/10 text-hot" title={`Current stage exceeded its ${stageSla.targetDays}-day SLA`} aria-label={`SLA overdue: current stage exceeded its ${stageSla.targetDays}-day target`}>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <StageSlaBadges elapsedDays={stageSla.elapsedDays} targetDays={stageSla.targetDays} />
+                        {stageSla.overdue && <span className="pill max-w-full !gap-1 !px-1.5 border border-hot/40 bg-hot/10 text-hot uppercase" title={`Current stage exceeded its ${stageSla.targetDays}-day SLA`} aria-label={`SLA overdue: current stage exceeded its ${stageSla.targetDays}-day target`}>
                         <AlertTriangle size={11} /> Overdue
-                      </span>}
+                        </span>}
+                      </div>
                     </span>
                   </td>
                   <td className="whitespace-nowrap px-2 py-2 font-normal"><InsuranceBadge code={lead.productCode} />                  </td>
@@ -1140,5 +1144,5 @@ function avatarCode(name: string) {
 }
 
 function tableDate(value?: string) {
-  return value ? normalizeDateInput(value) || '—' : '—';
+  return value ? normalizeDateInput(value) : '';
 }

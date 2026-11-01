@@ -75,7 +75,7 @@ export default function MiraPage() {
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-ink-900/60 text-muted text-[11px] uppercase tracking-wider">
+            <thead className="bg-ink-900/60 text-muted text-[11px] tracking-wider">
               <tr>
                 <th className="text-left px-4 py-3 font-medium w-10">#</th>
                 <th className="text-left px-4 py-3 font-medium">Date</th>
@@ -106,7 +106,7 @@ export default function MiraPage() {
             </tbody>
             <tfoot className="bg-ink-800/80 text-white font-semibold">
               <tr className="border-t-2 border-ink-600">
-                <td colSpan={4} className="px-4 py-3 text-right text-muted uppercase text-xs">Totals</td>
+                <td colSpan={4} className="px-4 py-3 text-right text-muted text-xs">Totals</td>
                 <td className="px-4 py-3 text-right">{totals.sumInsured.toLocaleString()}</td>
                 <td className="px-4 py-3 text-right">{totals.premium.toLocaleString()}</td>
                 <td></td>

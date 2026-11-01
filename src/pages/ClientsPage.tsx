@@ -498,10 +498,10 @@ export default function ClientsPage() {
                 <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Company Contacts</h4>
                 <div className="space-y-1.5">
                   {selectedContacts.map((contact) => <div key={contact.id} className="rounded-lg border border-ink-700 bg-ink-900/40 p-2.5">
-                    <div className="flex items-center justify-between gap-2 text-sm"><span className="font-medium text-white">{contact.name}</span><Badge variant="muted">{contact.role}</Badge></div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-sm"><span className="min-w-0 break-words font-medium text-white">{contact.name}</span><Badge variant="muted">{contact.role}</Badge></div>
                     {(contact.email || contact.phone) && <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-white">
-                      {contact.email && <span>{contact.email}</span>}
-                      {contact.phone && <span>{contact.phone}</span>}
+                      {contact.email && <span className="break-all">{contact.email}</span>}
+                      {contact.phone && <span className="break-all">{contact.phone}</span>}
                     </div>}
                   </div>)}
                 </div>

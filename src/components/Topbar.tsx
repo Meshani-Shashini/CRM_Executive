@@ -121,7 +121,7 @@ export default function Topbar({
               </div>
               {canPreviewRoles && (
                 <div className="border-b border-ink-700 p-2">
-                  <div className="px-1 pb-2 text-[10px] uppercase tracking-wider text-muted">View role</div>
+                  <div className="px-1 pb-2 text-[10px] tracking-wider text-muted">View role</div>
                   <div role="group" aria-label="Preview role" className="grid grid-cols-2 gap-1">
                     {([
                       ['admin', 'Admin'],

@@ -63,9 +63,9 @@ export default function ActivityTimelineItem({
     : '';
 
   return (
-    <article className="grid min-w-0 grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-2 border-b border-ink-700/70 px-2 py-1.5 last:border-b-0">
+    <article className="grid min-w-0 grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-1.5 border-b border-ink-700/70 px-1.5 py-1 last:border-b-0">
       <CategoryIcon size={12} className="text-muted" aria-hidden="true" />
-      <div className="flex min-w-0 items-center gap-2 overflow-hidden text-[10px] leading-4">
+      <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[10px] leading-4">
         {transition ? (
           <div className="flex shrink-0 items-center gap-1" aria-label={`Lead temperature: ${transition.from} to ${transition.to}`}>
             <TemperatureTag value={transition.from} />

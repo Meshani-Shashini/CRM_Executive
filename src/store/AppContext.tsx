@@ -14,7 +14,6 @@ import {
   initializeSampleLeads as persistSampleLeads,
   SAMPLE_LEAD_IDS,
 } from '../lib/sampleLeads';
-import { createSampleWorkspace } from '../lib/sampleWorkspace';
 import { reconcileContactAssociations } from '../utils/contactProfiles';
 
 interface AppState {
@@ -81,7 +80,7 @@ interface TenantRecord {
 type AuditedRecord = Lead | Deal;
 
 function auditValue(value: unknown): string {
-  if (value === undefined || value === null || value === '') return '—';
+  if (value === undefined || value === null || value === '') return 'Not set';
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return JSON.stringify(value);
@@ -376,15 +375,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ) {
         throw new Error('Invalid demo username or password.');
       }
-      const sampleWorkspace = createSampleWorkspace(DEMO_USER);
       setUsers([DEMO_USER]);
-      setLeads(sampleWorkspace.leads);
-      setDeals(sampleWorkspace.deals);
-      setClients(sampleWorkspace.clients);
-      setActivities(sampleWorkspace.activities);
-      setPipelines(sampleWorkspace.pipelines);
-      setPipelineStages(sampleWorkspace.pipelineStages);
-      setStageHistory(sampleWorkspace.stageHistory);
+      setLeads([]);
+      setDeals([]);
+      setClients([]);
+      setActivities([]);
+      setPipelines([]);
+      setPipelineStages([]);
+      setStageHistory([]);
       setUser(DEMO_USER);
       setAuthError(null);
       setDataReady(true);

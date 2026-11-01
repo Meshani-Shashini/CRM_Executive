@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { Flame, Snowflake, Sun } from 'lucide-react';
+import { ArrowRight, Flame, Snowflake, Sun } from 'lucide-react';
 import type { LeadTemperature } from '../types';
 
 const tableBadgeClass = 'pill pill-compact border';
@@ -114,13 +114,22 @@ export default function LeadTemperatureControl({
           onClick={(event) => event.stopPropagation()}
         >
           <h2 id={confirmationTitleId} className="text-sm font-semibold text-white">Confirm temperature change</h2>
-          <p className="mt-2 text-sm text-muted">
-            Lead temperature: <span className={selected.menuClassName}>{temperature}</span>
-            {' -> '}
-            <span className={temperatureOptions.find((option) => option.value === pendingTemperature)?.menuClassName}>
-              {pendingTemperature}
+          <p className="mt-2 flex items-center gap-2 text-sm text-muted" aria-label={`${leadName}: ${temperature} to ${pendingTemperature}?`}>
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold ${selected.className}`}>
+              <TemperatureIcon size={12} aria-hidden="true" />
+              {temperature}
             </span>
-            ?
+            <ArrowRight size={14} aria-hidden="true" />
+            {(() => {
+              const next = temperatureOptions.find((option) => option.value === pendingTemperature);
+              if (!next) return null;
+              const NextIcon = next.Icon;
+              return <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold ${next.className}`}>
+                <NextIcon size={12} aria-hidden="true" />
+                {pendingTemperature}
+              </span>;
+            })()}
+            <span>?</span>
           </p>
           <div className="mt-4 flex justify-end gap-2">
             <button ref={cancelRef} type="button" className="btn-ghost" onClick={dismissConfirmation}>No</button>

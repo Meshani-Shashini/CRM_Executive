@@ -371,7 +371,7 @@ function KpiCard({
   const content = (
     <>
       <div className="flex items-start justify-between">
-        <div className="text-xs text-muted uppercase tracking-wider">{label}</div>
+        <div className="text-xs text-muted tracking-wider">{label}</div>
         <div className={`w-8 h-8 rounded-lg border flex items-center justify-center ${colorMap[accent]}`}>
           <Icon size={15} />
         </div>
@@ -385,7 +385,7 @@ function KpiCard({
 
 function MetricLink({ href, label, value }: { href: string; label: string; value: string }) {
   return <a href={href} className="rounded-xl border border-ink-700 bg-ink-900/40 p-3 hover:border-brand-400/50 hover:bg-ink-800/60 transition">
-    <div className="text-[11px] uppercase tracking-wider text-muted">{label}</div>
+    <div className="text-[11px] tracking-wider text-muted">{label}</div>
     <div className="mt-1 text-sm font-semibold text-white">{value}</div>
   </a>;
 }

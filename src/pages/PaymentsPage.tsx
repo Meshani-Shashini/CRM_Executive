@@ -63,20 +63,20 @@ export default function PaymentsPage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="glass rounded-2xl p-4">
           <div className="flex items-center justify-between">
-            <div className="text-xs text-muted uppercase tracking-wider">Total Received</div>
+            <div className="text-xs text-muted tracking-wider">Total Received</div>
             <CreditCard size={16} className="text-brand-400" />
           </div>
           <div className="text-2xl font-bold text-white mt-1">MVR {total.toLocaleString()}</div>
         </div>
         <div className="glass rounded-2xl p-4">
           <div className="flex items-center justify-between">
-            <div className="text-xs text-muted uppercase tracking-wider">Commission Income</div>
+            <div className="text-xs text-muted tracking-wider">Commission Income</div>
             <TrendingUp size={16} className="text-win" />
           </div>
           <div className="text-2xl font-bold text-win mt-1">MVR {commissionTotal.toLocaleString()}</div>
         </div>
         <div className="glass rounded-2xl p-4">
-          <div className="text-xs text-muted uppercase tracking-wider">Pending Receipts</div>
+          <div className="text-xs text-muted tracking-wider">Pending Receipts</div>
           <div className="text-2xl font-bold text-warm mt-1">{pendingCount}</div>
         </div>
       </div>
@@ -100,7 +100,7 @@ export default function PaymentsPage() {
 
       <div className="glass rounded-2xl overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-ink-900/60 text-muted text-[11px] uppercase tracking-wider">
+          <thead className="bg-ink-900/60 text-muted text-[11px] tracking-wider">
             <tr>
               <th className="text-left px-4 py-3 font-medium">Receipt #</th>
               <th className="text-left px-4 py-3 font-medium">Invoice</th>
@@ -116,8 +116,8 @@ export default function PaymentsPage() {
           <tbody>
             {filtered.map((p) => (
               <tr key={p.id} className="table-row">
-                <td className="px-4 py-3 font-mono text-brand-400">{p.receiptNo}</td>
-                <td className="px-4 py-3 text-muted font-mono text-xs">{p.invoiceNumber}</td>
+                <td className="px-4 py-3 text-brand-400">{p.receiptNo}</td>
+                <td className="px-4 py-3 text-muted text-xs">{p.invoiceNumber}</td>
                 <td className="px-4 py-3 text-white">{p.clientName}</td>
                 <td className="px-4 py-3"><Badge variant={p.type === 'Commission' ? 'win' : 'brand'}>{p.type}</Badge></td>
                 <td className="px-4 py-3 text-muted">{p.method}</td>

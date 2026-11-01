@@ -128,7 +128,7 @@ export default function FunnelsPage() {
 function Metric({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
   return (
     <div className="glass flex items-center justify-between rounded-2xl p-4">
-      <div><div className="text-xs uppercase tracking-wider text-muted">{label}</div><div className="mt-1 text-2xl font-bold text-white">{value}</div></div>
+      <div><div className="text-xs tracking-wider text-muted">{label}</div><div className="mt-1 text-2xl font-bold text-white">{value}</div></div>
       {icon}
     </div>
   );

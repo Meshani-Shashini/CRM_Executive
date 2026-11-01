@@ -287,7 +287,7 @@ export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) 
               {auditEntries.map((entry) => (
                 <article key={entry.id} className="rounded-lg border border-ink-700 bg-ink-900/40 p-3 lg:grid lg:grid-cols-[minmax(10rem,1fr)_minmax(0,2fr)_minmax(12rem,auto)] lg:items-center lg:gap-4 lg:rounded-none lg:border-x-0 lg:border-t-0 lg:bg-transparent lg:px-2 lg:py-2">
                   <h4 className="text-sm font-normal text-white lg:truncate" title={entry.title}>{entry.title}</h4>
-                  <p className="mt-2 text-xs font-normal text-white lg:mt-0 lg:truncate" title={entry.description}>{entry.description || '—'}</p>
+                  <p className="mt-2 text-xs font-normal text-white lg:mt-0 lg:truncate" title={entry.description}>{entry.description || 'No details recorded.'}</p>
                   <div className="mt-2 flex flex-wrap gap-x-3 text-[10px] font-normal text-white lg:mt-0 lg:justify-end">
                     <span className="whitespace-nowrap">{entry.actorName ?? users.find((person) => person.id === entry.userId)?.name ?? formatStaffIdentifier(entry.userId)}</span>
                     <time className="whitespace-nowrap" dateTime={entry.createdAt ?? entry.date}>{formatAuditTimestamp(entry.createdAt ?? entry.date)}</time>
@@ -510,7 +510,7 @@ function ProductManagement({
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[1500px]">
-            <thead className="text-[11px] uppercase tracking-wider text-muted border-b border-ink-600">
+            <thead className="text-[11px] tracking-wider text-muted border-b border-ink-600">
               <tr><th className="text-left px-3 py-2">Class</th><th className="text-left px-3 py-2">Product Code</th><th className="text-left px-3 py-2">Description</th><th className="text-right px-3 py-2">Brokerage %</th><th className="text-left px-3 py-2">Mandatory</th><th className="text-left px-3 py-2">Pipeline Model</th><th className="text-left px-3 py-2">Sales Cycle / Velocity</th><th className="text-left px-3 py-2">Risk Level</th><th className="text-left px-3 py-2 min-w-[360px]">Key Underwriting Intake Artifacts</th><th className="px-3 py-2" /></tr>
             </thead>
             <tbody>
