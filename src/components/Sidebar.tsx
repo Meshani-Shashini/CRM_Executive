@@ -99,7 +99,9 @@ export default function Sidebar({
             </div>
             <div className="min-w-0 flex-1 leading-tight">
               <div className="truncate text-xs font-semibold text-white">{user.name}</div>
-              <div className="truncate text-[10px] text-muted">{user.email || company.legalName}</div>
+              <div className="truncate text-[10px] text-muted">
+                {user.role === 'admin' ? 'System admin' : user.email || company.legalName}
+              </div>
             </div>
           </div>
         </div>

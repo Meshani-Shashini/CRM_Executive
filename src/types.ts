@@ -19,6 +19,7 @@ export type LeadFunnelStage = 'L0: Capture' | 'L1: KYC/AML Triage' | 'L2: LOB Sc
 export interface Lead {
   id: string;
   createdAt?: string;
+  updatedAt?: string;
   stageChangedAt?: string;
   personId?: string;
   contactProfileId?: string;

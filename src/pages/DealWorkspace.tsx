@@ -96,13 +96,22 @@ function formatStageDuration(milliseconds: number | undefined) {
   if (elapsedMilliseconds < 3_600_000) return '<1h';
   const totalHours = Math.floor(elapsedMilliseconds / 3_600_000);
   if (totalHours < 24) return `${totalHours}h`;
-  return `${Math.floor(totalHours / 24)}d`;
+  return `${Math.floor(totalHours / 24)}D`;
 }
 
 function formatDays(milliseconds: number | undefined) {
   return milliseconds === undefined || !Number.isFinite(milliseconds)
     ? undefined
-    : `${Math.floor(milliseconds / 86400000)}d`;
+    : `${Math.floor(Math.max(0, milliseconds) / 86400000)}D`;
+}
+
+function formatIsoDate(value: string | undefined) {
+  if (!value) return undefined;
+  const dateOnly = /^(\d{4}-\d{2}-\d{2})/.exec(value);
+  if (dateOnly) return dateOnly[1];
+  const timestamp = new Date(value);
+  if (!Number.isFinite(timestamp.getTime())) return undefined;
+  return `${timestamp.getFullYear()}-${String(timestamp.getMonth() + 1).padStart(2, '0')}-${String(timestamp.getDate()).padStart(2, '0')}`;
 }
 
 function formatTelemetryDuration(milliseconds: number | undefined) {
@@ -279,19 +288,47 @@ export default function DealWorkspace({
       || (!activity.dealId && !activity.leadId && Boolean(selectedClient) && activity.clientId === selectedClient?.id))
     .filter(isBusinessActivity)
     .sort((left, right) => Date.parse(right.date) - Date.parse(left.date));
+  const leadAuditActivities = selectedLead
+    ? activities.filter((activity) => activity.id.startsWith('audit-')
+      && activity.leadId === selectedLead.id
+      && /^Lead (?:created|updated|stage changed|temperature changed):?/.test(activity.title))
+    : [];
+  const leadCreatedAt = selectedLead
+    ? [selectedLead.createdAt, leadAuditActivities.find((activity) => activity.title === 'Lead created')?.date]
+      .find((timestamp): timestamp is string => Boolean(timestamp && Number.isFinite(Date.parse(timestamp))))
+    : undefined;
+  const leadLastModifiedAt = selectedLead
+    ? [
+      selectedLead.updatedAt,
+      leadCreatedAt,
+      selectedLead.stageChangedAt,
+      selectedLead.routedAt,
+      ...leadAuditActivities.map((activity) => activity.date),
+    ].filter((timestamp): timestamp is string => Boolean(timestamp && Number.isFinite(Date.parse(timestamp))))
+      .reduce<string | undefined>((latest, timestamp) =>
+        !latest || Date.parse(timestamp) > Date.parse(latest) ? timestamp : latest, undefined)
+    : undefined;
+  const leadCreatedDateLabel = formatIsoDate(leadCreatedAt);
+  const leadLastModifiedDateLabel = formatIsoDate(leadLastModifiedAt);
   const quotes = selectedActivities.filter((activity) => activity.type === 'quote' && activity.quoteAmount !== undefined);
   const selectedHistory = progressDeal
     ? stageHistory.filter((entry) => entry.dealId === progressDeal.id).sort((left, right) => right.enteredAt.localeCompare(left.enteredAt))
     : [];
-  const stageEntry = selectedHistory.find((entry) => !entry.exitedAt);
-  const enteredAt = [stageEntry?.enteredAt, progressDeal?.stageChangedAt, selectedLead?.stageChangedAt, selectedLead?.routedAt, progressDeal?.createdAt, selectedLead?.createdAt]
+  const stageEntry = !selectedLead ? selectedHistory.find((entry) => !entry.exitedAt) : undefined;
+  const enteredAt = (selectedLead
+    ? [selectedLead.stageChangedAt, selectedLead.routedAt, leadCreatedAt]
+    : [stageEntry?.enteredAt, progressDeal?.stageChangedAt, progressDeal?.createdAt])
     .find((timestamp): timestamp is string => Boolean(timestamp && Number.isFinite(Date.parse(timestamp))));
-  const activeProgressStage = progressDeal
-    ? progressDeal.stage
-    : selectedLead ? lifecycleStageForLead(selectedLead) : '';
-  const progressStages: readonly (PipelineStage | string)[] = progressDeal ? stages : LEAD_LIFECYCLE_STAGES;
+  const activeProgressStage = selectedLead
+    ? lifecycleStageForLead(selectedLead, Boolean(progressDeal))
+    : progressDeal?.stage ?? '';
+  const progressStages: readonly (PipelineStage | string)[] = selectedLead
+    ? LEAD_LIFECYCLE_STAGES.filter((stage) =>
+      (stage !== 'Converted to deal' && stage !== 'Lost') || stage === activeProgressStage,
+    )
+    : stages;
   const activeProgressIndex = progressStages.findIndex((stage) => (typeof stage === 'string' ? stage : stage.name) === activeProgressStage);
-  const activeTargetStage = currentStage;
+  const activeTargetStage = selectedLead ? undefined : currentStage;
   const targetDays = activeTargetStage?.stagnationDaysThreshold ?? 0;
   const telemetryOverride = getTelemetryTimestampOverride(targetDays, clockNow);
   const stageEnteredAt = telemetryOverride?.timestamp ?? (enteredAt ? Date.parse(enteredAt) : Number.NaN);
@@ -309,14 +346,14 @@ export default function DealWorkspace({
     })
     .filter((transition): transition is { from: LeadLifecycleStage; to: LeadLifecycleStage; date: string } => Boolean(transition))
     .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
-  const progressStartDate = progressDeal
-    ? selectedHistory[selectedHistory.length - 1]?.enteredAt ?? progressDeal.createdAt ?? enteredAt
-    : selectedLead?.createdAt ?? leadStageHistory[0]?.date ?? selectedLead?.routedAt ?? enteredAt;
+  const progressStartDate = selectedLead
+    ? leadCreatedAt ?? leadStageHistory[0]?.date ?? selectedLead.routedAt ?? enteredAt
+    : selectedHistory[selectedHistory.length - 1]?.enteredAt ?? progressDeal?.createdAt ?? enteredAt;
   const progressStartMilliseconds = progressStartDate ? Date.parse(progressStartDate) : Number.NaN;
   const stageTimeline = progressStages.map((stage, index) => {
     const name = typeof stage === 'string' ? stage : stage.name;
     const pipelineStage = typeof stage === 'string' ? undefined : stage;
-    if (progressDeal) {
+    if (progressDeal && !selectedLead) {
       const history = pipelineStage
         ? selectedHistory.find((entry) => entry.toStageId === pipelineStage.id)
         : undefined;
@@ -351,20 +388,25 @@ export default function DealWorkspace({
     const transitionOut = leadStageHistory.find((transition) => transition.from === name);
     const isCurrent = name === activeProgressStage;
     const stageStart = transitionIn?.date
-      ?? (index === 0 || !leadStageHistory.length ? selectedLead?.createdAt ?? selectedLead?.routedAt : undefined)
-      ?? (isCurrent ? selectedLead?.stageChangedAt ?? selectedLead?.routedAt ?? selectedLead?.createdAt : undefined);
-    const stageEnd = transitionOut?.date ?? (isCurrent && stageStart ? new Date(clockNow).toISOString() : undefined);
+      ?? (index === 0 || !leadStageHistory.length ? leadCreatedAt ?? selectedLead?.routedAt : undefined)
+      ?? (isCurrent ? selectedLead?.stageChangedAt ?? selectedLead?.routedAt ?? leadCreatedAt : undefined);
+    const terminalReached = isCurrent && (name === 'Converted to deal' || name === 'Lost');
+    const stageEnd = transitionOut?.date
+      ?? (isCurrent && !terminalReached && stageStart ? new Date(clockNow).toISOString() : undefined);
     const startMs = stageStart ? Date.parse(stageStart) : Number.NaN;
     const endMs = stageEnd ? Date.parse(stageEnd) : Number.NaN;
+    const cumulativeEnd = terminalReached && Number.isFinite(startMs)
+      ? startMs
+      : isCurrent ? clockNow : Number.isFinite(endMs) ? endMs : startMs;
     const cumulative = Number.isFinite(startMs) && Number.isFinite(progressStartMilliseconds)
-      ? Math.max(0, (isCurrent ? clockNow : Number.isFinite(endMs) ? endMs : startMs) - progressStartMilliseconds)
+      ? Math.max(0, cumulativeEnd - progressStartMilliseconds)
       : undefined;
     return {
       key: name,
       name,
       index,
-      active: isCurrent,
-      done: activeProgressIndex >= 0 && index < activeProgressIndex,
+      active: isCurrent && !terminalReached,
+      done: (activeProgressIndex >= 0 && index < activeProgressIndex) || terminalReached,
       enteredAt: stageStart,
       duration: Number.isFinite(startMs) && Number.isFinite(endMs)
         ? Math.max(0, endMs - startMs)
@@ -419,6 +461,20 @@ export default function DealWorkspace({
   const kanbanStages = pipelineStages.filter((stage) => stage.pipelineId === kanbanPipeline?.id)
     .sort((left, right) => left.stageOrder - right.stageOrder);
   const timelineEntries: TimelineEntry[] = [
+    ...(selectedLead && leadCreatedAt ? [{
+      key: `lead-created-${selectedLead.id}`,
+      title: 'Lead created',
+      description: selectedLead.title ?? selectedLead.client,
+      date: leadCreatedAt,
+      category: 'stage' as const,
+    }] : []),
+    ...(selectedLead && leadLastModifiedAt ? [{
+      key: `lead-last-modified-${selectedLead.id}`,
+      title: 'Lead last modified',
+      description: 'Latest recorded lead update',
+      date: leadLastModifiedAt,
+      category: 'activity' as const,
+    }] : []),
     ...(selectedDeal?.createdAt ? [{
       key: `deal-created-${selectedDeal.id}`,
       title: 'Deal created',
@@ -443,31 +499,33 @@ export default function DealWorkspace({
         category: 'stage' as const,
       };
     }),
-    ...selectedActivities.map((activity) => {
-      const actor = users.find((person) => person.id === activity.userId);
-      const details = [
-        activity.description,
-        activity.personsMet ? `Persons met: ${activity.personsMet}` : '',
-        activity.meetingMode ? `Mode: ${activity.meetingMode}` : '',
-        activity.venue ? `Venue: ${activity.venue}` : '',
-        activity.outcome ? `Outcome: ${activity.outcome}` : '',
-        activity.followUpAction ? `Follow-up: ${activity.followUpAction}` : '',
-        activity.userId ? `By ${activity.actorName ?? actor?.name ?? (activity.userId === user.id ? user.name : formatStaffIdentifier(activity.userId))}` : '',
-      ].filter(Boolean).join(' · ');
-      return {
-        key: activity.id,
-        title: activity.title,
-        description: details,
-        date: activity.date,
-        category: activity.title.startsWith('Lead temperature changed:') ? 'temperature' as const
-          : activity.type === 'meeting' ? 'appointment' as const
-          : activity.type === 'quote' ? 'proposal' as const
-            : activity.type === 'task' ? 'task' as const
-              : (activity.title.startsWith('Lead stage changed:') || activity.title.startsWith('Deal stage changed:')) ? 'stage' as const
-                : activity.type === 'note' ? 'note' as const : 'activity' as const,
-        ...(activity.durationMinutes !== undefined ? { durationMinutes: activity.durationMinutes } : {}),
-      };
-    }),
+    ...selectedActivities
+      .filter((activity) => !(selectedLead && activity.id.startsWith('audit-') && activity.title === 'Lead created'))
+      .map((activity) => {
+        const actor = users.find((person) => person.id === activity.userId);
+        const details = [
+          activity.description,
+          activity.personsMet ? `Persons met: ${activity.personsMet}` : '',
+          activity.meetingMode ? `Mode: ${activity.meetingMode}` : '',
+          activity.venue ? `Venue: ${activity.venue}` : '',
+          activity.outcome ? `Outcome: ${activity.outcome}` : '',
+          activity.followUpAction ? `Follow-up: ${activity.followUpAction}` : '',
+          activity.userId ? `By ${activity.actorName ?? actor?.name ?? (activity.userId === user.id ? user.name : formatStaffIdentifier(activity.userId))}` : '',
+        ].filter(Boolean).join(' · ');
+        return {
+          key: activity.id,
+          title: activity.title,
+          description: details,
+          date: activity.date,
+          category: activity.title.startsWith('Lead temperature changed:') ? 'temperature' as const
+            : activity.type === 'meeting' ? 'appointment' as const
+              : activity.type === 'quote' ? 'proposal' as const
+                : activity.type === 'task' ? 'task' as const
+                  : (activity.title.startsWith('Lead stage changed:') || activity.title.startsWith('Deal stage changed:')) ? 'stage' as const
+                    : activity.type === 'note' ? 'note' as const : 'activity' as const,
+          ...(activity.durationMinutes !== undefined ? { durationMinutes: activity.durationMinutes } : {}),
+        };
+      }),
   ].sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
   const filteredTimelineEntries = timelineFilter === 'all'
     ? timelineEntries
@@ -1188,18 +1246,22 @@ export default function DealWorkspace({
             </div>
           </div>
 
-          <section aria-label={progressDeal ? 'Placement telemetry stage tracker' : 'Lead telemetry stage tracker'} className="telemetry-panel order-1 mt-2 min-w-0 rounded-xl px-2 py-1.5">
-            <h2 className="sr-only">{progressDeal ? 'Placement telemetry' : 'Lead telemetry'}</h2>
+          <section aria-label={selectedLead ? 'Lead telemetry stage tracker' : 'Placement telemetry stage tracker'} className={`telemetry-panel ${selectedLead ? 'order-4' : 'order-1'} mt-2 min-w-0 rounded-xl px-2 py-1.5`}>
+            <h2 className="sr-only">{selectedLead ? 'Lead telemetry' : 'Placement telemetry'}</h2>
             {stageTimeline.length ? <>
-              <div className="mb-1.5 flex items-center gap-1.5">
-                <ActivityIcon size={13} className="text-[#A7F2C5]" aria-hidden="true" />
-                <span className="text-[9px] tracking-[0.14em] text-[#A7F2C5]">{progressDeal ? selectedPipeline?.name ?? 'Pipeline' : 'Lead Telemetry'}</span>
-                <span className="telemetry-live-dot" aria-hidden="true" />
+              <div className="mb-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                <ActivityIcon size={13} className="shrink-0 text-[#A7F2C5]" aria-hidden="true" />
+                <span className="text-[9px] tracking-[0.14em] text-[#A7F2C5]">{selectedLead ? 'Lead Telemetry' : selectedPipeline?.name ?? 'Pipeline'}</span>
+                <span className="telemetry-live-dot shrink-0" aria-hidden="true" />
                 <span className="sr-only">Live tracking</span>
+                {selectedLead && <span className="ml-auto flex flex-wrap items-center gap-x-2 whitespace-nowrap text-[9px] tabular-nums text-[#A8B1BC]">
+                  {leadCreatedDateLabel && <span>CREATED {leadCreatedDateLabel}</span>}
+                  <span>UPDATED {leadLastModifiedDateLabel ?? '—'}</span>
+                </span>}
                 {telemetryOverride && <span className="ml-auto max-w-24 truncate text-[9px] tracking-wider text-[#E09228]" title={`Test · ${telemetryOverride.label}`}>Test · {telemetryOverride.label}</span>}
               </div>
               <div className="w-full min-w-0 overflow-x-auto">
-                <ol className="telemetry-track flex min-w-[700px] items-start justify-between xl:min-w-0">
+                <ol className="telemetry-track flex min-w-[700px] items-start justify-between pl-20 xl:min-w-0">
                       {stageTimeline.map((stage) => {
                         const pipelineStage = typeof progressStages[stage.index] === 'string'
                           ? undefined
@@ -1222,8 +1284,12 @@ export default function DealWorkspace({
                           : stage.done
                             ? formatTelemetryDuration(stage.duration)
                             : '';
-                        const activeDurationLabel = stage.active ? formatStageDuration(stageElapsedMilliseconds) : undefined;
+                        const activeDurationLabel = stage.active ? formatTelemetryDuration(durationMilliseconds) : undefined;
                         const cumulativeLabel = formatDays(stage.cumulative);
+                        const terminalTotalLabel = selectedLead && stage.done && stage.index === stageTimeline.length - 1
+                          ? cumulativeLabel : undefined;
+                        const displayStageName = stage.name === 'Converted to deal' ? 'CONVERTED' : stage.name;
+                        const lostTerminal = selectedLead && stage.name === 'Lost' && stage.done;
                         const health = stageSlaHealth(durationMilliseconds, stage.targetDays);
                         const stageOverdue = health === 'overdue';
                         const activeDateLabel = stage.active && Number.isFinite(stageEnteredAtMilliseconds)
@@ -1232,27 +1298,37 @@ export default function DealWorkspace({
                             .replace(' ', '-')
                           : '';
                         return <li key={stage.key} className="telemetry-step relative flex min-w-0 flex-1 flex-col items-center">
-                          <button type="button" disabled={!progressDeal || stage.active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
+                          {selectedLead && stage.index === 0 && leadCreatedDateLabel && <span className="telemetry-start-date" aria-label={`Lead created ${leadCreatedDateLabel}`}>
+                            {leadCreatedDateLabel}
+                          </span>}
+                          <button type="button" disabled={!pipelineStage || !progressDeal || stage.active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
                             onClick={() => pipelineStage && progressDeal && requestStageChange(pipelineStage, progressDeal)}
                             title={stage.active && stageOverdue ? `SLA overdue: stage exceeded its ${stage.targetDays}-day target` : stage.active && health === 'warning' ? `SLA warning: stage is approaching its ${stage.targetDays}-day target` : stage.name}
-                            aria-label={`${stage.name}${durationLabel ? `; stage duration ${durationLabel}` : ''}${stage.active ? `${activeDurationLabel ? `; elapsed ${activeDurationLabel}` : ''}${cumulativeLabel ? `; total ${cumulativeLabel}` : ''}` : stage.done ? '; completed' : '; upcoming'}${stage.active && stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : stage.active && health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
+                            aria-label={`${displayStageName}${durationLabel ? `; stage duration ${durationLabel}` : ''}${stage.active ? `${activeDurationLabel ? `; elapsed ${activeDurationLabel}` : ''}${cumulativeLabel ? `; total ${cumulativeLabel}` : ''}` : stage.done ? `; completed${terminalTotalLabel ? `; total ${terminalTotalLabel}` : ''}` : '; upcoming'}${stage.active && stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : stage.active && health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
                             aria-current={stage.active ? 'step' : undefined}
-                            className={`telemetry-stage relative z-[1] flex w-full flex-col items-center border-0 bg-transparent px-0.5 py-0 text-center disabled:cursor-default ${stage.active ? 'is-active' : stage.done ? 'is-complete' : 'is-pending'}`}>
+                            className={`telemetry-stage relative z-[1] flex w-full flex-col items-center border-0 bg-transparent px-0.5 py-0 text-center disabled:cursor-default ${lostTerminal ? 'is-lost' : stage.active ? 'is-active' : stage.done ? 'is-complete' : 'is-pending'}`}>
                             <span className={`flex h-7 w-full items-center justify-center px-1 text-[10px] font-semibold leading-3 tracking-normal sm:text-xs ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#89919C]'}`}>
-                              {stage.name}
+                              {displayStageName}
                             </span>
                             <span className={`flex h-4 items-center justify-center whitespace-nowrap text-[10px] font-semibold leading-none tracking-[0.08em] ${stage.active ? 'text-[#A7F2C5]' : 'text-transparent'}`}>
                               {stage.active ? `NOW${activeDateLabel ? ` ${activeDateLabel}` : ''}` : '\u00a0'}
                             </span>
-                            <span className={`telemetry-node ${stage.active ? `is-${health}` : stage.done ? 'is-complete' : ''}`}>
+                            <span className={`telemetry-node ${lostTerminal ? 'is-lost' : stage.active ? `is-${health}` : stage.done ? 'is-complete' : ''}`}>
                               {stage.done ? <Check size={11} aria-hidden="true" /> : <span className="telemetry-node-core" />}
                             </span>
                           </button>
-                          {durationLabel && <span
-                            className={`relative z-[1] mt-1 whitespace-nowrap text-center text-[10px] leading-4 sm:text-xs ${stage.active ? 'text-emerald-400/80' : 'text-[#A8B1BC]'}`}
+                          {stage.done && durationLabel && stage.index < stageTimeline.length - 1 && <span
+                            className="telemetry-transition-label"
                             title={`${durationLabel} in ${stage.name}`}
+                            aria-label={`${durationLabel} in ${stage.name}`}
                           >
-                            {durationLabel}
+                            <span>{durationLabel}</span>
+                          </span>}
+                          {stage.active && (activeDurationLabel || cumulativeLabel) && <span className="relative z-[1] mt-1 min-h-4 whitespace-nowrap text-center text-[9px] font-medium leading-3 tabular-nums text-emerald-300">
+                            {activeDurationLabel}{cumulativeLabel && <span className="ml-1 text-[#A8B1BC]">· TOTAL {cumulativeLabel}</span>}
+                          </span>}
+                          {terminalTotalLabel && <span className="relative z-[1] mt-1 min-h-4 whitespace-nowrap text-center text-[9px] font-semibold leading-3 tabular-nums text-[#A8B1BC]">
+                            TOTAL {terminalTotalLabel}
                           </span>}
                           {stage.index < stageTimeline.length - 1 && <span className={`telemetry-connector ${stage.done ? 'is-complete' : ''}`} aria-hidden="true" />}
                         </li>;
@@ -1362,7 +1438,7 @@ export default function DealWorkspace({
             </section>
           </div>
           </>}
-          <section className={`${selectedLead ? 'order-4' : ''} mt-4 min-w-0 border-t border-ink-600 pt-3`}>
+          <section className={`${selectedLead ? 'order-5' : ''} mt-4 min-w-0 border-t border-ink-600 pt-3`}>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Clock3 size={15} className="text-brand-300" /> Activity</h2>
@@ -1418,7 +1494,7 @@ export default function DealWorkspace({
               </div>
             </div>
           </section>
-          {selectedLead ? <section className="order-4 mt-3 rounded-xl border border-ink-600 bg-ink-900/30 p-3">
+          {selectedLead ? <section className="order-6 mt-3 rounded-xl border border-ink-600 bg-ink-900/30 p-3">
             <h2 className="text-sm font-semibold text-white">Lead progression</h2>
             {progressDeal ? <p className="mt-3 text-xs text-win">This lead is linked to deal {progressDeal.id} and follows its placement stages.</p> : <>
               {selectedLead.disposition === 'lost'

@@ -513,6 +513,7 @@ export default function LeadsPage() {
       ...(editingLead ?? {}),
       id: leadId,
       createdAt: editingLead?.createdAt ?? now,
+      updatedAt: now,
       stageChangedAt: stageChanged ? now : editingLead?.stageChangedAt ?? editingLead?.routedAt ?? now,
       personId: person?.id,
       person: selectedPersonName,
