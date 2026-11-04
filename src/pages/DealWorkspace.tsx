@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
+import LeadContactSlaBadge from '../components/LeadContactSlaBadge';
 import Modal from '../components/ui/Modal';
 import ActivityTimelineItem from '../components/ActivityTimelineItem';
 import { useApp } from '../store/AppContext';
@@ -19,9 +20,10 @@ import { isStageSlaOverdue } from '../utils/stageSla';
 import { linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
 import {
   appendLeadStageTransition, buildLeadTelemetryStages, LEAD_LIFECYCLE_STAGES,
-  isLeadLifecycleStage, lifecycleStageForLead,
+  isLeadLifecycleStage, isTerminalLeadStage, lifecycleStageForLead,
   parseLeadStageTransition, type LeadLifecycleStage,
 } from '../utils/leadLifecycle';
+import { getLeadContactedAt } from '../utils/leadSla';
 import { formatStaffIdentifier } from '../utils/staff';
 
 const LOSS_REASONS = [
@@ -174,27 +176,6 @@ function formatDays(milliseconds: number | undefined) {
 
 function formatInterStageDays(milliseconds: number | undefined) {
   return formatDurationDays(milliseconds);
-}
-
-function formatIsoDate(value: string | undefined) {
-  if (!value) return undefined;
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return undefined;
-  return new Intl.DateTimeFormat('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'UTC',
-  }).format(timestamp).replace(/ /g, '-');
-}
-
-function formatTelemetryDate(value: string | undefined) {
-  if (!value) return undefined;
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return undefined;
-  return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' })
-    .format(timestamp)
-    .replace(' ', '-');
 }
 
 function stageSlaHealth(durationMilliseconds: number | undefined, targetDays: number) {
@@ -535,20 +516,6 @@ export default function DealWorkspace({
       targetDays: recordStage.stagnationDaysThreshold,
     };
   };
-  const progressionEvents = [
-    ...selectedHistory.map((entry) => entry.enteredAt),
-    ...selectedActivities
-      .filter((activity) => parseLeadStageTransition(activity.title))
-      .map((activity) => activity.date),
-  ].filter((date) => Number.isFinite(Date.parse(date)));
-  const lastWeekProgressions = progressionEvents.filter((date) => {
-    const age = clockNow - Date.parse(date);
-    return age >= 0 && age <= 7 * 86400000;
-  }).length;
-  const lastMonthProgressions = progressionEvents.filter((date) => {
-    const age = clockNow - Date.parse(date);
-    return age >= 0 && age <= 30 * 86400000;
-  }).length;
   const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
   const kanbanPipeline = activePipelines.find((pipeline) => pipeline.id === kanbanPipelineId)
     ?? activePipelines.find((pipeline) => deals.some((deal) => deal.pipelineId === pipeline.id))
@@ -835,6 +802,56 @@ export default function DealWorkspace({
       durationSeconds: null,
     }]);
     setSelectedKey(`deal:${deal.id}`);
+  };
+
+  const changeLeadTelemetryStage = (target: LeadLifecycleStage) => {
+    if (!selectedLead || (activeRole !== 'admin' && activeRole !== 'sales')) return;
+    const currentStage = lifecycleStageForLead(selectedLead, Boolean(progressDeal));
+    if (target === currentStage || isTerminalLeadStage(currentStage)) return;
+    if (target === 'Converted to deal') {
+      convertLead();
+      return;
+    }
+
+    const enteredAt = new Date().toISOString();
+    let stageHistory;
+    try {
+      stageHistory = appendLeadStageTransition(selectedLead, target, enteredAt);
+    } catch (error) {
+      console.error('Could not update the lead telemetry stage.', error);
+      setContactError(error instanceof Error ? error.message : 'Could not update the lead stage.');
+      return;
+    }
+
+    setContactError('');
+    setLeads((current) => current.map((lead) => lead.id === selectedLead.id
+      ? {
+        ...lead,
+        funnelStage: target,
+        disposition: target === 'Lost' ? 'lost' : undefined,
+        lossReason: target === 'Lost' ? lead.lossReason : undefined,
+        stageHistory,
+        ...(target === 'Contact Made' && !getLeadContactedAt(selectedLead)
+          ? { contactedAt: enteredAt, contacted_at: enteredAt }
+          : {}),
+        stageChangedAt: enteredAt,
+        stage_changed_at: enteredAt,
+        updatedAt: enteredAt,
+        leadFunnelStage: target === 'Meetings Ongoing' ? 'L3: Qualified Opportunity' : undefined,
+      }
+      : lead));
+    setActivities([{
+      id: `activity-${crypto.randomUUID()}`,
+      clientId: selectedClient?.id ?? selectedLead.clientId ?? '',
+      leadId: selectedLead.id,
+      type: 'note',
+      title: `Lead stage changed: ${currentStage} → ${target}`,
+      description: '',
+      date: enteredAt,
+      createdAt: enteredAt,
+      userId: user.id,
+      actorName: user.name,
+    }, ...activities]);
   };
 
   const applyStageChange = (target: PipelineStage, reason?: string) => {
@@ -1327,9 +1344,12 @@ export default function DealWorkspace({
                     leadName={selectedLead.title ?? selectedLead.client}
                     temperature={selectedLead.temperature ?? 'WARM'}
                     disabled={activeRole !== 'admin' && activeRole !== 'sales'}
-                    onChange={(temperature) => setLeads((current) => current.map((lead) =>
-                      lead.id === selectedLead.id ? { ...lead, temperature } : lead,
-                    ))}
+                    onChange={(temperature) => {
+                      const updatedAt = new Date().toISOString();
+                      setLeads((current) => current.map((lead) =>
+                        lead.id === selectedLead.id ? { ...lead, temperature, updatedAt } : lead,
+                      ));
+                    }}
                   /><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1E2024] text-[10px] font-semibold text-[#8E95A2]" title={users.find((person) => person.id === selectedLead.ownerId)?.name ?? formatStaffIdentifier(selectedLead.ownerId)}>{users.find((person) => person.id === selectedLead.ownerId) ? avatarCode(users.find((person) => person.id === selectedLead.ownerId)?.name ?? '') : formatStaffIdentifier(selectedLead.ownerId).slice(0, 2)}</span></>}</div>
                 <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
                   <span>{selectedDeal?.product ?? selectedProduct?.name ?? selectedLead?.productCode} · {selectedPipeline?.name ?? 'No pipeline'} · Ref {selectedItem.id}</span>
@@ -1351,16 +1371,16 @@ export default function DealWorkspace({
             </div>
           </div>
 
-          <section aria-label={selectedLead ? 'Lead telemetry stage tracker' : 'Placement telemetry stage tracker'} className={`telemetry-panel relative w-full ${selectedLead ? 'order-4' : 'order-1'} mt-2 min-w-0 rounded-xl px-2 py-6`}>
+          <section aria-label={selectedLead ? 'Lead telemetry stage tracker' : 'Placement telemetry stage tracker'} className={`telemetry-panel relative w-full ${selectedLead ? 'order-4' : 'order-1'} mt-2 min-w-0 rounded-xl px-2 py-3`}>
             <h2 className="sr-only">{selectedLead ? 'Lead telemetry' : 'Placement telemetry'}</h2>
             {stageTimeline.length ? <>
-              <div className="mb-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+              {!selectedLead && <div className="mb-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
                 <ActivityIcon size={13} className="shrink-0 text-[#A7F2C5]" aria-hidden="true" />
-                <span className="text-[9px] tracking-[0.14em] text-[#A7F2C5]">{selectedLead ? 'Lead Telemetry' : selectedPipeline?.name ?? 'Pipeline'}</span>
+                <span className="text-[9px] tracking-[0.14em] text-[#A7F2C5]">{selectedPipeline?.name ?? 'Pipeline'}</span>
                 <span className="telemetry-live-dot shrink-0" aria-hidden="true" />
                 <span className="sr-only">Live tracking</span>
-              </div>
-              <div className="w-full min-w-0 overflow-x-auto py-2">
+              </div>}
+              <div className="w-full min-w-0 overflow-x-auto py-1">
                 <ol className={`telemetry-track flex min-w-[700px] items-start justify-between pl-20 xl:min-w-0 ${selectedLead ? 'telemetry-track--lead' : ''} ${selectedLead && activeProgressStage === 'Lost' ? 'is-lost' : ''}`}>
                       {stageTimeline.map((stage) => {
                         const pipelineStage = typeof progressStages[stage.index] === 'string'
@@ -1384,7 +1404,7 @@ export default function DealWorkspace({
                         const segmentDurationLabel = stage.done && hasNextStage
                           ? formatInterStageDays(interStageMilliseconds)
                           : '';
-                        const segmentTransitionDate = stage.done ? formatTelemetryDate(nextStageEnteredAt) : undefined;
+                        const segmentTransitionDate = stage.done ? formatDate(nextStageEnteredAt) : undefined;
                         const activeDurationLabel = stage.active
                           ? formatActiveDuration(stage.enteredAt ?? enteredAt, clockNow)
                           : undefined;
@@ -1394,14 +1414,12 @@ export default function DealWorkspace({
                             ? segmentDurationLabel ?? ''
                             : '';
                         const cumulativeLabel = formatDays(stage.cumulative);
-                        const terminalTotalLabel = selectedLead && stage.done && stage.index === stageTimeline.length - 1
-                          ? cumulativeLabel : undefined;
                         const displayStageName = stage.name === 'Converted to deal' ? 'Converted' : stage.name;
                         const lostTerminal = selectedLead && stage.name === 'Lost' && stage.done;
                         const health = stageSlaHealth(durationMilliseconds, stage.targetDays);
                         const stageOverdue = health === 'overdue';
                         const stageDateLabel = stage.done || stage.active
-                          ? formatIsoDate(stageDateFromFields({
+                          ? formatDate(stageDateFromFields({
                             enteredAt: stage.index === 0
                               ? progressStartDate
                               : stage.enteredAt ?? (stage.active ? enteredAt : undefined),
@@ -1409,10 +1427,18 @@ export default function DealWorkspace({
                           : undefined;
                         const showStageDate = stageDateLabel && !(selectedLead && stage.index === 0);
                         return <li key={stage.key} className="telemetry-step relative flex min-w-0 flex-1 flex-col items-center">
-                          <button type="button" disabled={!pipelineStage || !progressDeal || stage.active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
-                            onClick={() => pipelineStage && progressDeal && requestStageChange(pipelineStage, progressDeal)}
+                          <button type="button" disabled={selectedLead
+                            ? (activeRole !== 'admin' && activeRole !== 'sales') || isTerminalLeadStage(lifecycleStageForLead(selectedLead, Boolean(progressDeal)))
+                            : !pipelineStage || !progressDeal || stage.active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
+                            onClick={() => {
+                              if (selectedLead && isLeadLifecycleStage(stage.name)) {
+                                changeLeadTelemetryStage(stage.name);
+                              } else if (pipelineStage && progressDeal) {
+                                requestStageChange(pipelineStage, progressDeal);
+                              }
+                            }}
                             title={stage.active && stageOverdue ? `SLA overdue: stage exceeded its ${stage.targetDays}-day target` : stage.active && health === 'warning' ? `SLA warning: stage is approaching its ${stage.targetDays}-day target` : stage.name}
-                            aria-label={`${displayStageName}${stageDateLabel ? `; entered ${stageDateLabel}` : ''}${durationLabel ? `; stage duration ${durationLabel}` : ''}${stage.active ? `${activeDurationLabel ? `; elapsed ${activeDurationLabel}` : ''}${cumulativeLabel ? `; total ${cumulativeLabel}` : ''}` : stage.done ? `; completed${terminalTotalLabel ? `; total ${terminalTotalLabel}` : ''}` : '; upcoming'}${stage.active && stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : stage.active && health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
+                            aria-label={`${displayStageName}${stageDateLabel ? `; entered ${stageDateLabel}` : ''}${durationLabel ? `; stage duration ${durationLabel}` : ''}${stage.active ? `${activeDurationLabel ? `; elapsed ${activeDurationLabel}` : ''}` : stage.done ? '; completed' : '; upcoming'}${stage.active && stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : stage.active && health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
                             aria-current={stage.active ? 'step' : undefined}
                             className={`telemetry-stage relative z-[1] flex w-full flex-col items-center border-0 bg-transparent px-0.5 py-0 text-center disabled:cursor-default ${lostTerminal ? 'is-lost' : stage.active ? 'is-active' : stage.done ? 'is-complete' : 'is-pending'}`}>
                             {!selectedLead && <span className="flex h-4 items-center justify-center whitespace-nowrap font-mono text-[10px] font-medium leading-none tabular-nums text-[#8B949E] sm:text-xs">
@@ -1426,10 +1452,7 @@ export default function DealWorkspace({
                             </span>
                           </button>
                           {!selectedLead && stage.active && (activeDurationLabel || cumulativeLabel) && <span className="relative z-[1] mt-1 min-h-4 whitespace-nowrap text-center text-[9px] font-medium leading-3 tabular-nums text-emerald-300">
-                            {activeDurationLabel}{cumulativeLabel && <span className="ml-1 text-[#A8B1BC]">· TOTAL {cumulativeLabel}</span>}
-                          </span>}
-                          {!selectedLead && terminalTotalLabel && <span className="relative z-[1] mt-1 min-h-4 whitespace-nowrap text-center text-[9px] font-semibold leading-3 tabular-nums text-[#A8B1BC]">
-                            TOTAL {terminalTotalLabel}
+                            {activeDurationLabel}{cumulativeLabel && <span className="ml-1 text-[#A8B1BC]">· {cumulativeLabel}</span>}
                           </span>}
                           {stage.index < stageTimeline.length - 1 && <span className={`telemetry-connector ${stage.done ? 'is-complete' : ''}`}>
                             {!selectedLead && stage.done && hasNextStage && segmentDurationLabel && <span className="telemetry-transition-label"
@@ -1456,7 +1479,7 @@ export default function DealWorkspace({
                           ? selectedLead.stage_changed_at ?? selectedLead.stageChangedAt ?? selectedLead.routedAt
                           : undefined);
                     const enteredDate = isInitiated
-                      ? formatIsoDate(stageDateFromFields({ enteredAt: rawStageDate }))
+                      ? formatDate(stageDateFromFields({ enteredAt: rawStageDate }))
                       : undefined;
                     const reachedTerminal = stage.done
                       && stage.index === stageTimeline.length - 1
@@ -1469,26 +1492,20 @@ export default function DealWorkspace({
                       ? elapsedBetweenDates(rawStageDate, stageDateFromFields(nextStage)) ?? stage.duration
                       : undefined;
                     const completedDuration = formatMeasuredDays(completedMilliseconds);
-                    const completedDate = reachedTerminal
-                      ? enteredDate
-                      : undefined;
                     const stageDuration = stage.done && !reachedTerminal
                       ? completedDuration
                       : activeDays;
                     return <li key={`metrics-${stage.key}`} className="telemetry-metric-step relative flex min-w-0 flex-1 flex-col items-center text-center">
                       {enteredDate && <span className="whitespace-nowrap font-mono text-[9px] leading-3 tabular-nums text-[#8B949E] sm:text-[10px]">
-                        {reachedTerminal
-                          ? `END · ${completedDate}`
-                          : stage.index === 0
-                            ? `START · ${enteredDate}`
-                            : enteredDate}
+                        {enteredDate}
                       </span>}
                       {(reachedTerminal ? stageTotal : stageDuration) && <span className="whitespace-nowrap font-mono text-[9px] font-semibold leading-3 tabular-nums text-[#A5DDBB] sm:text-[10px]">
-                        {reachedTerminal ? `TOTAL ${stageTotal}` : `+${stageDuration}`}
+                        {reachedTerminal ? stageTotal : `+${stageDuration}`}
                       </span>}
                     </li>;
                   })}
                 </ol>}
+                {selectedLead && contactError && <p role="alert" className="mt-2 text-xs text-hot">{contactError}</p>}
               </div></> : <p className="py-1 text-[10px] text-muted">No stages are configured for this pipeline.</p>}
           </section>
 
@@ -1510,10 +1527,12 @@ export default function DealWorkspace({
                   <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
                     <DetailValue label="Lead Owner" value={users.find((person) => person.id === selectedLead.ownerId)?.name ?? formatStaffIdentifier(selectedLead.ownerId)} />
                     <DetailValue label="Lead Stage" value={lifecycleStageForLead(selectedLead, Boolean(progressDeal))} />
+                    <DetailValue label="Contacted At" value={formatDate(getLeadContactedAt(selectedLead)) || 'Awaiting first contact'} />
                     {selectedLead.lossReason && <DetailValue label="Loss reason" value={selectedLead.lossReason} />}
                     <DetailValue label="Expected Closing Date" value={formatDate(selectedLead.closeDate ?? selectedLead.renewalDate)} />
                     <DetailValue label="Remarks / Notes" value={selectedLead.notes} />
                   </div>
+                  <div className="mt-3"><LeadContactSlaBadge lead={selectedLead} pipelineStages={pipelineStages} now={clockNow} /></div>
                 </div>
               </section>
               <section className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
@@ -1604,16 +1623,6 @@ export default function DealWorkspace({
                 <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('quote')}><FileText size={13} /> Proposal</button>
                 <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('note')}><Plus size={13} /> Note</button>
                 <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('task')}><Check size={13} /> Task</button>
-              </div>
-            </div>
-            <div className="mb-3 grid gap-2 sm:grid-cols-2">
-              <div className="rounded-lg border border-ink-700 bg-ink-900/40 p-3">
-                <p className="text-[10px] font-semibold tracking-wide text-muted">Weekly stage progression</p>
-                <p className="mt-1 text-lg font-semibold text-white">{lastWeekProgressions}<span className="ml-1 text-xs font-normal text-muted">stage changes · last 7 days</span></p>
-              </div>
-              <div className="rounded-lg border border-ink-700 bg-ink-900/40 p-3">
-                <p className="text-[10px] font-semibold tracking-wide text-muted">Monthly stage progression</p>
-                <p className="mt-1 text-lg font-semibold text-white">{lastMonthProgressions}<span className="ml-1 text-xs font-normal text-muted">stage changes · last 30 days</span></p>
               </div>
             </div>
             <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filter timeline entries">

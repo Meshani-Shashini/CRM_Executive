@@ -2,9 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
-import StageSlaBadges from '../components/StageSlaBadges';
 import { useApp } from '../store/AppContext';
-import { AlertTriangle, CalendarDays, CheckCircle2, CircleDot, Clock3, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, TrendingUp, UserRound, X } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CheckCircle2, CircleDot, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, TrendingUp, UserRound, X } from 'lucide-react';
 import type { Client, CompanyContactProfile, Lead, LeadTemperature } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
@@ -13,7 +12,7 @@ import DateInput from '../components/ui/DateInput';
 import ProductSelect from '../components/ui/ProductSelect';
 import { calculateBrokerageCommission } from '../utils/insurance';
 import { INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
-import { getStageSlaElapsedDays, isStageSlaOverdue } from '../utils/stageSla';
+import { getLeadContactedAt } from '../utils/leadSla';
 import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
 import DealWorkspace from './DealWorkspace';
 import {
@@ -71,7 +70,6 @@ export default function LeadsPage() {
   const {
     leads, setLeads, deals, clients, setClients, user, users, pipelines,
     customerLookups, setCustomerLookups, products, activities, setActivities, viewAsRole,
-    pipelineStages, stageHistory,
   } = useApp();
   const activeRole = viewAsRole ?? user.role;
   const PRODUCT_CODES = products;
@@ -115,7 +113,6 @@ export default function LeadsPage() {
   const [insuranceClassFilter, setInsuranceClassFilter] = useState(() => hashParams().get('insuranceClass') ?? '');
   const [pendingLeadDeletion, setPendingLeadDeletion] = useState<Lead | null>(null);
   const [openLeadActionsId, setOpenLeadActionsId] = useState('');
-  const [clockNow, setClockNow] = useState(Date.now());
   const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
   const linkedDealIds = useMemo(() => new Set(deals.map((deal) => deal.id)), [deals]);
   const linkedLeadIds = useMemo(() => new Set(deals.flatMap((deal) => deal.leadId ? [deal.leadId] : [])), [deals]);
@@ -181,10 +178,6 @@ export default function LeadsPage() {
     window.addEventListener('hashchange', applyHashFilters);
     return () => window.removeEventListener('hashchange', applyHashFilters);
   }, []);
-  useEffect(() => {
-    const timer = window.setInterval(() => setClockNow(Date.now()), 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
   const matchesLeadFilters = (lead: Lead) =>
     (user.role === 'admin' || (user.role === 'sales' && lead.ownerId === user.id)) &&
     (!temperatureFilter || lead.temperature === temperatureFilter) &&
@@ -199,32 +192,21 @@ export default function LeadsPage() {
     const product = products.find((candidate) => candidate.code === lead.productCode);
     const search = `${lead.title ?? ''} ${lead.client} ${lead.contact} ${owner} ${lead.insuranceClass} ${lead.productCode} ${product?.name ?? ''}`.toLowerCase();
     return search.includes(searchQuery.trim().toLowerCase());
+  }).sort((left, right) => {
+    const leftUpdated = Date.parse(left.updatedAt ?? '');
+    const rightUpdated = Date.parse(right.updatedAt ?? '');
+    const leftCreated = Date.parse(left.createdAt ?? left.created_at ?? '');
+    const rightCreated = Date.parse(right.createdAt ?? right.created_at ?? '');
+    const leftTimestamp = Number.isFinite(leftUpdated) ? leftUpdated : leftCreated;
+    const rightTimestamp = Number.isFinite(rightUpdated) ? rightUpdated : rightCreated;
+    if (!Number.isFinite(leftTimestamp)) return Number.isFinite(rightTimestamp) ? 1 : 0;
+    if (!Number.isFinite(rightTimestamp)) return -1;
+    return rightTimestamp - leftTimestamp;
   });
   const leadsByBoardStage = LEAD_LIFECYCLE_STAGES.map((stage) => ({
     stage,
     leads: searchedLeads.filter((lead) => boardStageForLead(lead, linkedDealIds, linkedLeadIds) === stage),
   }));
-  const stageSlaForLead = (lead: Lead) => {
-    const linkedDeal = deals.find((deal) => deal.id === lead.dealId || deal.leadId === lead.id);
-    const stage = linkedDeal
-      ? pipelineStages.find((item) => item.pipelineId === linkedDeal.pipelineId && item.name === linkedDeal.stage)
-      : undefined;
-    const activeHistory = linkedDeal && stage
-      ? stageHistory.find((entry) => entry.dealId === linkedDeal.id && entry.toStageId === stage.id && !entry.exitedAt)
-      : undefined;
-    const enteredAt = activeHistory?.enteredAt
-      ?? linkedDeal?.stageChangedAt
-      ?? linkedDeal?.createdAt
-      ?? lead.stageChangedAt
-      ?? lead.routedAt
-      ?? lead.createdAt;
-    const targetDays = stage?.stagnationDaysThreshold ?? 0;
-    return {
-      overdue: isStageSlaOverdue(enteredAt, targetDays, clockNow),
-      targetDays,
-      elapsedDays: getStageSlaElapsedDays(enteredAt, clockNow),
-    };
-  };
   const moveLeadToStage = (lead: Lead, stage: LeadLifecycleStage) => {
     if (!isLeadLifecycleStage(stage)) {
       window.alert('Choose a valid Lead Telemetry stage.');
@@ -244,7 +226,8 @@ export default function LeadsPage() {
 
   const updateLeadTemperature = (lead: Lead, temperature: LeadTemperature) => {
     if (lead.temperature === temperature || (activeRole !== 'admin' && activeRole !== 'sales')) return;
-    setLeads((current) => current.map((item) => item.id === lead.id ? { ...item, temperature } : item));
+    const updatedAt = new Date().toISOString();
+    setLeads((current) => current.map((item) => item.id === lead.id ? { ...item, temperature, updatedAt } : item));
   };
 
   const deleteLead = (lead: Lead) => {
@@ -484,6 +467,7 @@ export default function LeadsPage() {
       ? appendLeadStageTransition(editingLead, leadBoardStage, now)
       : editingLead?.stageHistory ?? [];
     const leadId = editingLead?.id ?? `L-${crypto.randomUUID()}`;
+    const contactedAt = editingLead ? getLeadContactedAt(editingLead) : undefined;
     const primaryExistingProfile = findMatchingContactProfile(selectedOrganization.contacts, {
       id: profileId,
       email,
@@ -528,6 +512,12 @@ export default function LeadsPage() {
       updatedAt: now,
       stageChangedAt: stageChanged ? now : editingLead?.stageChangedAt ?? editingLead?.routedAt ?? now,
       stageHistory,
+      ...((contactedAt ?? (leadBoardStage === 'Contact Made' ? now : undefined))
+        ? {
+          contactedAt: contactedAt ?? now,
+          contacted_at: contactedAt ?? now,
+        }
+        : {}),
       personId: person?.id,
       person: selectedPersonName,
       clientId: selectedOrganization.id,
@@ -679,7 +669,6 @@ export default function LeadsPage() {
                   const isLinked = Boolean((lead.dealId && linkedDealIds.has(lead.dealId)) || linkedLeadIds.has(lead.id));
                   const currentStage = boardStageForLead(lead, linkedDealIds, linkedLeadIds);
                   const isTerminal = isTerminalLeadStage(currentStage);
-                  const stageSla = stageSlaForLead(lead);
                   return <article key={lead.id} draggable={!isLinked && !isTerminal}
                     onDragStart={(event) => {
                       event.dataTransfer.setData('text/lead-id', lead.id);
@@ -704,7 +693,6 @@ export default function LeadsPage() {
                         onChange={(temperature) => updateLeadTemperature(lead, temperature)}
                       />
                       <Badge variant={lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win'}>{lead.status}</Badge>
-                      {stageSla.overdue && <Badge variant="hot"><Clock3 size={11} /> SLA overdue</Badge>}
                     </div>
                     <div className="mt-2 flex items-center justify-between border-t border-ink-700/80 pt-2 text-[11px]">
                       <span className="text-muted">MVR value</span>
@@ -778,7 +766,6 @@ export default function LeadsPage() {
                 const stage = boardStageForLead(lead, linkedDealIds, linkedLeadIds);
                 const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? formatStaffIdentifier(lead.ownerId);
                 const statusVariant = lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win';
-                const stageSla = stageSlaForLead(lead);
                 return <tr key={lead.id} role="link" tabIndex={0} aria-label={`Open lead details for ${lead.title ?? lead.client}`} draggable={!isTerminalLeadStage(stage) && !((lead.dealId && linkedDealIds.has(lead.dealId)) || linkedLeadIds.has(lead.id))} className="cursor-pointer border-b border-[#1B1E22] last:border-0 text-xs transition-colors hover:bg-[#111214] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-400"
                   onClick={() => setInspectedLeadId(lead.id)}
                   onKeyDown={(event) => {
@@ -803,16 +790,10 @@ export default function LeadsPage() {
                   <td className="min-w-0 overflow-hidden px-2 py-2 font-normal text-[#E1E2E5]">
                     <span className="flex min-w-0 flex-nowrap items-center gap-1" title={stage} aria-label={`Stage: ${stage}`}>
                       {isTerminalLeadStage(stage)
-                        ? <span className={`pill min-w-0 flex-1 truncate whitespace-nowrap border uppercase ${stage === 'Lost' ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]' : 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]'}`} title={stage}>
+                        ? <span className={`pill inline-flex w-fit max-w-full shrink-0 whitespace-nowrap border !px-2 !py-0.5 text-[10px] leading-none uppercase ${stage === 'Lost' ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]' : 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]'}`} title={stage}>
                           {stage === 'Converted to deal' ? 'CONVERTED' : stage}
                         </span>
                         : <span className="min-w-0 flex-1 truncate">{stage}</span>}
-                      <div className="flex shrink-0 items-center gap-1">
-                        <StageSlaBadges elapsedDays={stageSla.elapsedDays} targetDays={stageSla.targetDays} />
-                        {stageSla.overdue && <span className="pill max-w-full !gap-1 !px-1.5 border border-hot/40 bg-hot/10 text-hot uppercase" title={`Current stage exceeded its ${stageSla.targetDays}-day SLA`} aria-label={`SLA overdue: current stage exceeded its ${stageSla.targetDays}-day target`}>
-                        <AlertTriangle size={11} /> Overdue
-                        </span>}
-                      </div>
                     </span>
                   </td>
                   <td className="whitespace-nowrap px-2 py-2 font-normal"><InsuranceBadge code={lead.productCode} />                  </td>

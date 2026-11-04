@@ -28,6 +28,47 @@ The Insurance Brokers Management System (IBMS) is a browser-based CRM for an ins
 | MIRA Form 1 | Provides a report layout, date filters, print, and CSV export; its row collection is currently empty and not connected to CRM records. |
 | Quotation Request Slips | Shows an empty list and a request form; submitting the form currently closes it without persisting a slip. |
 
+## Current processes in the system
+
+The system is currently operating as an end-to-end insurance brokerage CRM with the following live business processes:
+
+1. Lead intake and qualification
+   - Sales staff create or import leads with company details, contact profiles, insurance class, product selection, expected close date, and sales owner.
+   - The system validates communication channels (phone, WhatsApp, Telegram) and checks whether the company profile is complete before a lead can be converted or progressed to a deal.
+   - Lead stage history, funnel stage, and temperature are tracked as the opportunity matures, and SLA health is calculated against configured pipeline targets.
+
+2. Client onboarding and account management
+   - New customer accounts are created from leads or directly from the Clients module with entity details, stakeholder information, compliance checks, target portfolio, and next action.
+   - Client records can be linked to a portal user, allowing the client to update only their own contact details while staff manage the broader account records.
+   - Client profiles feed later deal work, renewals, and finance processes.
+
+3. Deal creation and placement workflow
+   - Qualified leads are converted into deals in a dedicated deal workspace where the user can view lead details, placement notes, compliance alerts, insurer quotes, and stage history.
+   - Sales staff compare quotes, record meetings and notes, update the deal stage, and bind policies once the deal is ready.
+   - When the deal is won or bound, the system stores the outcome, updates stage history, and can generate the downstream finance and renewal records.
+
+4. Pipeline and SLA management
+   - Deals move through the canonical brokerage pipelines for commercial placements, SME/velocity packages, and annual renewals.
+   - Each stage records entry timestamps and current stage status, enabling SLA monitoring, overdue warnings, and win/loss tracking across the pipeline.
+   - Lost deals require a reason, while won or bound deals maintain a recorded disposition for reporting and follow-up.
+
+5. Renewal and policy lifecycle tracking
+   - Policies with upcoming expiry dates are surfaced into renewal workflows.
+   - When a policy is renewed or a renewal deal is created, the system keeps the active renewal stage and records the progress through renewal checkpoints.
+   - Renewal tracking is coupled to the broader deal lifecycle so sales and operations can follow policy expiries and renewal opportunities.
+
+6. Finance, invoice, and payment processing
+   - Once a policy is bound, the system can create premium invoices and record payments against them.
+   - Invoice status, outstanding totals, collected amounts, and overdue balances are tracked from the finance modules and summarized on the dashboard.
+   - The accounting process is tied back to the client and deal records so invoices remain linked to the commercial activity they support.
+
+7. Administration and product configuration
+   - System Admins manage company settings, tax rates, user roles, and the shared product catalog.
+   - Product codes, brokerage percentages, and underwriting-intake metadata are maintained centrally and applied to leads and deals when a product is selected.
+   - The app also exposes funnel, pipeline, MIRA, and settings reporting views for operational monitoring and admin control.
+
+These processes are the current operational backbone of the product: lead capture, client/profile management, deal progression, renewal tracking, finance collection, and administrator configuration.
+
 ## Insurance product catalog and routing
 
 The system includes all 49 products classified from `NM CODES.xlsx`. The shared product catalog in `src/data/catalogs.ts` and the tenant-scoped `public.policy_types` table contain product code, description, core industry class, standard brokerage percentage, statutory mandatory flag, sales-cycle velocity, risk level, and underwriting-intake artifacts. Product metadata is loaded into Lead and Deal selectors and displayed when a product is selected; product code filters the shared pipeline instead of routing products to separate pipelines. Administrators manage the matrix from Settings **Item / Product Management**; product codes are stored uppercase, product names are unique case-insensitively, brokerage percentages support up to two decimal places, and deletion is blocked for products linked to active Leads or Deals with a confirmation dialog for valid deletions.

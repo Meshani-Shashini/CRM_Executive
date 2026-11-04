@@ -39,7 +39,9 @@ function buildSampleStageHistory(
   let enteredAt = Date.parse(createdAt);
 
   for (let index = 0; index < stageIndex; index += 1) {
-    const durationDays = sampleStageDurationDays(sampleIndex, index);
+    const durationDays = stage === 'Contact Made' && index === 0
+      ? 3
+      : sampleStageDurationDays(sampleIndex, index);
     enteredAt += durationDays * DAY_MS;
     history.push({
       fromStage: LEAD_ACTIVE_STAGES[index],
@@ -108,9 +110,13 @@ function lead(input: {
     : LEAD_ACTIVE_STAGES.indexOf(input.stage as (typeof LEAD_ACTIVE_STAGES)[number]);
   if (stageIndex < 0) throw new Error(`Unknown sample lead stage: ${input.stage}.`);
   const currentStageAgeDays = 1 + (sampleIndex % 4);
-  const priorStageDurationDays = Array.from({ length: stageIndex }, (_, priorIndex) => sampleStageDurationDays(sampleIndex, priorIndex));
+  const priorStageDurationDays = Array.from({ length: stageIndex }, (_, priorIndex) =>
+    input.stage === 'Contact Made' && priorIndex === 0
+      ? 3
+      : sampleStageDurationDays(sampleIndex, priorIndex));
   const createdAt = new Date(now.getTime() - (currentStageAgeDays + priorStageDurationDays.reduce((sum, days) => sum + days, 0)) * DAY_MS).toISOString();
   const stageHistory = buildSampleStageHistory(input.id, input.stage, createdAt);
+  const contactedAt = stageHistory.find((transition) => transition.toStage === 'Contact Made')?.enteredAt;
   const stageChangedAt = stageHistory[stageHistory.length - 1]?.enteredAt ?? createdAt;
   const contacts = sampleContacts(input.id, input.person);
   const primaryContact = contacts[0];
@@ -121,6 +127,7 @@ function lead(input: {
     updatedAt: now.toISOString(),
     stageChangedAt,
     stageHistory,
+    ...(contactedAt ? { contactedAt, contacted_at: contactedAt } : {}),
     person: input.person,
     client: input.client,
     title: input.title,

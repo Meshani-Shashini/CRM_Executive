@@ -26,6 +26,8 @@ export interface Lead {
   stageChangedAt?: string;
   stage_changed_at?: string;
   stageHistory?: LeadStageTransition[];
+  contactedAt?: string;
+  contacted_at?: string;
   personId?: string;
   contactProfileId?: string;
   contactRole?: string;
