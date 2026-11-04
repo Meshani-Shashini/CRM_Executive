@@ -120,6 +120,15 @@ function formatIsoDate(value: string | undefined) {
   return `${timestamp.getFullYear()}-${String(timestamp.getMonth() + 1).padStart(2, '0')}-${String(timestamp.getDate()).padStart(2, '0')}`;
 }
 
+function formatTelemetryDate(value: string | undefined) {
+  if (!value) return undefined;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return undefined;
+  return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' })
+    .format(timestamp)
+    .replace(' ', '-');
+}
+
 function formatTelemetryDuration(milliseconds: number | undefined) {
   if (milliseconds === undefined || !Number.isFinite(milliseconds)) return undefined;
   return formatStageDuration(milliseconds);
@@ -346,7 +355,7 @@ export default function DealWorkspace({
   const elapsedMilliseconds = hasStageTimestamp ? Math.max(0, clockNow - stageEnteredAt) : undefined;
   const activeSlaHealth = stageSlaHealth(elapsedMilliseconds, targetDays);
   const isStagnant = activeSlaHealth === 'overdue';
-  const leadStageHistory = selectedActivities
+  const activityLeadStageHistory = selectedActivities
     .filter((activity) => activity.title.startsWith('Lead stage changed:'))
     .map((activity) => {
       const transition = /^Lead stage changed:\s*(.*?)\s*→\s*(.*?)\s*$/.exec(activity.title);
@@ -355,6 +364,19 @@ export default function DealWorkspace({
         : undefined;
     })
     .filter((transition): transition is { from: LeadLifecycleStage; to: LeadLifecycleStage; date: string } => Boolean(transition))
+    .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
+  const leadStageHistoryByTimestamp = new Map<string, { from: LeadLifecycleStage; to: LeadLifecycleStage; date: string }>();
+  for (const transition of [
+    ...(selectedLead?.stageHistory ?? []).map((entry) => ({
+      from: lifecycleStageForName(entry.fromStage),
+      to: lifecycleStageForName(entry.toStage),
+      date: entry.enteredAt,
+    })),
+    ...activityLeadStageHistory,
+  ]) {
+    leadStageHistoryByTimestamp.set(`${transition.from}\0${transition.to}\0${Date.parse(transition.date)}`, transition);
+  }
+  const leadStageHistory = [...leadStageHistoryByTimestamp.values()]
     .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
   const progressStartDate = selectedLead
     ? leadCreatedAt ?? leadStageHistory[0]?.date ?? selectedLead.routedAt ?? enteredAt
@@ -1290,6 +1312,7 @@ export default function DealWorkspace({
                           ? Date.parse(nextStageEnteredAt) - Date.parse(stage.enteredAt)
                           : stage.active ? durationMilliseconds : stage.duration;
                         const segmentDurationLabel = formatInterStageDays(interStageMilliseconds);
+                        const segmentTransitionDate = stage.done ? formatTelemetryDate(nextStageEnteredAt) : undefined;
                         const durationLabel = stage.active
                           ? formatTelemetryDuration(durationMilliseconds)
                           : stage.done
@@ -1335,9 +1358,10 @@ export default function DealWorkspace({
                           </span>}
                           {stage.index < stageTimeline.length - 1 && <span className={`telemetry-connector ${stage.done ? 'is-complete' : ''}`}>
                             <span className="telemetry-transition-label"
-                              title={`${segmentDurationLabel} from ${stage.name} to ${stageTimeline[stage.index + 1].name}`}
-                              aria-label={`${segmentDurationLabel} from ${stage.name} to ${stageTimeline[stage.index + 1].name}`}>
+                              title={`${segmentDurationLabel}${segmentTransitionDate ? ` · ${segmentTransitionDate}` : ''} from ${stage.name} to ${stageTimeline[stage.index + 1].name}`}
+                              aria-label={`${segmentDurationLabel}${segmentTransitionDate ? `; transitioned ${segmentTransitionDate}` : ''} from ${stage.name} to ${stageTimeline[stage.index + 1].name}`}>
                               {segmentDurationLabel}
+                              {segmentTransitionDate && <span className="ml-1 text-[#8B949E]">{segmentTransitionDate}</span>}
                             </span>
                           </span>}
                         </li>;

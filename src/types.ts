@@ -21,6 +21,7 @@ export interface Lead {
   createdAt?: string;
   updatedAt?: string;
   stageChangedAt?: string;
+  stageHistory?: LeadStageTransition[];
   personId?: string;
   contactProfileId?: string;
   contactRole?: string;
@@ -62,6 +63,13 @@ export interface Lead {
   leadFunnelStage?: LeadFunnelStage;
   dealId?: string;
   routedAt?: string;
+}
+
+export interface LeadStageTransition {
+  fromStage: string;
+  toStage: string;
+  enteredAt: string;
+  durationDays: number;
 }
 
 export interface Client {

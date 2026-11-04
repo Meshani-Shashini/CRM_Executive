@@ -1,4 +1,4 @@
-import type { Activity, CompanyContactProfile, Lead, LeadTemperature, ActivityStatus } from '../types';
+import type { Activity, CompanyContactProfile, Lead, LeadStageTransition, LeadTemperature, ActivityStatus } from '../types';
 import { supabase, TENANT_ID } from './supabase';
 import { LEAD_ACTIVE_STAGES } from '../utils/leadLifecycle';
 
@@ -15,6 +15,36 @@ export const SAMPLE_LEAD_IDS = [
 
 const USD_TO_MVR = 15.42;
 const DAY_MS = 86400000;
+const SAMPLE_STAGE_DURATIONS_DAYS = [2, 7, 4, 7] as const;
+
+function sampleStageDurationDays(sampleIndex: number, stageIndex: number) {
+  return SAMPLE_STAGE_DURATIONS_DAYS[(sampleIndex + stageIndex) % SAMPLE_STAGE_DURATIONS_DAYS.length];
+}
+
+function buildSampleStageHistory(
+  leadId: Lead['id'],
+  stage: string,
+  createdAt: string,
+): LeadStageTransition[] {
+  const sampleIndex = SAMPLE_LEAD_IDS.indexOf(leadId as (typeof SAMPLE_LEAD_IDS)[number]);
+  const stageIndex = LEAD_ACTIVE_STAGES.indexOf(stage as (typeof LEAD_ACTIVE_STAGES)[number]);
+  if (sampleIndex < 0) throw new Error(`Unknown sample lead ID: ${leadId}.`);
+  if (stageIndex < 0) throw new Error(`Unknown sample lead stage: ${stage}.`);
+  const history: LeadStageTransition[] = [];
+  let enteredAt = Date.parse(createdAt);
+
+  for (let index = 0; index < stageIndex; index += 1) {
+    const durationDays = sampleStageDurationDays(sampleIndex, index);
+    enteredAt += durationDays * DAY_MS;
+    history.push({
+      fromStage: LEAD_ACTIVE_STAGES[index],
+      toStage: LEAD_ACTIVE_STAGES[index + 1],
+      enteredAt: new Date(enteredAt).toISOString(),
+      durationDays,
+    });
+  }
+  return history;
+}
 
 function dateFromToday(days: number, today = new Date()): string {
   const date = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + days));
@@ -68,9 +98,10 @@ function lead(input: {
   const sampleIndex = SAMPLE_LEAD_IDS.indexOf(input.id);
   const stageIndex = Math.max(0, LEAD_ACTIVE_STAGES.indexOf(input.stage as (typeof LEAD_ACTIVE_STAGES)[number]));
   const currentStageAgeDays = 1 + (sampleIndex % 4);
-  const priorStageDurationDays = Array.from({ length: stageIndex }, (_, priorIndex) => 1 + ((sampleIndex + priorIndex) % 3));
+  const priorStageDurationDays = Array.from({ length: stageIndex }, (_, priorIndex) => sampleStageDurationDays(sampleIndex, priorIndex));
   const createdAt = new Date(now.getTime() - (currentStageAgeDays + priorStageDurationDays.reduce((sum, days) => sum + days, 0)) * DAY_MS).toISOString();
-  const stageChangedAt = new Date(now.getTime() - currentStageAgeDays * DAY_MS).toISOString();
+  const stageHistory = buildSampleStageHistory(input.id, input.stage, createdAt);
+  const stageChangedAt = stageHistory[stageHistory.length - 1]?.enteredAt ?? createdAt;
   const contacts = sampleContacts(input.id, input.person);
   const primaryContact = contacts[0];
 
@@ -79,6 +110,7 @@ function lead(input: {
     createdAt,
     updatedAt: now.toISOString(),
     stageChangedAt,
+    stageHistory,
     person: input.person,
     client: input.client,
     title: input.title,
@@ -246,36 +278,50 @@ export function createSampleLeads(ownerIds: string[], today = new Date()): Lead[
 
 export function createSampleLeadActivities(leads: Lead[], today = new Date()): Activity[] {
   return leads.flatMap((lead) => {
-    const stageIndex = Math.max(0, LEAD_ACTIVE_STAGES.indexOf(lead.funnelStage as (typeof LEAD_ACTIVE_STAGES)[number]));
     const createdAt = Date.parse(lead.createdAt ?? '');
     const stageChangedAt = Date.parse(lead.stageChangedAt ?? '');
+    const leadNow = Date.parse(lead.updatedAt ?? today.toISOString());
     if (!Number.isFinite(createdAt) || !Number.isFinite(stageChangedAt) || stageChangedAt < createdAt) {
       throw new Error(`Sample lead ${lead.id} has invalid lifecycle timestamps.`);
     }
+    if (!Number.isFinite(leadNow) || leadNow < stageChangedAt) {
+      throw new Error(`Sample lead ${lead.id} has an invalid update timestamp.`);
+    }
 
-    const stageTransitions: Activity[] = [];
-    let transitionAt = createdAt;
-    for (let index = 1; index <= stageIndex; index += 1) {
-      transitionAt += (1 + ((SAMPLE_LEAD_IDS.indexOf(lead.id as (typeof SAMPLE_LEAD_IDS)[number]) + index - 1) % 3)) * DAY_MS;
-      stageTransitions.push({
-        id: `sample-activity-${lead.id}-stage-${index}`,
+    const stageHistory = lead.stageHistory ?? [];
+    let previousAt = createdAt;
+    const stageTransitions = stageHistory.map((transition, index) => {
+      const enteredAt = Date.parse(transition.enteredAt);
+      if (transition.fromStage !== LEAD_ACTIVE_STAGES[index]
+        || transition.toStage !== LEAD_ACTIVE_STAGES[index + 1]
+        || !Number.isFinite(enteredAt) || enteredAt <= previousAt
+        || transition.durationDays !== (enteredAt - previousAt) / DAY_MS) {
+        throw new Error(`Sample lead ${lead.id} has non-sequential stage history.`);
+      }
+      previousAt = enteredAt;
+      return {
+        id: `sample-activity-${lead.id}-stage-${index + 1}`,
         clientId: lead.clientId ?? '',
         leadId: lead.id,
         type: 'note',
-        title: `Lead stage changed: ${LEAD_ACTIVE_STAGES[index - 1]} → ${LEAD_ACTIVE_STAGES[index]}`,
-        description: `Sample progression to ${LEAD_ACTIVE_STAGES[index]}.`,
-        date: new Date(transitionAt).toISOString(),
-        createdAt: new Date(transitionAt).toISOString(),
+        title: `Lead stage changed: ${transition.fromStage} → ${transition.toStage}`,
+        description: `Sample progression to ${transition.toStage}.`,
+        date: transition.enteredAt,
+        createdAt: transition.enteredAt,
         userId: lead.ownerId,
-      });
-    }
-    if (transitionAt !== stageChangedAt) {
+      } satisfies Activity;
+    });
+    if (previousAt !== stageChangedAt) {
       throw new Error(`Sample lead ${lead.id} stage history does not end at its current stage timestamp.`);
     }
 
-    const firstStageDuration = stageIndex ? Date.parse(stageTransitions[0].date) - createdAt : stageChangedAt - createdAt;
-    const touchpointAt = createdAt + Math.floor(firstStageDuration / 2);
-    const taskAt = stageChangedAt + Math.floor((today.getTime() - stageChangedAt) / 2);
+    const firstStageDuration = stageHistory.length
+      ? Date.parse(stageTransitions[0].date) - createdAt
+      : leadNow - createdAt;
+    const touchpointAt = createdAt + Math.floor(firstStageDuration / 3);
+    const taskAt = stageHistory.length
+      ? stageChangedAt + Math.floor((leadNow - stageChangedAt) / 2)
+      : createdAt + Math.floor(firstStageDuration * 2 / 3);
     const touchpoint: Activity = {
       id: `sample-activity-${lead.id}-touchpoint`,
       clientId: lead.clientId ?? '',
@@ -298,7 +344,8 @@ export function createSampleLeadActivities(leads: Lead[], today = new Date()): A
       createdAt: new Date(taskAt).toISOString(),
       userId: lead.ownerId,
     };
-    return [...stageTransitions, touchpoint, taskUpdate];
+    return [...stageTransitions, touchpoint, taskUpdate]
+      .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
   });
 }
 
