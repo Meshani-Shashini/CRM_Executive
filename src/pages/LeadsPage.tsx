@@ -17,7 +17,8 @@ import { getStageSlaElapsedDays, isStageSlaOverdue } from '../utils/stageSla';
 import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
 import DealWorkspace from './DealWorkspace';
 import {
-  isTerminalLeadStage, LEAD_ACTIVE_STAGES, LEAD_LIFECYCLE_STAGES, lifecycleStageForLead,
+  appendLeadStageTransition, isLeadLifecycleStage, isTerminalLeadStage, LEAD_ACTIVE_STAGES,
+  LEAD_LIFECYCLE_STAGES, lifecycleStageForLead,
   type LeadLifecycleStage,
 } from '../utils/leadLifecycle';
 import { formatStaffIdentifier } from '../utils/staff';
@@ -225,6 +226,10 @@ export default function LeadsPage() {
     };
   };
   const moveLeadToStage = (lead: Lead, stage: LeadLifecycleStage) => {
+    if (!isLeadLifecycleStage(stage)) {
+      window.alert('Choose a valid Lead Telemetry stage.');
+      return;
+    }
     const currentStage = boardStageForLead(lead, linkedDealIds, linkedLeadIds);
     if (stage === currentStage || isTerminalLeadStage(currentStage)) return;
     if (stage === 'Converted to deal') {
@@ -451,6 +456,10 @@ export default function LeadsPage() {
         : 'Complete each additional contact name, role, valid email, and valid phone number.');
       return;
     }
+    if (!isLeadLifecycleStage(leadBoardStage)) {
+      setFormError('Choose a valid Lead Telemetry stage.');
+      return;
+    }
     const hasLinkedDeal = Boolean(editingLead
       && deals.some((deal) => deal.id === editingLead.dealId || deal.leadId === editingLead.id));
     if (leadBoardStage === 'Converted to deal' && !hasLinkedDeal) {
@@ -471,6 +480,9 @@ export default function LeadsPage() {
     const valueMvr = toMvr(amount, leadCurrency, rate);
     const now = new Date().toISOString();
     const stageChanged = Boolean(editingLead && leadBoardStage !== boardStageForLead(editingLead, linkedDealIds, linkedLeadIds));
+    const stageHistory = editingLead && stageChanged
+      ? appendLeadStageTransition(editingLead, leadBoardStage, now)
+      : editingLead?.stageHistory ?? [];
     const leadId = editingLead?.id ?? `L-${crypto.randomUUID()}`;
     const primaryExistingProfile = findMatchingContactProfile(selectedOrganization.contacts, {
       id: profileId,
@@ -515,6 +527,7 @@ export default function LeadsPage() {
       createdAt: editingLead?.createdAt ?? now,
       updatedAt: now,
       stageChangedAt: stageChanged ? now : editingLead?.stageChangedAt ?? editingLead?.routedAt ?? now,
+      stageHistory,
       personId: person?.id,
       person: selectedPersonName,
       clientId: selectedOrganization.id,

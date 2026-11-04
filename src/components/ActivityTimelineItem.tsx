@@ -63,7 +63,8 @@ export default function ActivityTimelineItem({
     : '';
 
   return (
-    <article className="grid w-full min-w-0 grid-cols-[14px_minmax(0,1fr)_minmax(136px,max-content)] items-center gap-1.5 border-b border-ink-700/70 px-1.5 py-1 last:border-b-0">
+    <article className="grid w-full min-w-0 grid-cols-[max-content_14px_minmax(0,1fr)] items-center gap-1.5 border-b border-ink-700/70 px-1.5 py-1 last:border-b-0">
+      <time className="whitespace-nowrap font-mono text-[9px] tabular-nums text-[#8B949E]">{formattedDate}</time>
       <CategoryIcon size={12} className="text-muted" aria-hidden="true" />
       <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[10px] leading-4">
         {transition ? (
@@ -77,7 +78,6 @@ export default function ActivityTimelineItem({
         )}
         {details && <span className="min-w-0 truncate text-muted" title={details}>{details}</span>}
       </div>
-      <time className="justify-self-end whitespace-nowrap text-right text-[9px] tabular-nums text-muted">{formattedDate}</time>
     </article>
   );
 }

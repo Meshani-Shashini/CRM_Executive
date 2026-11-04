@@ -19,8 +19,12 @@ export type LeadFunnelStage = 'L0: Capture' | 'L1: KYC/AML Triage' | 'L2: LOB Sc
 export interface Lead {
   id: string;
   createdAt?: string;
+  created_at?: string;
+  startDate?: string;
+  start_date?: string;
   updatedAt?: string;
   stageChangedAt?: string;
+  stage_changed_at?: string;
   stageHistory?: LeadStageTransition[];
   personId?: string;
   contactProfileId?: string;
@@ -69,7 +73,22 @@ export interface LeadStageTransition {
   fromStage: string;
   toStage: string;
   enteredAt: string;
+  entered_at?: string;
+  timestamp?: string;
+  created_at?: string;
+  date?: string;
   durationDays: number;
+}
+
+export interface LeadStageHistoryRecord {
+  id: string;
+  lead_id: string;
+  leadId?: string;
+  stage: string;
+  entered_at: string;
+  exited_at?: string;
+  duration_days?: number;
+  is_current: boolean;
 }
 
 export interface Client {

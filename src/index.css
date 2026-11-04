@@ -114,10 +114,15 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   }
   .telemetry-track { position: relative; }
   .telemetry-step { min-height: 0; }
+  .telemetry-track--lead .telemetry-connector { top: 37px; }
+  .telemetry-metrics-row {
+    position: relative;
+    margin-top: 5px;
+  }
   .telemetry-connector {
     position: absolute;
     z-index: 0;
-    top: 49px;
+    top: 53px;
     left: 50%;
     right: -50%;
     height: 1px;
@@ -188,7 +193,7 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
     color: #FFD0DC;
     box-shadow: 0 0 10px rgba(255, 51, 102, 0.2);
   }
-  .telemetry-stage.is-lost > span:first-child { color: #FF9AAF; }
+  .telemetry-stage.is-lost > span:nth-child(2) { color: #FF9AAF; }
   .telemetry-node.is-healthy,
   .telemetry-node.is-unconfigured {
     border-color: #27C272;

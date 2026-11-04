@@ -27,9 +27,14 @@ function buildSampleStageHistory(
   createdAt: string,
 ): LeadStageTransition[] {
   const sampleIndex = SAMPLE_LEAD_IDS.indexOf(leadId as (typeof SAMPLE_LEAD_IDS)[number]);
-  const stageIndex = LEAD_ACTIVE_STAGES.indexOf(stage as (typeof LEAD_ACTIVE_STAGES)[number]);
+  const isTerminalStage = stage === 'Converted to deal' || stage === 'Lost';
+  const stageIndex = isTerminalStage
+    ? LEAD_ACTIVE_STAGES.length
+    : LEAD_ACTIVE_STAGES.indexOf(stage as (typeof LEAD_ACTIVE_STAGES)[number]);
   if (sampleIndex < 0) throw new Error(`Unknown sample lead ID: ${leadId}.`);
-  if (stageIndex < 0) throw new Error(`Unknown sample lead stage: ${stage}.`);
+  if (stageIndex < 0 || (!isTerminalStage && stageIndex >= LEAD_ACTIVE_STAGES.length)) {
+    throw new Error(`Unknown sample lead stage: ${stage}.`);
+  }
   const history: LeadStageTransition[] = [];
   let enteredAt = Date.parse(createdAt);
 
@@ -38,7 +43,9 @@ function buildSampleStageHistory(
     enteredAt += durationDays * DAY_MS;
     history.push({
       fromStage: LEAD_ACTIVE_STAGES[index],
-      toStage: LEAD_ACTIVE_STAGES[index + 1],
+      toStage: index + 1 < LEAD_ACTIVE_STAGES.length
+        ? LEAD_ACTIVE_STAGES[index + 1]
+        : stage,
       enteredAt: new Date(enteredAt).toISOString(),
       durationDays,
     });
@@ -96,7 +103,10 @@ function lead(input: {
   const closeDate = dateFromToday(input.closeInDays, input.today);
   const now = input.today ?? new Date();
   const sampleIndex = SAMPLE_LEAD_IDS.indexOf(input.id);
-  const stageIndex = Math.max(0, LEAD_ACTIVE_STAGES.indexOf(input.stage as (typeof LEAD_ACTIVE_STAGES)[number]));
+  const stageIndex = input.stage === 'Converted to deal' || input.stage === 'Lost'
+    ? LEAD_ACTIVE_STAGES.length
+    : LEAD_ACTIVE_STAGES.indexOf(input.stage as (typeof LEAD_ACTIVE_STAGES)[number]);
+  if (stageIndex < 0) throw new Error(`Unknown sample lead stage: ${input.stage}.`);
   const currentStageAgeDays = 1 + (sampleIndex % 4);
   const priorStageDurationDays = Array.from({ length: stageIndex }, (_, priorIndex) => sampleStageDurationDays(sampleIndex, priorIndex));
   const createdAt = new Date(now.getTime() - (currentStageAgeDays + priorStageDurationDays.reduce((sum, days) => sum + days, 0)) * DAY_MS).toISOString();
@@ -223,7 +233,7 @@ export function createSampleLeads(ownerIds: string[], today = new Date()): Lead[
       closeInDays: 67,
       temperature: 'COLD',
       status: 'COMPLETED',
-      stage: 'Lead Identified',
+      stage: 'Converted to deal',
     },
     {
       id: 'sample-lead-hulhumale-medical',
@@ -251,7 +261,7 @@ export function createSampleLeads(ownerIds: string[], today = new Date()): Lead[
       closeInDays: 76,
       temperature: 'WARM',
       status: 'COMPLETED',
-      stage: 'Contact Made',
+      stage: 'Meetings Ongoing',
     },
     {
       id: 'sample-lead-capital-holdings',
@@ -265,7 +275,7 @@ export function createSampleLeads(ownerIds: string[], today = new Date()): Lead[
       closeInDays: 90,
       temperature: 'COLD',
       status: 'BACKLOG',
-      stage: 'Lead Identified',
+      stage: 'Lost',
     },
   ];
 
@@ -292,8 +302,12 @@ export function createSampleLeadActivities(leads: Lead[], today = new Date()): A
     let previousAt = createdAt;
     const stageTransitions = stageHistory.map((transition, index) => {
       const enteredAt = Date.parse(transition.enteredAt);
+      const expectedToStage = index + 1 < LEAD_ACTIVE_STAGES.length
+        ? LEAD_ACTIVE_STAGES[index + 1]
+        : lead.disposition === 'lost' ? 'Lost'
+          : lead.disposition === 'converted' ? 'Converted to deal' : undefined;
       if (transition.fromStage !== LEAD_ACTIVE_STAGES[index]
-        || transition.toStage !== LEAD_ACTIVE_STAGES[index + 1]
+        || transition.toStage !== expectedToStage
         || !Number.isFinite(enteredAt) || enteredAt <= previousAt
         || transition.durationDays !== (enteredAt - previousAt) / DAY_MS) {
         throw new Error(`Sample lead ${lead.id} has non-sequential stage history.`);

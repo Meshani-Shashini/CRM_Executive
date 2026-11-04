@@ -3,11 +3,16 @@ import {
   type Dispatch, type ReactNode, type SetStateAction,
 } from 'react';
 import type {
-  Activity, Client, Deal, Invoice, Lead, Payment, Pipeline, PipelineStage,
+  Activity, Client, Deal, Invoice, Lead, LeadStageHistoryRecord, Payment, Pipeline, PipelineStage,
   Role, StageHistoryAudit, TaxRate, User, ProductCode,
 } from '../types';
 import { COMPANY, PRODUCT_CODES } from '../data/catalogs';
-import { createDefaultCustomerLookups, mergeCustomerLookups, type CustomerLookups } from '../data/customerLookups';
+import {
+  createDefaultCustomerLookups,
+  mergeCustomerLookups,
+  type CustomerLookupKey,
+  type CustomerLookups,
+} from '../data/customerLookups';
 import { supabase, TENANT_ID } from '../lib/supabase';
 import {
   createSampleLeadActivities,
@@ -16,6 +21,7 @@ import {
   SAMPLE_LEAD_IDS,
 } from '../lib/sampleLeads';
 import { reconcileContactAssociations } from '../utils/contactProfiles';
+import { buildLeadStageHistoryRecords, hydrateLeadStageHistory } from '../utils/leadLifecycle';
 
 interface AppState {
   user: User;
@@ -264,6 +270,20 @@ function writeArray(resource: string, items: unknown[]) {
   return supabase.rpc('sync_tenant_records', { p_resource: resource, p_records: sanitizeRecords(items) });
 }
 
+function customerLookupRecord(options: CustomerLookups) {
+  const defaults = createDefaultCustomerLookups();
+  const persistedOptions = Object.fromEntries(
+    (Object.keys(defaults) as CustomerLookupKey[]).map((key) => [
+      key,
+      Array.isArray(options[key])
+        ? options[key].filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        : [],
+    ]),
+  ) as CustomerLookups;
+
+  return { id: 'customer-lookups', options: persistedOptions };
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User>(GUEST_USER);
   const [viewAsRole, setViewAsRoleState] = useState<Role | null>(null);
@@ -485,9 +505,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const records = (data ?? []) as TenantRecord[];
         setTaxRates(asArray<TaxRate>(records, 'tax-rates'));
         const loadedLeads = asArray<Lead>(records, 'leads');
+        const leadStageHistory = asArray<LeadStageHistoryRecord>(records, 'lead-stage-history');
         const loadedClients = asArray<Client>(records, 'clients');
         const loadedDeals = asArray<Deal>(records, 'deals');
-        const contactsReconciled = reconcileContactAssociations(loadedLeads, loadedClients, loadedDeals);
+        const leadsWithHistory = hydrateLeadStageHistory(loadedLeads, leadStageHistory);
+        const contactsReconciled = reconcileContactAssociations(leadsWithHistory, loadedClients, loadedDeals);
         setLeads(contactsReconciled.leads);
         setClients(contactsReconciled.clients);
         const customerLookupsRecord = records.find((record) => record.resource === 'customer-lookups');
@@ -527,7 +549,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       'tax-rates': taxRates,
       leads,
       clients,
-      'customer-lookups': [{ id: 'customer-lookups', options: customerLookups }],
+      'customer-lookups': [customerLookupRecord(customerLookups)],
       products,
       activities,
       deals,
@@ -536,24 +558,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
       pipelines,
       'pipeline-stages': pipelineStages,
       'stage-history': stageHistory,
+      'lead-stage-history': buildLeadStageHistoryRecords(leads),
       company: [{ id: 'company-settings', ...company }],
       'email-templates': [{ id: 'email-templates', templates: emailTemplates }],
     };
     const writableByRole: Record<Role, string[]> = {
       admin: Object.keys(allResources),
-      sales: ['leads', 'clients', 'customer-lookups', 'activities', 'deals', 'stage-history'],
+      sales: ['leads', 'clients', 'customer-lookups', 'activities', 'deals', 'stage-history', 'lead-stage-history'],
       finance: ['invoices', 'payments'],
       client: [],
     };
     const timer = window.setTimeout(() => {
       saveQueue.current = saveQueue.current.then(async () => {
+        const resources = writableByRole[user.role];
         const results = await Promise.all(
-          writableByRole[user.role].map((resource) => writeArray(resource, allResources[resource])),
+          resources.map(async (resource) => ({
+            resource,
+            result: await writeArray(resource, allResources[resource]),
+          })),
         );
-        const failed = results.find((result) => result.error);
-        if (failed?.error) {
-          console.error('Could not persist app records to Supabase.', failed.error);
-          setPersistenceError(`Supabase save failed: ${failed.error.message}`);
+        const failed = results.find(({ result }) => result.error);
+        if (failed?.result.error) {
+          console.error(`Could not persist "${failed.resource}" records to Supabase.`, failed.result.error);
+          setPersistenceError(`Supabase save failed for ${failed.resource}: ${failed.result.error.message}`);
           return;
         }
         setPersistenceError(null);

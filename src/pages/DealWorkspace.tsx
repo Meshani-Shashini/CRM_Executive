@@ -17,7 +17,11 @@ import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from 
 import { hasCompleteClientProfile } from '../utils/customerProfile';
 import { isStageSlaOverdue } from '../utils/stageSla';
 import { linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
-import { LEAD_LIFECYCLE_STAGES, lifecycleStageForLead, lifecycleStageForName, type LeadLifecycleStage } from '../utils/leadLifecycle';
+import {
+  appendLeadStageTransition, buildLeadTelemetryStages, LEAD_LIFECYCLE_STAGES,
+  isLeadLifecycleStage, lifecycleStageForLead,
+  parseLeadStageTransition, type LeadLifecycleStage,
+} from '../utils/leadLifecycle';
 import { formatStaffIdentifier } from '../utils/staff';
 
 const LOSS_REASONS = [
@@ -90,13 +94,76 @@ function dateBefore(date: string, days: number) {
   return value.toISOString().slice(0, 10);
 }
 
-function formatStageDuration(milliseconds: number | undefined) {
-  if (milliseconds === undefined || !Number.isFinite(milliseconds)) return undefined;
-  const elapsedMilliseconds = Math.max(0, milliseconds);
-  if (elapsedMilliseconds < 3_600_000) return '<1h';
-  const totalHours = Math.floor(elapsedMilliseconds / 3_600_000);
-  if (totalHours < 24) return `${totalHours}h`;
-  return `${Math.floor(totalHours / 24)}D`;
+function formatDurationDays(milliseconds: number | undefined) {
+  if (milliseconds === undefined || !Number.isFinite(milliseconds) || milliseconds < 0) return undefined;
+  const days = Math.floor(milliseconds / 86400000);
+  return days === 0 ? '<1d' : `${days}d`;
+}
+
+function formatActiveDuration(startDate: string | undefined, now: number) {
+  if (!startDate) return undefined;
+  const start = Date.parse(startDate);
+  if (!Number.isFinite(start) || start > now) return undefined;
+  const startDay = new Date(start);
+  const nowDay = new Date(now);
+  const startDateUtc = Date.UTC(startDay.getUTCFullYear(), startDay.getUTCMonth(), startDay.getUTCDate());
+  const currentDateUtc = Date.UTC(nowDay.getUTCFullYear(), nowDay.getUTCMonth(), nowDay.getUTCDate());
+  const elapsedDays = Math.floor((currentDateUtc - startDateUtc) / 86400000);
+  return elapsedDays <= 0 ? 'NOW' : `${elapsedDays}d`;
+}
+
+function formatElapsedCalendarDays(startDate: string | undefined, now: number) {
+  if (!startDate) return undefined;
+  const start = Date.parse(startDate);
+  if (!Number.isFinite(start) || start > now) return undefined;
+  return formatMeasuredDays(now - start);
+}
+
+function formatMeasuredDays(milliseconds: number | undefined) {
+  if (milliseconds === undefined || !Number.isFinite(milliseconds) || milliseconds < 0) return undefined;
+  return formatDurationDays(milliseconds);
+}
+
+function elapsedBetweenDates(startDate: string | undefined, endDate: string | undefined) {
+  if (!startDate || !endDate) return undefined;
+  const start = Date.parse(startDate);
+  const end = Date.parse(endDate);
+  return Number.isFinite(start) && Number.isFinite(end) && end >= start
+    ? end - start
+    : undefined;
+}
+
+function stageDateFromFields(stage: {
+  enteredAt?: unknown;
+  entered_at?: unknown;
+  timestamp?: unknown;
+  created_at?: unknown;
+  date?: unknown;
+  createdAt?: unknown;
+  startDate?: unknown;
+  start_date?: unknown;
+}) {
+  const candidates = [
+    stage.enteredAt,
+    stage.entered_at,
+    stage.timestamp,
+    stage.created_at,
+    stage.date,
+    stage.createdAt,
+    stage.startDate,
+    stage.start_date,
+  ];
+  for (const candidate of candidates) {
+    const timestamp = candidate instanceof Date
+      ? candidate.getTime()
+      : typeof candidate === 'number'
+        ? candidate
+        : typeof candidate === 'string'
+          ? Date.parse(candidate)
+          : Number.NaN;
+    if (Number.isFinite(timestamp)) return new Date(timestamp).toISOString();
+  }
+  return undefined;
 }
 
 function formatDays(milliseconds: number | undefined) {
@@ -106,18 +173,19 @@ function formatDays(milliseconds: number | undefined) {
 }
 
 function formatInterStageDays(milliseconds: number | undefined) {
-  if (milliseconds === undefined || !Number.isFinite(milliseconds)) return '<1d';
-  const days = Math.ceil(Math.max(0, milliseconds) / 86400000);
-  return days === 0 ? '<1d' : `${days}d`;
+  return formatDurationDays(milliseconds);
 }
 
 function formatIsoDate(value: string | undefined) {
   if (!value) return undefined;
-  const dateOnly = /^(\d{4}-\d{2}-\d{2})/.exec(value);
-  if (dateOnly) return dateOnly[1];
-  const timestamp = new Date(value);
-  if (!Number.isFinite(timestamp.getTime())) return undefined;
-  return `${timestamp.getFullYear()}-${String(timestamp.getMonth() + 1).padStart(2, '0')}-${String(timestamp.getDate()).padStart(2, '0')}`;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return undefined;
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(timestamp).replace(/ /g, '-');
 }
 
 function formatTelemetryDate(value: string | undefined) {
@@ -129,11 +197,6 @@ function formatTelemetryDate(value: string | undefined) {
     .replace(' ', '-');
 }
 
-function formatTelemetryDuration(milliseconds: number | undefined) {
-  if (milliseconds === undefined || !Number.isFinite(milliseconds)) return undefined;
-  return formatStageDuration(milliseconds);
-}
-
 function stageSlaHealth(durationMilliseconds: number | undefined, targetDays: number) {
   if (!Number.isFinite(targetDays) || targetDays <= 0 || durationMilliseconds === undefined || !Number.isFinite(durationMilliseconds)) {
     return 'unconfigured' as const;
@@ -142,27 +205,6 @@ function stageSlaHealth(durationMilliseconds: number | undefined, targetDays: nu
   if (durationMilliseconds > targetMilliseconds) return 'overdue' as const;
   if (durationMilliseconds > targetMilliseconds * 0.75) return 'warning' as const;
   return 'healthy' as const;
-}
-
-function getTelemetryTimestampOverride(targetDays: number, now: number) {
-  if (!import.meta.env.DEV || typeof window === 'undefined') return undefined;
-  const parameters = new URLSearchParams(window.location.search);
-  const testState = parameters.get('telemetry')?.toLowerCase();
-  const testDurationRatio = testState === 'healthy' ? 0.5
-    : testState === 'warning' ? 0.85
-      : testState === 'overdue' ? 1.05 : undefined;
-
-  if (testDurationRatio !== undefined && targetDays > 0) {
-    return { timestamp: now - targetDays * 86400000 * testDurationRatio, label: testState?.toUpperCase() ?? 'TEST' };
-  }
-
-  const timestampOverride = parameters.get('stageEnteredAt');
-  if (timestampOverride) {
-    const parsedTimestamp = Date.parse(timestampOverride);
-    if (Number.isFinite(parsedTimestamp)) return { timestamp: parsedTimestamp, label: 'TIMESTAMP' };
-  }
-
-  return undefined;
 }
 
 function isBusinessActivity(activity: Activity) {
@@ -311,8 +353,10 @@ export default function DealWorkspace({
   const leadCreatedAt = selectedLead
     ? [
       selectedLead.createdAt,
+      selectedLead.created_at,
+      selectedLead.startDate,
+      selectedLead.start_date,
       leadAuditActivities.find((activity) => activity.title === 'Lead created')?.date,
-      selectedLead.routedAt,
     ]
       .find((timestamp): timestamp is string => Boolean(timestamp && Number.isFinite(Date.parse(timestamp))))
     : undefined;
@@ -327,14 +371,13 @@ export default function DealWorkspace({
       .reduce<string | undefined>((latest, timestamp) =>
         !latest || Date.parse(timestamp) > Date.parse(latest) ? timestamp : latest, undefined)
     : undefined;
-  const leadCreatedDateLabel = formatIsoDate(leadCreatedAt);
   const quotes = selectedActivities.filter((activity) => activity.type === 'quote' && activity.quoteAmount !== undefined);
   const selectedHistory = progressDeal
     ? stageHistory.filter((entry) => entry.dealId === progressDeal.id).sort((left, right) => right.enteredAt.localeCompare(left.enteredAt))
     : [];
   const stageEntry = !selectedLead ? selectedHistory.find((entry) => !entry.exitedAt) : undefined;
   const enteredAt = (selectedLead
-    ? [selectedLead.stageChangedAt, selectedLead.routedAt, leadCreatedAt]
+    ? [selectedLead.stage_changed_at, selectedLead.stageChangedAt, selectedLead.routedAt, leadCreatedAt]
     : [stageEntry?.enteredAt, progressDeal?.stageChangedAt, progressDeal?.createdAt])
     .find((timestamp): timestamp is string => Boolean(timestamp && Number.isFinite(Date.parse(timestamp))));
   const activeProgressStage = selectedLead
@@ -349,37 +392,54 @@ export default function DealWorkspace({
   const activeProgressIndex = progressStages.findIndex((stage) => (typeof stage === 'string' ? stage : stage.name) === activeProgressStage);
   const activeTargetStage = selectedLead ? undefined : currentStage;
   const targetDays = activeTargetStage?.stagnationDaysThreshold ?? 0;
-  const telemetryOverride = getTelemetryTimestampOverride(targetDays, clockNow);
-  const stageEnteredAt = telemetryOverride?.timestamp ?? (enteredAt ? Date.parse(enteredAt) : Number.NaN);
+  const stageEnteredAt = enteredAt ? Date.parse(enteredAt) : Number.NaN;
   const hasStageTimestamp = Number.isFinite(stageEnteredAt);
   const elapsedMilliseconds = hasStageTimestamp ? Math.max(0, clockNow - stageEnteredAt) : undefined;
   const activeSlaHealth = stageSlaHealth(elapsedMilliseconds, targetDays);
   const isStagnant = activeSlaHealth === 'overdue';
   const activityLeadStageHistory = selectedActivities
-    .filter((activity) => activity.title.startsWith('Lead stage changed:'))
     .map((activity) => {
-      const transition = /^Lead stage changed:\s*(.*?)\s*→\s*(.*?)\s*$/.exec(activity.title);
-      return transition
-        ? { from: lifecycleStageForName(transition[1]), to: lifecycleStageForName(transition[2]), date: activity.date }
-        : undefined;
+      const transition = parseLeadStageTransition(activity.title);
+      return transition ? { ...transition, date: activity.date } : undefined;
     })
     .filter((transition): transition is { from: LeadLifecycleStage; to: LeadLifecycleStage; date: string } => Boolean(transition))
     .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
   const leadStageHistoryByTimestamp = new Map<string, { from: LeadLifecycleStage; to: LeadLifecycleStage; date: string }>();
   for (const transition of [
-    ...(selectedLead?.stageHistory ?? []).map((entry) => ({
-      from: lifecycleStageForName(entry.fromStage),
-      to: lifecycleStageForName(entry.toStage),
-      date: entry.enteredAt,
-    })),
+    ...(selectedLead?.stageHistory ?? []).flatMap((entry) => {
+      const date = stageDateFromFields(entry);
+      return isLeadLifecycleStage(entry.fromStage) && isLeadLifecycleStage(entry.toStage) && date
+        ? [{ from: entry.fromStage, to: entry.toStage, date }]
+        : [];
+    }),
     ...activityLeadStageHistory,
   ]) {
     leadStageHistoryByTimestamp.set(`${transition.from}\0${transition.to}\0${Date.parse(transition.date)}`, transition);
   }
   const leadStageHistory = [...leadStageHistoryByTimestamp.values()]
     .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
+  const structuredLeadTelemetry = selectedLead
+    ? buildLeadTelemetryStages(selectedLead, new Date(clockNow))
+    : [];
+  const firstStoredLeadTransition = selectedLead?.stageHistory?.find((transition) =>
+    transition.fromStage === 'Lead Identified' && stageDateFromFields(transition));
+  const inferredLeadCreatedAt = firstStoredLeadTransition
+    && Number.isFinite(firstStoredLeadTransition.durationDays)
+    && firstStoredLeadTransition.durationDays >= 0
+    ? new Date(Date.parse(stageDateFromFields(firstStoredLeadTransition) as string) - firstStoredLeadTransition.durationDays * 86400000).toISOString()
+    : undefined;
+  const leadStartDate = selectedLead
+    ? leadCreatedAt
+      ?? inferredLeadCreatedAt
+      ?? stageDateFromFields({ startDate: selectedLead.startDate, start_date: selectedLead.start_date })
+      ?? selectedLead.routedAt
+      ?? selectedLead.stage_changed_at
+      ?? selectedLead.stageChangedAt
+      ?? enteredAt
+      ?? new Date(clockNow).toISOString()
+    : undefined;
   const progressStartDate = selectedLead
-    ? leadCreatedAt ?? leadStageHistory[0]?.date ?? selectedLead.routedAt ?? enteredAt
+    ? leadStartDate
     : selectedHistory[selectedHistory.length - 1]?.enteredAt ?? progressDeal?.createdAt ?? enteredAt;
   const progressStartMilliseconds = progressStartDate ? Date.parse(progressStartDate) : Number.NaN;
   const stageTimeline = progressStages.map((stage, index) => {
@@ -416,14 +476,17 @@ export default function DealWorkspace({
       };
     }
 
+    const storedStage = structuredLeadTelemetry.find((entry) => entry.stage === name);
     const transitionIn = leadStageHistory.find((transition) => transition.to === name);
     const transitionOut = leadStageHistory.find((transition) => transition.from === name);
     const isCurrent = name === activeProgressStage;
-    const stageStart = transitionIn?.date
-      ?? (index === 0 || !leadStageHistory.length ? leadCreatedAt ?? selectedLead?.routedAt : undefined)
-      ?? (isCurrent ? selectedLead?.stageChangedAt ?? selectedLead?.routedAt ?? leadCreatedAt : undefined);
+    const stageStart = storedStage?.entered_at
+      ?? transitionIn?.date
+      ?? (index === 0 ? leadStartDate : undefined)
+      ?? (isCurrent ? selectedLead?.stage_changed_at ?? selectedLead?.stageChangedAt ?? selectedLead?.routedAt ?? leadStartDate : undefined);
     const terminalReached = isCurrent && (name === 'Converted to deal' || name === 'Lost');
-    const stageEnd = transitionOut?.date
+    const stageEnd = storedStage?.exited_at
+      ?? transitionOut?.date
       ?? (isCurrent && !terminalReached && stageStart ? new Date(clockNow).toISOString() : undefined);
     const startMs = stageStart ? Date.parse(stageStart) : Number.NaN;
     const endMs = stageEnd ? Date.parse(stageEnd) : Number.NaN;
@@ -475,7 +538,7 @@ export default function DealWorkspace({
   const progressionEvents = [
     ...selectedHistory.map((entry) => entry.enteredAt),
     ...selectedActivities
-      .filter((activity) => activity.title.startsWith('Lead stage changed:'))
+      .filter((activity) => parseLeadStageTransition(activity.title))
       .map((activity) => activity.date),
   ].filter((date) => Number.isFinite(Date.parse(date)));
   const lastWeekProgressions = progressionEvents.filter((date) => {
@@ -521,7 +584,7 @@ export default function DealWorkspace({
       date: selectedDeal.nextActivityAt,
       category: 'task' as const,
     }] : []),
-    ...selectedHistory.map((entry) => {
+    ...(selectedLead ? [] : selectedHistory).map((entry) => {
       const target = pipelineStages.find((stage) => stage.id === entry.toStageId)?.name ?? 'Pipeline stage';
       return {
         key: entry.id,
@@ -533,6 +596,12 @@ export default function DealWorkspace({
     }),
     ...selectedActivities
       .filter((activity) => !(selectedLead && activity.id.startsWith('audit-') && activity.title === 'Lead created'))
+      .filter((activity) => {
+        if (!selectedLead) return true;
+        if (activity.title.startsWith('Deal stage changed:')) return false;
+        if (!activity.title.startsWith('Lead stage changed:')) return true;
+        return Boolean(parseLeadStageTransition(activity.title));
+      })
       .map((activity) => {
         const actor = users.find((person) => person.id === activity.userId);
         const details = [
@@ -673,12 +742,14 @@ export default function DealWorkspace({
     const existing = allDeals.find((deal) => deal.leadId === selectedLead.id || deal.id === selectedLead.dealId);
     if (existing) {
       const enteredAt = new Date().toISOString();
+      const stageHistory = appendLeadStageTransition(selectedLead, 'Converted to deal', enteredAt);
       setLeads((current) => current.map((lead) => lead.id === selectedLead.id
         ? {
           ...lead,
           dealId: existing.id,
           funnelStage: 'Converted to deal',
           disposition: 'converted',
+          stageHistory,
           stageChangedAt: lead.disposition === 'converted' && lead.funnelStage === 'Converted to deal'
             ? lead.stageChangedAt
             : enteredAt,
@@ -696,6 +767,7 @@ export default function DealWorkspace({
       return;
     }
     const enteredAt = new Date().toISOString();
+    const stageHistory = appendLeadStageTransition(selectedLead, 'Converted to deal', enteredAt);
     const value = selectedLead.value ?? selectedLead.sumInsured ?? selectedLead.premium;
     const deal: Deal = {
       id: `deal-${crypto.randomUUID()}`,
@@ -739,6 +811,7 @@ export default function DealWorkspace({
         dealId: deal.id,
         funnelStage: 'Converted to deal',
         disposition: 'converted',
+        stageHistory,
         stageChangedAt: enteredAt,
         contactProfileId: lead.contactProfileId ?? primaryContactProfile?.id,
         contactEmail: lead.contactEmail || primaryContactProfile?.email || '',
@@ -1278,7 +1351,7 @@ export default function DealWorkspace({
             </div>
           </div>
 
-          <section aria-label={selectedLead ? 'Lead telemetry stage tracker' : 'Placement telemetry stage tracker'} className={`telemetry-panel relative w-full ${selectedLead ? 'order-4' : 'order-1'} mt-2 min-w-0 rounded-xl px-2 py-4`}>
+          <section aria-label={selectedLead ? 'Lead telemetry stage tracker' : 'Placement telemetry stage tracker'} className={`telemetry-panel relative w-full ${selectedLead ? 'order-4' : 'order-1'} mt-2 min-w-0 rounded-xl px-2 py-6`}>
             <h2 className="sr-only">{selectedLead ? 'Lead telemetry' : 'Placement telemetry'}</h2>
             {stageTimeline.length ? <>
               <div className="mb-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
@@ -1286,10 +1359,9 @@ export default function DealWorkspace({
                 <span className="text-[9px] tracking-[0.14em] text-[#A7F2C5]">{selectedLead ? 'Lead Telemetry' : selectedPipeline?.name ?? 'Pipeline'}</span>
                 <span className="telemetry-live-dot shrink-0" aria-hidden="true" />
                 <span className="sr-only">Live tracking</span>
-                {telemetryOverride && <span className="ml-auto max-w-24 truncate text-[9px] tracking-wider text-[#E09228]" title={`Test · ${telemetryOverride.label}`}>Test · {telemetryOverride.label}</span>}
               </div>
               <div className="w-full min-w-0 overflow-x-auto py-2">
-                <ol className={`telemetry-track flex min-w-[700px] items-start justify-between pl-20 xl:min-w-0 ${selectedLead && activeProgressStage === 'Lost' ? 'is-lost' : ''}`}>
+                <ol className={`telemetry-track flex min-w-[700px] items-start justify-between pl-20 xl:min-w-0 ${selectedLead ? 'telemetry-track--lead' : ''} ${selectedLead && activeProgressStage === 'Lost' ? 'is-lost' : ''}`}>
                       {stageTimeline.map((stage) => {
                         const pipelineStage = typeof progressStages[stage.index] === 'string'
                           ? undefined
@@ -1304,69 +1376,119 @@ export default function DealWorkspace({
                             ? Math.max(0, clockNow - stageEnteredAtMilliseconds)
                             : undefined
                           : stage.duration;
-                        const durationMilliseconds = stage.active && telemetryOverride
-                          ? Math.max(0, clockNow - telemetryOverride.timestamp)
-                          : stageElapsedMilliseconds;
+                        const durationMilliseconds = stageElapsedMilliseconds;
                         const nextStageEnteredAt = stageTimeline[stage.index + 1]?.enteredAt;
-                        const interStageMilliseconds = stage.enteredAt && nextStageEnteredAt
-                          ? Date.parse(nextStageEnteredAt) - Date.parse(stage.enteredAt)
-                          : stage.active ? durationMilliseconds : stage.duration;
-                        const segmentDurationLabel = formatInterStageDays(interStageMilliseconds);
+                        const interStageMilliseconds = elapsedBetweenDates(stage.enteredAt, nextStageEnteredAt)
+                          ?? (stage.active ? durationMilliseconds : stage.duration);
+                        const hasNextStage = stage.index < stageTimeline.length - 1;
+                        const segmentDurationLabel = stage.done && hasNextStage
+                          ? formatInterStageDays(interStageMilliseconds)
+                          : '';
                         const segmentTransitionDate = stage.done ? formatTelemetryDate(nextStageEnteredAt) : undefined;
+                        const activeDurationLabel = stage.active
+                          ? formatActiveDuration(stage.enteredAt ?? enteredAt, clockNow)
+                          : undefined;
                         const durationLabel = stage.active
-                          ? formatTelemetryDuration(durationMilliseconds)
-                          : stage.done
-                            ? segmentDurationLabel
+                          ? activeDurationLabel
+                          : stage.done && hasNextStage
+                            ? segmentDurationLabel ?? ''
                             : '';
-                        const activeDurationLabel = stage.active ? formatTelemetryDuration(durationMilliseconds) : undefined;
                         const cumulativeLabel = formatDays(stage.cumulative);
                         const terminalTotalLabel = selectedLead && stage.done && stage.index === stageTimeline.length - 1
                           ? cumulativeLabel : undefined;
-                        const displayStageName = stage.name === 'Converted to deal' ? 'CONVERTED' : stage.name;
+                        const displayStageName = stage.name === 'Converted to deal' ? 'Converted' : stage.name;
                         const lostTerminal = selectedLead && stage.name === 'Lost' && stage.done;
                         const health = stageSlaHealth(durationMilliseconds, stage.targetDays);
                         const stageOverdue = health === 'overdue';
-                        const activeDateLabel = stage.active && Number.isFinite(stageEnteredAtMilliseconds)
-                          ? new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' })
-                            .format(stageEnteredAtMilliseconds)
-                            .replace(' ', '-')
-                          : '';
+                        const stageDateLabel = stage.done || stage.active
+                          ? formatIsoDate(stageDateFromFields({
+                            enteredAt: stage.index === 0
+                              ? progressStartDate
+                              : stage.enteredAt ?? (stage.active ? enteredAt : undefined),
+                          }))
+                          : undefined;
+                        const showStageDate = stageDateLabel && !(selectedLead && stage.index === 0);
                         return <li key={stage.key} className="telemetry-step relative flex min-w-0 flex-1 flex-col items-center">
                           <button type="button" disabled={!pipelineStage || !progressDeal || stage.active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
                             onClick={() => pipelineStage && progressDeal && requestStageChange(pipelineStage, progressDeal)}
                             title={stage.active && stageOverdue ? `SLA overdue: stage exceeded its ${stage.targetDays}-day target` : stage.active && health === 'warning' ? `SLA warning: stage is approaching its ${stage.targetDays}-day target` : stage.name}
-                            aria-label={`${displayStageName}${durationLabel ? `; stage duration ${durationLabel}` : ''}${stage.active ? `${activeDurationLabel ? `; elapsed ${activeDurationLabel}` : ''}${cumulativeLabel ? `; total ${cumulativeLabel}` : ''}` : stage.done ? `; completed${terminalTotalLabel ? `; total ${terminalTotalLabel}` : ''}` : '; upcoming'}${stage.active && stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : stage.active && health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
+                            aria-label={`${displayStageName}${stageDateLabel ? `; entered ${stageDateLabel}` : ''}${durationLabel ? `; stage duration ${durationLabel}` : ''}${stage.active ? `${activeDurationLabel ? `; elapsed ${activeDurationLabel}` : ''}${cumulativeLabel ? `; total ${cumulativeLabel}` : ''}` : stage.done ? `; completed${terminalTotalLabel ? `; total ${terminalTotalLabel}` : ''}` : '; upcoming'}${stage.active && stageOverdue ? `; SLA overdue, target ${stage.targetDays} days` : stage.active && health === 'warning' ? `; approaching target of ${stage.targetDays} days` : ''}`}
                             aria-current={stage.active ? 'step' : undefined}
                             className={`telemetry-stage relative z-[1] flex w-full flex-col items-center border-0 bg-transparent px-0.5 py-0 text-center disabled:cursor-default ${lostTerminal ? 'is-lost' : stage.active ? 'is-active' : stage.done ? 'is-complete' : 'is-pending'}`}>
+                            {!selectedLead && <span className="flex h-4 items-center justify-center whitespace-nowrap font-mono text-[10px] font-medium leading-none tabular-nums text-[#8B949E] sm:text-xs">
+                              {showStageDate && `${stage.active ? 'NOW · ' : ''}${stageDateLabel}`}
+                            </span>}
                             <span className={`flex h-7 w-full items-center justify-center px-1 text-[10px] font-semibold leading-3 tracking-normal sm:text-xs ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#89919C]'}`}>
                               {displayStageName}
-                            </span>
-                            <span className={`flex h-4 items-center justify-center whitespace-nowrap text-[9px] font-semibold leading-none tabular-nums tracking-[0.04em] ${selectedLead && stage.index === 0 && leadCreatedDateLabel ? 'text-[#A7F2C5]' : stage.active ? 'text-[#A7F2C5]' : 'text-transparent'}`}>
-                              {selectedLead && stage.index === 0 && leadCreatedDateLabel
-                                ? leadCreatedDateLabel
-                                : stage.active ? `NOW${activeDateLabel ? ` ${activeDateLabel}` : ''}` : '\u00a0'}
                             </span>
                             <span className={`telemetry-node ${lostTerminal ? 'is-lost' : stage.active ? `is-${health}` : stage.done ? 'is-complete' : ''}`}>
                               {stage.done ? <Check size={11} aria-hidden="true" /> : <span className="telemetry-node-core" />}
                             </span>
                           </button>
-                          {stage.active && (activeDurationLabel || cumulativeLabel) && <span className="relative z-[1] mt-1 min-h-4 whitespace-nowrap text-center text-[9px] font-medium leading-3 tabular-nums text-emerald-300">
+                          {!selectedLead && stage.active && (activeDurationLabel || cumulativeLabel) && <span className="relative z-[1] mt-1 min-h-4 whitespace-nowrap text-center text-[9px] font-medium leading-3 tabular-nums text-emerald-300">
                             {activeDurationLabel}{cumulativeLabel && <span className="ml-1 text-[#A8B1BC]">· TOTAL {cumulativeLabel}</span>}
                           </span>}
-                          {terminalTotalLabel && <span className="relative z-[1] mt-1 min-h-4 whitespace-nowrap text-center text-[9px] font-semibold leading-3 tabular-nums text-[#A8B1BC]">
+                          {!selectedLead && terminalTotalLabel && <span className="relative z-[1] mt-1 min-h-4 whitespace-nowrap text-center text-[9px] font-semibold leading-3 tabular-nums text-[#A8B1BC]">
                             TOTAL {terminalTotalLabel}
                           </span>}
                           {stage.index < stageTimeline.length - 1 && <span className={`telemetry-connector ${stage.done ? 'is-complete' : ''}`}>
-                            <span className="telemetry-transition-label"
+                            {!selectedLead && stage.done && hasNextStage && segmentDurationLabel && <span className="telemetry-transition-label"
                               title={`${segmentDurationLabel}${segmentTransitionDate ? ` · ${segmentTransitionDate}` : ''} from ${stage.name} to ${stageTimeline[stage.index + 1].name}`}
                               aria-label={`${segmentDurationLabel}${segmentTransitionDate ? `; transitioned ${segmentTransitionDate}` : ''} from ${stage.name} to ${stageTimeline[stage.index + 1].name}`}>
                               {segmentDurationLabel}
                               {segmentTransitionDate && <span className="ml-1 text-[#8B949E]">{segmentTransitionDate}</span>}
-                            </span>
+                            </span>}
                           </span>}
                         </li>;
                       })}
                 </ol>
+                {selectedLead && <ol
+                  aria-label="Lead stage dates and durations"
+                  className="telemetry-metrics-row flex min-w-[700px] items-start justify-between pl-20"
+                >
+                  {stageTimeline.map((stage) => {
+                    const isInitiated = stage.done || stage.active;
+                    const nextStage = stageTimeline[stage.index + 1];
+                    const rawStageDate = stage.index === 0
+                      ? progressStartDate
+                      : stageDateFromFields(stage)
+                        ?? (stage.active
+                          ? selectedLead.stage_changed_at ?? selectedLead.stageChangedAt ?? selectedLead.routedAt
+                          : undefined);
+                    const enteredDate = isInitiated
+                      ? formatIsoDate(stageDateFromFields({ enteredAt: rawStageDate }))
+                      : undefined;
+                    const reachedTerminal = stage.done
+                      && stage.index === stageTimeline.length - 1
+                      && (stage.name === 'Converted to deal' || stage.name === 'Lost');
+                    const activeDays = stage.active
+                      ? formatElapsedCalendarDays(rawStageDate, clockNow)
+                      : undefined;
+                    const stageTotal = reachedTerminal ? formatDays(stage.cumulative) : undefined;
+                    const completedMilliseconds = stage.done && nextStage
+                      ? elapsedBetweenDates(rawStageDate, stageDateFromFields(nextStage)) ?? stage.duration
+                      : undefined;
+                    const completedDuration = formatMeasuredDays(completedMilliseconds);
+                    const completedDate = reachedTerminal
+                      ? enteredDate
+                      : undefined;
+                    const stageDuration = stage.done && !reachedTerminal
+                      ? completedDuration
+                      : activeDays;
+                    return <li key={`metrics-${stage.key}`} className="telemetry-metric-step relative flex min-w-0 flex-1 flex-col items-center text-center">
+                      {enteredDate && <span className="whitespace-nowrap font-mono text-[9px] leading-3 tabular-nums text-[#8B949E] sm:text-[10px]">
+                        {reachedTerminal
+                          ? `END · ${completedDate}`
+                          : stage.index === 0
+                            ? `START · ${enteredDate}`
+                            : enteredDate}
+                      </span>}
+                      {(reachedTerminal ? stageTotal : stageDuration) && <span className="whitespace-nowrap font-mono text-[9px] font-semibold leading-3 tabular-nums text-[#A5DDBB] sm:text-[10px]">
+                        {reachedTerminal ? `TOTAL ${stageTotal}` : `+${stageDuration}`}
+                      </span>}
+                    </li>;
+                  })}
+                </ol>}
               </div></> : <p className="py-1 text-[10px] text-muted">No stages are configured for this pipeline.</p>}
           </section>
 
