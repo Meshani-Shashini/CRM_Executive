@@ -10,6 +10,7 @@ import { COMPANY, PRODUCT_CODES } from '../data/catalogs';
 import { createDefaultCustomerLookups, mergeCustomerLookups, type CustomerLookups } from '../data/customerLookups';
 import { supabase, TENANT_ID } from '../lib/supabase';
 import {
+  createSampleLeadActivities,
   createSampleLeads,
   initializeSampleLeads as persistSampleLeads,
   SAMPLE_LEAD_IDS,
@@ -458,9 +459,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ? createSampleLeads(validOwnerIds)
       : await persistSampleLeads(validOwnerIds);
     const sampleIdSet = new Set<string>(SAMPLE_LEAD_IDS);
+    const sampleActivities = createSampleLeadActivities(samples);
     setLeads((current) => [
       ...current.filter((lead) => !sampleIdSet.has(lead.id)),
       ...samples,
+    ]);
+    setActivities((current) => [
+      ...current.filter((activity) => !SAMPLE_LEAD_IDS.some((leadId) => activity.id.startsWith(`sample-activity-${leadId}-`))),
+      ...sampleActivities,
     ]);
   }, [user.id]);
 

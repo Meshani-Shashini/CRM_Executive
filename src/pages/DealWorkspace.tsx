@@ -102,7 +102,13 @@ function formatStageDuration(milliseconds: number | undefined) {
 function formatDays(milliseconds: number | undefined) {
   return milliseconds === undefined || !Number.isFinite(milliseconds)
     ? undefined
-    : `${Math.floor(Math.max(0, milliseconds) / 86400000)}D`;
+    : `${Math.floor(Math.max(0, milliseconds) / 86400000)}d`;
+}
+
+function formatInterStageDays(milliseconds: number | undefined) {
+  if (milliseconds === undefined || !Number.isFinite(milliseconds)) return '<1d';
+  const days = Math.ceil(Math.max(0, milliseconds) / 86400000);
+  return days === 0 ? '<1d' : `${days}d`;
 }
 
 function formatIsoDate(value: string | undefined) {
@@ -294,7 +300,11 @@ export default function DealWorkspace({
       && /^Lead (?:created|updated|stage changed|temperature changed):?/.test(activity.title))
     : [];
   const leadCreatedAt = selectedLead
-    ? [selectedLead.createdAt, leadAuditActivities.find((activity) => activity.title === 'Lead created')?.date]
+    ? [
+      selectedLead.createdAt,
+      leadAuditActivities.find((activity) => activity.title === 'Lead created')?.date,
+      selectedLead.routedAt,
+    ]
       .find((timestamp): timestamp is string => Boolean(timestamp && Number.isFinite(Date.parse(timestamp))))
     : undefined;
   const leadLastModifiedAt = selectedLead
@@ -309,7 +319,6 @@ export default function DealWorkspace({
         !latest || Date.parse(timestamp) > Date.parse(latest) ? timestamp : latest, undefined)
     : undefined;
   const leadCreatedDateLabel = formatIsoDate(leadCreatedAt);
-  const leadLastModifiedDateLabel = formatIsoDate(leadLastModifiedAt);
   const quotes = selectedActivities.filter((activity) => activity.type === 'quote' && activity.quoteAmount !== undefined);
   const selectedHistory = progressDeal
     ? stageHistory.filter((entry) => entry.dealId === progressDeal.id).sort((left, right) => right.enteredAt.localeCompare(left.enteredAt))
@@ -323,9 +332,10 @@ export default function DealWorkspace({
     ? lifecycleStageForLead(selectedLead, Boolean(progressDeal))
     : progressDeal?.stage ?? '';
   const progressStages: readonly (PipelineStage | string)[] = selectedLead
-    ? LEAD_LIFECYCLE_STAGES.filter((stage) =>
-      (stage !== 'Converted to deal' && stage !== 'Lost') || stage === activeProgressStage,
-    )
+    ? [
+      ...LEAD_LIFECYCLE_STAGES.filter((stage) => stage !== 'Converted to deal' && stage !== 'Lost'),
+      activeProgressStage === 'Lost' ? 'Lost' : 'Converted to deal',
+    ]
     : stages;
   const activeProgressIndex = progressStages.findIndex((stage) => (typeof stage === 'string' ? stage : stage.name) === activeProgressStage);
   const activeTargetStage = selectedLead ? undefined : currentStage;
@@ -1246,7 +1256,7 @@ export default function DealWorkspace({
             </div>
           </div>
 
-          <section aria-label={selectedLead ? 'Lead telemetry stage tracker' : 'Placement telemetry stage tracker'} className={`telemetry-panel ${selectedLead ? 'order-4' : 'order-1'} mt-2 min-w-0 rounded-xl px-2 py-1.5`}>
+          <section aria-label={selectedLead ? 'Lead telemetry stage tracker' : 'Placement telemetry stage tracker'} className={`telemetry-panel relative w-full ${selectedLead ? 'order-4' : 'order-1'} mt-2 min-w-0 rounded-xl px-2 py-4`}>
             <h2 className="sr-only">{selectedLead ? 'Lead telemetry' : 'Placement telemetry'}</h2>
             {stageTimeline.length ? <>
               <div className="mb-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
@@ -1254,14 +1264,10 @@ export default function DealWorkspace({
                 <span className="text-[9px] tracking-[0.14em] text-[#A7F2C5]">{selectedLead ? 'Lead Telemetry' : selectedPipeline?.name ?? 'Pipeline'}</span>
                 <span className="telemetry-live-dot shrink-0" aria-hidden="true" />
                 <span className="sr-only">Live tracking</span>
-                {selectedLead && <span className="ml-auto flex flex-wrap items-center gap-x-2 whitespace-nowrap text-[9px] tabular-nums text-[#A8B1BC]">
-                  {leadCreatedDateLabel && <span>CREATED {leadCreatedDateLabel}</span>}
-                  <span>UPDATED {leadLastModifiedDateLabel ?? '—'}</span>
-                </span>}
                 {telemetryOverride && <span className="ml-auto max-w-24 truncate text-[9px] tracking-wider text-[#E09228]" title={`Test · ${telemetryOverride.label}`}>Test · {telemetryOverride.label}</span>}
               </div>
-              <div className="w-full min-w-0 overflow-x-auto">
-                <ol className="telemetry-track flex min-w-[700px] items-start justify-between pl-20 xl:min-w-0">
+              <div className="w-full min-w-0 overflow-x-auto py-2">
+                <ol className={`telemetry-track flex min-w-[700px] items-start justify-between pl-20 xl:min-w-0 ${selectedLead && activeProgressStage === 'Lost' ? 'is-lost' : ''}`}>
                       {stageTimeline.map((stage) => {
                         const pipelineStage = typeof progressStages[stage.index] === 'string'
                           ? undefined
@@ -1279,10 +1285,15 @@ export default function DealWorkspace({
                         const durationMilliseconds = stage.active && telemetryOverride
                           ? Math.max(0, clockNow - telemetryOverride.timestamp)
                           : stageElapsedMilliseconds;
+                        const nextStageEnteredAt = stageTimeline[stage.index + 1]?.enteredAt;
+                        const interStageMilliseconds = stage.enteredAt && nextStageEnteredAt
+                          ? Date.parse(nextStageEnteredAt) - Date.parse(stage.enteredAt)
+                          : stage.active ? durationMilliseconds : stage.duration;
+                        const segmentDurationLabel = formatInterStageDays(interStageMilliseconds);
                         const durationLabel = stage.active
                           ? formatTelemetryDuration(durationMilliseconds)
                           : stage.done
-                            ? formatTelemetryDuration(stage.duration)
+                            ? segmentDurationLabel
                             : '';
                         const activeDurationLabel = stage.active ? formatTelemetryDuration(durationMilliseconds) : undefined;
                         const cumulativeLabel = formatDays(stage.cumulative);
@@ -1298,9 +1309,6 @@ export default function DealWorkspace({
                             .replace(' ', '-')
                           : '';
                         return <li key={stage.key} className="telemetry-step relative flex min-w-0 flex-1 flex-col items-center">
-                          {selectedLead && stage.index === 0 && leadCreatedDateLabel && <span className="telemetry-start-date" aria-label={`Lead created ${leadCreatedDateLabel}`}>
-                            {leadCreatedDateLabel}
-                          </span>}
                           <button type="button" disabled={!pipelineStage || !progressDeal || stage.active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
                             onClick={() => pipelineStage && progressDeal && requestStageChange(pipelineStage, progressDeal)}
                             title={stage.active && stageOverdue ? `SLA overdue: stage exceeded its ${stage.targetDays}-day target` : stage.active && health === 'warning' ? `SLA warning: stage is approaching its ${stage.targetDays}-day target` : stage.name}
@@ -1310,27 +1318,28 @@ export default function DealWorkspace({
                             <span className={`flex h-7 w-full items-center justify-center px-1 text-[10px] font-semibold leading-3 tracking-normal sm:text-xs ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#89919C]'}`}>
                               {displayStageName}
                             </span>
-                            <span className={`flex h-4 items-center justify-center whitespace-nowrap text-[10px] font-semibold leading-none tracking-[0.08em] ${stage.active ? 'text-[#A7F2C5]' : 'text-transparent'}`}>
-                              {stage.active ? `NOW${activeDateLabel ? ` ${activeDateLabel}` : ''}` : '\u00a0'}
+                            <span className={`flex h-4 items-center justify-center whitespace-nowrap text-[9px] font-semibold leading-none tabular-nums tracking-[0.04em] ${selectedLead && stage.index === 0 && leadCreatedDateLabel ? 'text-[#A7F2C5]' : stage.active ? 'text-[#A7F2C5]' : 'text-transparent'}`}>
+                              {selectedLead && stage.index === 0 && leadCreatedDateLabel
+                                ? leadCreatedDateLabel
+                                : stage.active ? `NOW${activeDateLabel ? ` ${activeDateLabel}` : ''}` : '\u00a0'}
                             </span>
                             <span className={`telemetry-node ${lostTerminal ? 'is-lost' : stage.active ? `is-${health}` : stage.done ? 'is-complete' : ''}`}>
                               {stage.done ? <Check size={11} aria-hidden="true" /> : <span className="telemetry-node-core" />}
                             </span>
                           </button>
-                          {stage.done && durationLabel && stage.index < stageTimeline.length - 1 && <span
-                            className="telemetry-transition-label"
-                            title={`${durationLabel} in ${stage.name}`}
-                            aria-label={`${durationLabel} in ${stage.name}`}
-                          >
-                            <span>{durationLabel}</span>
-                          </span>}
                           {stage.active && (activeDurationLabel || cumulativeLabel) && <span className="relative z-[1] mt-1 min-h-4 whitespace-nowrap text-center text-[9px] font-medium leading-3 tabular-nums text-emerald-300">
                             {activeDurationLabel}{cumulativeLabel && <span className="ml-1 text-[#A8B1BC]">· TOTAL {cumulativeLabel}</span>}
                           </span>}
                           {terminalTotalLabel && <span className="relative z-[1] mt-1 min-h-4 whitespace-nowrap text-center text-[9px] font-semibold leading-3 tabular-nums text-[#A8B1BC]">
                             TOTAL {terminalTotalLabel}
                           </span>}
-                          {stage.index < stageTimeline.length - 1 && <span className={`telemetry-connector ${stage.done ? 'is-complete' : ''}`} aria-hidden="true" />}
+                          {stage.index < stageTimeline.length - 1 && <span className={`telemetry-connector ${stage.done ? 'is-complete' : ''}`}>
+                            <span className="telemetry-transition-label"
+                              title={`${segmentDurationLabel} from ${stage.name} to ${stageTimeline[stage.index + 1].name}`}
+                              aria-label={`${segmentDurationLabel} from ${stage.name} to ${stageTimeline[stage.index + 1].name}`}>
+                              {segmentDurationLabel}
+                            </span>
+                          </span>}
                         </li>;
                       })}
                 </ol>

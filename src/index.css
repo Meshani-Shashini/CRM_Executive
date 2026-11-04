@@ -114,17 +114,6 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   }
   .telemetry-track { position: relative; }
   .telemetry-step { min-height: 0; }
-  .telemetry-start-date {
-    position: absolute;
-    z-index: 2;
-    top: 41px;
-    right: calc(50% + 14px);
-    color: #A7F2C5;
-    font-size: 12px;
-    line-height: 16px;
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-  }
   .telemetry-connector {
     position: absolute;
     z-index: 0;
@@ -132,7 +121,7 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
     left: 50%;
     right: -50%;
     height: 1px;
-    overflow: hidden;
+    overflow: visible;
     background: #2A3037;
   }
   .telemetry-connector.is-complete {
@@ -142,14 +131,13 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   .telemetry-transition-label {
     position: absolute;
     z-index: 2;
-    top: 42px;
+    top: 50%;
     left: 50%;
-    display: flex;
-    width: 100%;
+    display: inline-flex;
+    width: max-content;
     justify-content: center;
+    transform: translate(-50%, -50%);
     pointer-events: none;
-  }
-  .telemetry-transition-label > span {
     padding: 1px 4px;
     border: 1px solid rgba(58, 167, 109, 0.26);
     border-radius: 9999px;
@@ -159,7 +147,9 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
     font-weight: 600;
     line-height: 12px;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
+  .telemetry-track.is-lost .telemetry-connector.is-complete { opacity: 0.45; }
   .telemetry-connector::after {
     position: absolute;
     inset: 0 auto 0 -35%;
