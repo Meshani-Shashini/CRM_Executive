@@ -5,7 +5,10 @@ import LeadTemperatureControl from '../components/LeadTemperatureControl';
 import { useApp } from '../store/AppContext';
 import { AlertTriangle, CalendarDays, CheckCircle2, CircleDot, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, TrendingUp, UserRound, X } from 'lucide-react';
 import type { Client, CompanyContactProfile, Lead, LeadTemperature } from '../types';
-import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
+import {
+  DEFAULT_USD_TO_MVR_RATE, formatAmount, formatCurrencyInput, formatCurrencyInputForDisplay,
+  parseCurrencyInput, toMvr, type Currency,
+} from '../utils/currency';
 import { hashParams } from '../utils/navigation';
 import { formatDate, normalizeDateInput } from '../utils/date';
 import DateInput from '../components/ui/DateInput';
@@ -13,7 +16,7 @@ import ProductSelect from '../components/ui/ProductSelect';
 import { calculateBrokerageCommission } from '../utils/insurance';
 import { INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
 import { getLeadContactedAt } from '../utils/leadSla';
-import { isValidPhoneNumber } from '../utils/communication';
+import { isValidPhoneNumber, isValidTelegramContact } from '../utils/communication';
 import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
 import DealWorkspace from './DealWorkspace';
 import {
@@ -90,6 +93,8 @@ export default function LeadsPage() {
   const [contactRole, setContactRole] = useState('Decision Maker');
   const [contactEmail, setContactEmail] = useState('');
   const [contactPhone, setContactPhone] = useState('');
+  const [contactWhatsapp, setContactWhatsapp] = useState('');
+  const [contactTelegram, setContactTelegram] = useState('');
   const [additionalContactDrafts, setAdditionalContactDrafts] = useState<ContactDraft[]>([]);
   const [leadTitle, setLeadTitle] = useState('');
   const [titleManuallyEdited, setTitleManuallyEdited] = useState(false);
@@ -98,6 +103,7 @@ export default function LeadsPage() {
   const [productCode, setProductCode] = useState('');
   const [closeDate, setCloseDate] = useState('');
   const [ownerId, setOwnerId] = useState('');
+  const [leadTemperature, setLeadTemperature] = useState<LeadTemperature>('WARM');
   const [leadBoardStage, setLeadBoardStage] = useState<LeadLifecycleStage>('Lead Identified');
   const [leadLossReason, setLeadLossReason] = useState('');
   const [leadCurrency, setLeadCurrency] = useState<Currency | ''>('');
@@ -121,6 +127,8 @@ export default function LeadsPage() {
   const selectedOrganization = clients.find(
     (client) => client.name.trim().toLowerCase() === organizationQuery.trim().toLowerCase(),
   );
+  const effectiveOwnerId = activeRole === 'sales' ? user.id : ownerId;
+  const parsedLeadValue = parseCurrencyInput(leadValue);
   const fieldErrors = {
     personName: validationAttempted && !personName.trim() ? 'Sales person is required.' : '',
     organization: validationAttempted && !selectedOrganization ? 'Choose an existing organization or create it first.' : '',
@@ -130,14 +138,18 @@ export default function LeadsPage() {
       : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim()) ? '' : 'Enter a valid contact email address.',
     contactPhone: !validationAttempted ? '' : !contactPhone.trim()
       ? 'Contact phone is required.'
-      : isValidPhoneNumber(contactPhone) ? '' : 'Enter a valid contact phone number.',
+      : isValidPhoneNumber(contactPhone) ? '' : 'Enter a valid Maldives phone number starting with +960 and seven subscriber digits.',
+    contactWhatsapp: validationAttempted && contactWhatsapp.trim() && !isValidPhoneNumber(contactWhatsapp)
+      ? 'Enter a valid Maldives WhatsApp number starting with +960 and seven subscriber digits.' : '',
+    contactTelegram: validationAttempted && contactTelegram.trim() && !isValidTelegramContact(contactTelegram)
+      ? 'Enter a valid Telegram username or Maldives number starting with +960 and seven subscriber digits.' : '',
     leadTitle: validationAttempted && !leadTitle.trim() ? 'Title is required.' : '',
     productCode: validationAttempted && !productCode ? 'Insurance product is required.' : '',
     selectedPipelineId: validationAttempted && !selectedPipeline ? 'Deal pipeline is required.' : '',
-    ownerId: validationAttempted && !ownerId ? 'Owner is required.' : '',
+    ownerId: validationAttempted && !effectiveOwnerId ? 'Owner is required.' : '',
     closeDate: validationAttempted && !normalizeDateInput(closeDate) ? 'Expected close date is required.' : '',
     leadCurrency: validationAttempted && !leadCurrency ? 'Currency is required.' : '',
-    leadValue: !validationAttempted || (leadValue.trim() && Number.isFinite(Number(leadValue)) && Number(leadValue) >= 0)
+    leadValue: !validationAttempted || (leadValue.trim() && Number.isFinite(parsedLeadValue) && parsedLeadValue >= 0)
       ? '' : 'Enter a non-negative lead value.',
     exchangeRate: !validationAttempted || leadCurrency !== 'USD' || (Number.isFinite(Number(exchangeRate)) && Number(exchangeRate) > 0)
       ? '' : 'Enter a positive exchange rate for USD.',
@@ -268,6 +280,8 @@ export default function LeadsPage() {
     setContactRole('Decision Maker');
     setContactEmail('');
     setContactPhone('');
+    setContactWhatsapp('');
+    setContactTelegram('');
     setAdditionalContactDrafts([]);
     setLeadTitle('');
     setTitleManuallyEdited(false);
@@ -276,6 +290,7 @@ export default function LeadsPage() {
     setProductCode('');
     setCloseDate('');
     setOwnerId(user.id);
+    setLeadTemperature('WARM');
     setLeadBoardStage('Lead Identified');
     setLeadLossReason('');
     setPersonName(user.name);
@@ -302,21 +317,31 @@ export default function LeadsPage() {
 
   const openEditLead = (lead: Lead) => {
     if (user.role !== 'admin' && user.role !== 'sales') return;
+    const leadClient = clients.find((client) => client.id === lead.clientId)
+      ?? clients.find((client) => client.name.trim().toLowerCase() === lead.client.trim().toLowerCase());
+    const leadProfiles = [
+      ...(lead.contacts ?? []),
+      ...(leadClient?.contacts ?? []).filter((profile) => profile.linkedLeadIds?.includes(lead.id)),
+    ].filter((profile, index, profiles) => profiles.findIndex((candidate) => candidate.id === profile.id) === index);
+    const primaryProfile = leadProfiles.find((profile) => profile.id === lead.contactProfileId)
+      ?? leadProfiles.find((profile) => profile.name.trim().toLowerCase() === lead.contact.trim().toLowerCase()
+        || Boolean(lead.contactEmail && profile.email.trim().toLowerCase() === lead.contactEmail.trim().toLowerCase()));
     setFormError('');
     setValidationAttempted(false);
     setEditingLead(lead);
     setOrganizationQuery(lead.client);
     setPersonName(lead.person ?? lead.contact);
-    setPrimaryContactName(lead.contact);
-    setContactProfileId(lead.contactProfileId ?? '');
-    setContactRole(lead.contactRole ?? 'Decision Maker');
-    setContactEmail(lead.contactEmail ?? '');
-    setContactPhone(lead.contactPhone ?? '');
-    const leadClient = clients.find((client) => client.id === lead.clientId)
-      ?? clients.find((client) => client.name.trim().toLowerCase() === lead.client.trim().toLowerCase());
-    const existingContacts = [...(lead.contacts ?? []), ...(leadClient?.contacts ?? []).filter((profile) => profile.linkedLeadIds?.includes(lead.id))]
-      .filter((profile, index, profiles) => profiles.findIndex((candidate) => candidate.id === profile.id) === index)
-      .filter((profile) => profile.id !== lead.contactProfileId && profile.name.trim().toLowerCase() !== lead.contact.trim().toLowerCase());
+    setPrimaryContactName(lead.contact || primaryProfile?.name || '');
+    setContactProfileId(lead.contactProfileId ?? primaryProfile?.id ?? '');
+    setContactRole(lead.contactRole ?? primaryProfile?.role ?? 'Decision Maker');
+    setContactEmail(lead.contactEmail ?? primaryProfile?.email ?? '');
+    setContactPhone(lead.contactPhone ?? primaryProfile?.phone ?? '');
+    setContactWhatsapp(lead.whatsapp ?? primaryProfile?.whatsapp ?? '');
+    setContactTelegram(lead.telegram ?? primaryProfile?.telegram ?? '');
+    const existingContacts = leadProfiles
+      .filter((profile) => profile.id !== primaryProfile?.id
+        && profile.id !== lead.contactProfileId
+        && profile.name.trim().toLowerCase() !== (lead.contact || primaryProfile?.name || '').trim().toLowerCase());
     setAdditionalContactDrafts(existingContacts.map((profile) => contactDraft(profile)));
     setLeadTitle(lead.title ?? `${lead.client} lead`);
     setTitleManuallyEdited(true);
@@ -324,12 +349,13 @@ export default function LeadsPage() {
     setLeadNotes(lead.notes ?? '');
     setProductCode(lead.productCode);
     setCloseDate(lead.closeDate ?? lead.renewalDate);
-    setOwnerId(lead.ownerId);
+    setOwnerId(activeRole === 'sales' ? user.id : lead.ownerId);
+    setLeadTemperature(lead.temperature ?? 'WARM');
     setLeadBoardStage(boardStageForLead(lead, linkedDealIds, linkedLeadIds));
     setLeadLossReason(lead.lossReason ?? '');
     setSelectedPipelineId(lead.pipelineId ?? boardPipeline?.id ?? '');
     setLeadCurrency(lead.currency ?? 'MVR');
-    setLeadValue(String(lead.value ?? lead.premium));
+    setLeadValue(formatCurrencyInputForDisplay(String(lead.value ?? lead.premium)));
     setExchangeRate(lead.currency === 'USD' ? String(lead.exchangeRate ?? DEFAULT_USD_TO_MVR_RATE) : '');
     setNewLeadOpen(true);
   };
@@ -386,8 +412,8 @@ export default function LeadsPage() {
     const primaryContact = primaryContactName.trim();
     const email = contactEmail.trim();
     const phone = contactPhone.trim();
-    const whatsapp = String(data.get('whatsapp') ?? '').trim();
-    const telegram = String(data.get('telegram') ?? '').trim();
+    const whatsapp = contactWhatsapp.trim();
+    const telegram = contactTelegram.trim();
     const matchingProfile = findMatchingContactProfile(selectedOrganization?.contacts, {
       id: contactProfileId,
       email,
@@ -400,7 +426,9 @@ export default function LeadsPage() {
       const contactPhone = contact.phone.trim();
       return !contactName || !contact.role.trim()
         || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)
-        || !isValidPhoneNumber(contactPhone);
+        || !isValidPhoneNumber(contactPhone)
+        || Boolean(contact.whatsapp.trim() && !isValidPhoneNumber(contact.whatsapp))
+        || Boolean(contact.telegram.trim() && !isValidTelegramContact(contact.telegram));
     });
     const normalizedEmails = [email, ...additionalContactDrafts.map((contact) => contact.email.trim())]
       .filter(Boolean)
@@ -413,8 +441,8 @@ export default function LeadsPage() {
     const person = users.find((candidate) =>
       candidate.role === 'sales' && candidate.name.trim().toLowerCase() === selectedPersonName.toLowerCase(),
     );
-    const owner = staffOptions.find((candidate) => candidate.id === ownerId);
-    const amount = Number(data.get('value'));
+    const owner = staffOptions.find((candidate) => candidate.id === effectiveOwnerId);
+    const amount = parseCurrencyInput(leadValue);
     const rate = leadCurrency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
     const expectedCloseDate = normalizeDateInput(closeDate);
 
@@ -430,8 +458,9 @@ export default function LeadsPage() {
       setFormError('Enter a valid contact email address.');
       return;
     }
-    if (!isValidPhoneNumber(phone)) {
-      setFormError('Enter a valid contact phone number.');
+    if (!isValidPhoneNumber(phone) || (whatsapp && !isValidPhoneNumber(whatsapp))
+      || (telegram && !isValidTelegramContact(telegram))) {
+      setFormError('Enter valid Maldives phone numbers starting with +960 and seven subscriber digits. Telegram may also be a username.');
       return;
     }
     if (additionalContactErrors || duplicateContactEmails || duplicateContactPhones) {
@@ -546,7 +575,7 @@ export default function LeadsPage() {
       country: selectedOrganization.country,
       insuranceClass: product.category,
       productCode: product.code,
-      temperature: editingLead?.temperature ?? 'WARM',
+      temperature: leadTemperature,
       status: editingLead?.status ?? 'TO-DO',
       funnelStage: leadBoardStage,
       disposition: leadBoardStage === 'Lost' ? 'lost' : leadBoardStage === 'Converted to deal' ? 'converted' : undefined,
@@ -845,7 +874,7 @@ export default function LeadsPage() {
         title={pendingLeadStageChange ? 'Update Lead Stage' : editingLead ? 'Edit Lead' : 'Add Lead'}
         subtitle={pendingLeadStageChange ? `Move from ${pendingLeadStageChange.from} to ${pendingLeadStageChange.to}.` : editingLead ? 'Update this lead in its sales pipeline.' : 'Create a lead in a sales pipeline.'}
         size="lg"
-        footer={<><button type="button" className="btn-ghost" onClick={() => { setNewLeadOpen(false); resetLeadForm(); }}><X size={14} /> Cancel</button><button type="submit" form="new-lead-form" className="btn-primary">{editingLead ? <><Pencil size={14} /> Update Lead</> : '+ Lead'}</button></>}
+        footer={<><button type="button" className="btn-ghost" onClick={() => { setNewLeadOpen(false); resetLeadForm(); }}><X size={14} /> Cancel</button><button type="submit" form="new-lead-form" className="btn-primary">Save</button></>}
       >
         <form id="new-lead-form" onSubmit={createLead} noValidate className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <SectionHeading title="Basic Information" />
@@ -878,7 +907,16 @@ export default function LeadsPage() {
               list="lead-organizations"
               required
               value={organizationQuery}
-              onChange={(event) => { setOrganizationQuery(event.target.value); setContactProfileId(''); }}
+              onChange={(event) => {
+                setOrganizationQuery(event.target.value);
+                setContactProfileId('');
+                setPrimaryContactName('');
+                setContactRole('Decision Maker');
+                setContactEmail('');
+                setContactPhone('');
+                setContactWhatsapp('');
+                setContactTelegram('');
+              }}
               onBlur={() => {
                 if (organizationQuery.trim() && !clients.some((client) => client.name.trim().toLowerCase() === organizationQuery.trim().toLowerCase())) {
                   setNewOrganizationOpen(true);
@@ -906,6 +944,14 @@ export default function LeadsPage() {
                 setContactEmail(profile.email);
                 setContactPhone(profile.phone);
                 setContactRole(profile.role);
+                setContactWhatsapp(profile.whatsapp ?? '');
+                setContactTelegram(profile.telegram ?? '');
+              } else {
+                setPrimaryContactName('');
+                setContactEmail('');
+                setContactPhone('');
+                setContactWhatsapp('');
+                setContactTelegram('');
               }
             }}>
               <option value="">Create or update a profile from this lead</option>
@@ -928,8 +974,14 @@ export default function LeadsPage() {
             <input className={inputClass(fieldErrors.contactPhone)} type="tel" value={contactPhone} onChange={(event) => setContactPhone(event.target.value)} required placeholder="+960 ..." aria-invalid={Boolean(fieldErrors.contactPhone)} />
             {fieldErrors.contactPhone && <p className="mt-1 text-xs text-red-400">{fieldErrors.contactPhone}</p>}
           </Field>
-          <Field label="WhatsApp"><input className="input" name="whatsapp" type="tel" defaultValue={editingLead?.whatsapp ?? ''} placeholder="+960 ..." /></Field>
-          <Field label="Telegram"><input className="input" name="telegram" defaultValue={editingLead?.telegram ?? ''} placeholder="@username or phone" /></Field>
+          <Field label="WhatsApp">
+            <input className={inputClass(fieldErrors.contactWhatsapp)} name="whatsapp" type="tel" value={contactWhatsapp} onChange={(event) => setContactWhatsapp(event.target.value)} placeholder="+960 ..." aria-invalid={Boolean(fieldErrors.contactWhatsapp)} />
+            {fieldErrors.contactWhatsapp && <p className="mt-1 text-xs text-red-400">{fieldErrors.contactWhatsapp}</p>}
+          </Field>
+          <Field label="Telegram">
+            <input className={inputClass(fieldErrors.contactTelegram)} name="telegram" value={contactTelegram} onChange={(event) => setContactTelegram(event.target.value)} placeholder="@username or +960 ..." aria-invalid={Boolean(fieldErrors.contactTelegram)} />
+            {fieldErrors.contactTelegram && <p className="mt-1 text-xs text-red-400">{fieldErrors.contactTelegram}</p>}
+          </Field>
           <div className="sm:col-span-2 space-y-3">
             {additionalContactDrafts.map((contact, index) => <section key={contact.id} className="rounded-lg border border-ink-700 bg-ink-900/35 p-3">
               <div className="mb-3 flex items-center justify-between">
@@ -952,7 +1004,7 @@ export default function LeadsPage() {
                   onChange={(event) => updateContactDraft(contact.id, 'phone', event.target.value)} /></Field>
                 <Field label="WhatsApp"><input className="input" type="tel" value={contact.whatsapp} placeholder="+960 ..."
                   onChange={(event) => updateContactDraft(contact.id, 'whatsapp', event.target.value)} /></Field>
-                <Field label="Telegram"><input className="input" value={contact.telegram} placeholder="@username or phone"
+                <Field label="Telegram"><input className="input" value={contact.telegram} placeholder="@username or +960 ..."
                   onChange={(event) => updateContactDraft(contact.id, 'telegram', event.target.value)} /></Field>
               </div>
             </section>)}
@@ -962,6 +1014,13 @@ export default function LeadsPage() {
             </button>
           </div>
           <SectionHeading title="Opportunity Details" />
+          <Field label="Lead Temperature / Tag">
+            <select className="input" value={leadTemperature} onChange={(event) => setLeadTemperature(event.target.value as LeadTemperature)}>
+              <option value="WARM">WARM</option>
+              <option value="COLD">COLD</option>
+              <option value="HOT">HOT</option>
+            </select>
+          </Field>
           <Field label="Title *">
             <input className={inputClass(fieldErrors.leadTitle)} name="title" maxLength={200} required value={leadTitle} onChange={(event) => { setTitleManuallyEdited(true); setLeadTitle(event.target.value); }} aria-invalid={Boolean(fieldErrors.leadTitle)} />
             {fieldErrors.leadTitle && <p className="mt-1 text-xs text-red-400">{fieldErrors.leadTitle}</p>}
@@ -997,6 +1056,9 @@ export default function LeadsPage() {
                 setStageChangeRemarks('');
               }
               setLeadBoardStage(nextStage);
+              event.currentTarget.blur();
+            }} onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur();
             }} disabled={Boolean(editingLead && isTerminalLeadStage(boardStageForLead(editingLead, linkedDealIds, linkedLeadIds)))}>
               {(editingLead && isTerminalLeadStage(boardStageForLead(editingLead, linkedDealIds, linkedLeadIds))
                 ? [leadBoardStage]
@@ -1012,7 +1074,12 @@ export default function LeadsPage() {
             <Field label="Remarks / Notes (optional)"><textarea className="input min-h-20" value={stageChangeRemarks} onChange={(event) => setStageChangeRemarks(event.target.value)} placeholder="Add stage-change notes to the activity timeline." maxLength={2000} /></Field>
           </div>}
           <Field label="Deal pipeline">
-            <select className={inputClass(fieldErrors.selectedPipelineId)} value={selectedPipelineId} onChange={(event) => setSelectedPipelineId(event.target.value)} aria-invalid={Boolean(fieldErrors.selectedPipelineId)}>
+            <select className={inputClass(fieldErrors.selectedPipelineId)} value={selectedPipelineId} onChange={(event) => {
+              setSelectedPipelineId(event.target.value);
+              event.currentTarget.blur();
+            }} onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur();
+            }} aria-invalid={Boolean(fieldErrors.selectedPipelineId)}>
               <option value="">Select deal pipeline</option>
               {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
             </select>
@@ -1031,28 +1098,28 @@ export default function LeadsPage() {
             {fieldErrors.leadCurrency && <p className="mt-1 text-xs text-red-400">{fieldErrors.leadCurrency}</p>}
           </Field>
           <Field label={`Total Insured Value${leadCurrency ? ` (${leadCurrency})` : ''}`}>
-            <input className={inputClass(fieldErrors.leadValue)} name="value" type="number" min="0" step="0.01" required value={leadValue} onChange={(event) => setLeadValue(event.target.value)} aria-invalid={Boolean(fieldErrors.leadValue)} />
+            <input className={inputClass(fieldErrors.leadValue)} name="value" type="text" inputMode="decimal" required value={leadValue} onChange={(event) => setLeadValue(formatCurrencyInput(event.target.value))} onBlur={() => setLeadValue(formatCurrencyInputForDisplay(leadValue))} aria-invalid={Boolean(fieldErrors.leadValue)} />
             {fieldErrors.leadValue && <p className="mt-1 text-xs text-red-400">{fieldErrors.leadValue}</p>}
           </Field>
-          {productCode && Number(leadValue) >= 0 && PRODUCT_CODES.find((product) => product.code === productCode) && <p className="self-end text-sm text-brand-300">Tentative Brokerage: {formatAmount(calculateBrokerageCommission(Number(leadValue), PRODUCT_CODES.find((product) => product.code === productCode)), leadCurrency || 'MVR')} ({PRODUCT_CODES.find((product) => product.code === productCode)?.standardBrokerageRatePct ?? 0}%)</p>}
+          {productCode && Number.isFinite(parsedLeadValue) && parsedLeadValue >= 0 && PRODUCT_CODES.find((product) => product.code === productCode) && <p className="self-end text-sm text-brand-300">Tentative Brokerage: {formatAmount(calculateBrokerageCommission(parsedLeadValue, PRODUCT_CODES.find((product) => product.code === productCode)), leadCurrency || 'MVR')} ({PRODUCT_CODES.find((product) => product.code === productCode)?.standardBrokerageRatePct ?? 0}%)</p>}
           {leadCurrency === 'USD' && (
             <>
               <Field label="Exchange rate (MVR per USD)">
                 <input className={inputClass(fieldErrors.exchangeRate)} name="exchangeRate" type="number" min="0.000001" step="any" required value={exchangeRate} onChange={(event) => setExchangeRate(event.target.value)} aria-invalid={Boolean(fieldErrors.exchangeRate)} />
                 {fieldErrors.exchangeRate && <p className="mt-1 text-xs text-red-400">{fieldErrors.exchangeRate}</p>}
               </Field>
-              {Number(leadValue) > 0 && Number(exchangeRate) > 0 && <p className="self-end text-sm text-muted">MVR equivalent: {formatAmount(toMvr(Number(leadValue), 'USD', Number(exchangeRate)), 'MVR')}</p>}
+              {parsedLeadValue > 0 && Number(exchangeRate) > 0 && <p className="self-end text-sm text-muted">MVR equivalent: {formatAmount(toMvr(parsedLeadValue, 'USD', Number(exchangeRate)), 'MVR')}</p>}
             </>
           )}
           <Field label="Owner">
-            <select className={inputClass(fieldErrors.ownerId)} required value={ownerId} onChange={(event) => {
+            <select className={inputClass(fieldErrors.ownerId)} required value={effectiveOwnerId} disabled={activeRole === 'sales'} onChange={(event) => {
               const nextOwnerId = event.target.value;
               setOwnerId(nextOwnerId);
               const nextOwner = staffOptions.find((candidate) => candidate.id === nextOwnerId);
               if (nextOwner) setPersonName(nextOwner.name);
             }} aria-invalid={Boolean(fieldErrors.ownerId)}>
               <option value="">Select owner</option>
-              {staffOptions.map((owner) => <option key={owner.id} value={owner.id}>{owner.name} · {formatStaffIdentifier(owner.id)}{owner.id === user.id ? ' (You)' : ''}</option>)}
+              {staffOptions.map((owner) => <option key={owner.id} value={owner.id}>{owner.name || (owner.role === 'admin' ? 'Admin' : 'Sales')}{owner.id === user.id ? ' (You)' : ''}</option>)}
             </select>
             {fieldErrors.ownerId && <p className="mt-1 text-xs text-red-400">{fieldErrors.ownerId}</p>}
           </Field>

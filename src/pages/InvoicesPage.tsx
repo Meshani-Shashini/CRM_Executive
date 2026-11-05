@@ -27,10 +27,13 @@ export default function InvoicesPage() {
     const applyHashFilter = () => {
       const status = hashParams().get('status');
       setTab(status === 'outstanding' || status === 'Pending' || status === 'Paid' || status === 'Overdue' || status === 'Archived' ? status : 'all');
+      const invoiceId = hashParams().get('id');
+      if (invoiceId) setSelected(invoices.find((invoice) => invoice.id === invoiceId) ?? null);
     };
     window.addEventListener('hashchange', applyHashFilter);
+    applyHashFilter();
     return () => window.removeEventListener('hashchange', applyHashFilter);
-  }, []);
+  }, [invoices]);
 
   const filtered = tab === 'all'
     ? invoices

@@ -4,13 +4,19 @@ import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
 import { Plus, Filter, X } from 'lucide-react';
 import type { CompanyContactProfile, Deal, Lead, ProductCode } from '../types';
-import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
+import {
+  DEFAULT_USD_TO_MVR_RATE, formatAmount, formatCurrencyInput, formatCurrencyInputForDisplay,
+  parseCurrencyInput, toMvr, type Currency,
+} from '../utils/currency';
 import { hashParams } from '../utils/navigation';
 import DateInput from '../components/ui/DateInput';
 import ProductSelect from '../components/ui/ProductSelect';
 import { calculateBrokerageCommission } from '../utils/insurance';
 import { normalizeDateInput } from '../utils/date';
-import { hasCompleteCommunicationChannels, isValidPhoneNumber, requiresCommunicationChannels } from '../utils/communication';
+import {
+  hasCompleteCommunicationChannels, isValidPhoneNumber, isValidTelegramContact,
+  requiresCommunicationChannels,
+} from '../utils/communication';
 import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
 import DealWorkspace from './DealWorkspace';
 import { TENANT_ID } from '../lib/supabase';
@@ -65,6 +71,7 @@ export default function DealsPage() {
   const availableStages = pipelineStages
     .filter((stage) => stage.pipelineId === createPipelineId)
     .sort((a, b) => a.stageOrder - b.stageOrder);
+  const parsedDealAmount = parseCurrencyInput(dealAmount);
   useEffect(() => {
     const firstStage = availableStages[0];
     if (!firstStage) {
@@ -100,7 +107,7 @@ export default function DealsPage() {
     setCreatePipelineId(deal.pipelineId ?? '');
     setSelectedStageId(pipelineStages.find((stage) => stage.pipelineId === deal.pipelineId && stage.name === deal.stage)?.id ?? '');
     setDealCurrency(deal.currency);
-    setDealAmount(String(deal.value));
+    setDealAmount(formatCurrencyInputForDisplay(String(deal.value)));
     setExchangeRate(deal.currency === 'USD' ? String(deal.exchangeRate ?? DEFAULT_USD_TO_MVR_RATE) : '');
     setDealClient(deal.client);
     setDealInsurer(deal.insurer);
@@ -170,7 +177,7 @@ export default function DealsPage() {
   const createDeal = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    const value = Number(dealAmount);
+    const value = parseCurrencyInput(dealAmount);
     const closeDate = dealCloseDate;
     const currency = String(data.get('currency')) as Currency;
     const rate = currency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
@@ -183,8 +190,18 @@ export default function DealsPage() {
       setCreateError('Complete Client, Insurer, Insurance Product, Pipeline, Stage, Currency, Insured Value, Probability, and Expected Close Date.');
       return;
     }
+    if (!Number.isFinite(value) || value < 0) {
+      setCreateError('Enter a non-negative total insured value.');
+      return;
+    }
     if (currency === 'USD' && (!Number.isFinite(rate) || !rate || rate <= 0)) {
       setCreateError('Enter a valid positive exchange rate.');
+      return;
+    }
+    if ((dealPhone && !isValidPhoneNumber(dealPhone))
+      || (dealWhatsapp && !isValidPhoneNumber(dealWhatsapp))
+      || (dealTelegram && !isValidTelegramContact(dealTelegram))) {
+      setCreateError('Enter valid Maldives phone numbers starting with +960 and seven subscriber digits. Telegram may also be a username.');
       return;
     }
     if (selectedStage && requiresCommunicationChannels(selectedStage.name)
@@ -358,10 +375,10 @@ export default function DealsPage() {
           <Field label="Telegram"><input className="input" name="telegram" defaultValue={editingDeal?.telegram ?? ''} placeholder="@username or phone" /></Field>
           <Field label="Stage"><select className="input" name="stage" required value={selectedStageId} onChange={(event) => setSelectedStageId(event.target.value)}><option value="">Select stage</option>{availableStages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select></Field>
           <Field label="Currency"><select className="input" name="currency" required value={dealCurrency} onChange={(event) => { const currency = event.target.value as Currency | ''; setDealCurrency(currency); setDealAmount(''); setExchangeRate(currency === 'USD' ? String(DEFAULT_USD_TO_MVR_RATE) : ''); }}><option value="">Select currency</option><option value="MVR">MVR</option><option value="USD">USD</option></select></Field>
-          <Field label={`Total Insured Value${dealCurrency ? ` (${dealCurrency})` : ''}`}><input className="input" name="value" type="number" min="0" step="0.01" required value={dealAmount} onChange={(event) => setDealAmount(event.target.value)} /></Field>
-          {selectedProduct && Number(dealAmount) >= 0 && <p className="self-end text-sm text-brand-300">Tentative brokerage/profit budget: {formatAmount(calculateBrokerageCommission(Number(dealAmount), selectedProduct), dealCurrency || 'MVR')} ({selectedProduct.standardBrokerageRatePct}%)</p>}
+          <Field label={`Total Insured Value${dealCurrency ? ` (${dealCurrency})` : ''}`}><input className="input" name="value" type="text" inputMode="decimal" required value={dealAmount} onChange={(event) => setDealAmount(formatCurrencyInput(event.target.value))} onBlur={() => setDealAmount(formatCurrencyInputForDisplay(dealAmount))} /></Field>
+          {selectedProduct && Number.isFinite(parsedDealAmount) && parsedDealAmount >= 0 && <p className="self-end text-sm text-brand-300">Tentative brokerage/profit budget: {formatAmount(calculateBrokerageCommission(parsedDealAmount, selectedProduct), dealCurrency || 'MVR')} ({selectedProduct.standardBrokerageRatePct}%)</p>}
           {dealCurrency === 'USD' && <Field label="Exchange rate (1 USD = MVR)"><input className="input" name="exchangeRate" type="number" min="0.000001" step="any" required value={exchangeRate} onChange={(event) => { setExchangeRate(event.target.value); setCreateError(''); }} /></Field>}
-          {dealCurrency === 'USD' && Number(dealAmount) > 0 && Number(exchangeRate) > 0 && <p className="sm:col-span-2 text-sm text-muted">Equivalent: {formatAmount(toMvr(Number(dealAmount), 'USD', Number(exchangeRate)), 'MVR')}</p>}
+          {dealCurrency === 'USD' && parsedDealAmount > 0 && Number(exchangeRate) > 0 && <p className="sm:col-span-2 text-sm text-muted">Equivalent: {formatAmount(toMvr(parsedDealAmount, 'USD', Number(exchangeRate)), 'MVR')}</p>}
           {createError && <p role="alert" className="sm:col-span-2 text-sm text-hot">{createError}</p>}
           <Field label="Stage win probability"><input className="input" name="probability" type="number" value={availableStages.find((stage) => stage.id === selectedStageId)?.winProbabilityPct ?? dealProbability} readOnly aria-readonly="true" /></Field>
           <Field label="Intent Tier">

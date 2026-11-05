@@ -5,17 +5,19 @@ type CommunicationChannels = {
 };
 
 export function isValidPhoneNumber(value: string) {
-  const phone = value.trim();
-  const digitCount = phone.replace(/\D/g, '').length;
-  return /^[+()\d\s-]+$/.test(phone) && digitCount >= 7 && digitCount <= 15;
+  return /^\+960[\s-]?\d{7}$/.test(value.trim());
+}
+
+export function isValidTelegramContact(value: string) {
+  const telegram = value.trim();
+  return /^@?[A-Za-z][A-Za-z0-9_]{4,31}$/.test(telegram) || isValidPhoneNumber(telegram);
 }
 
 export function hasCompleteCommunicationChannels(contact: CommunicationChannels) {
   const phone = contact.contactPhone?.trim() ?? '';
   const whatsapp = contact.whatsapp?.trim() ?? '';
   const telegram = contact.telegram?.trim() ?? '';
-  const validTelegram = /^@?[A-Za-z0-9_]{5,32}$/.test(telegram) || isValidPhoneNumber(telegram);
-  return isValidPhoneNumber(phone) && isValidPhoneNumber(whatsapp) && validTelegram;
+  return isValidPhoneNumber(phone) && isValidPhoneNumber(whatsapp) && isValidTelegramContact(telegram);
 }
 
 export function requiresCommunicationChannels(stageName: string) {

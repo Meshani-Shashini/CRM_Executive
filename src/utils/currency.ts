@@ -14,5 +14,26 @@ export function toMvr(amount: number, currency: Currency, exchangeRate?: number 
 }
 
 export function formatAmount(amount: number, currency: Currency) {
-  return `${currency} ${amount.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+  return `${currency} ${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+export function parseCurrencyInput(value: string) {
+  const normalized = value.replace(/,/g, '').trim();
+  return normalized ? Number(normalized) : Number.NaN;
+}
+
+export function formatCurrencyInput(value: string) {
+  const normalized = value.replace(/,/g, '').replace(/[^\d.]/g, '');
+  const decimalIndex = normalized.indexOf('.');
+  const integerPart = (decimalIndex < 0 ? normalized : normalized.slice(0, decimalIndex)).replace(/\D/g, '');
+  const fractionPart = decimalIndex < 0 ? '' : normalized.slice(decimalIndex + 1).replace(/\D/g, '').slice(0, 2);
+  const groupedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return decimalIndex < 0 ? groupedInteger : `${groupedInteger}.${fractionPart}`;
+}
+
+export function formatCurrencyInputForDisplay(value: string) {
+  const amount = parseCurrencyInput(value);
+  return Number.isFinite(amount)
+    ? amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '';
 }

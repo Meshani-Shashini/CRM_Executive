@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { INSURERS, PRODUCT_CODES } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
@@ -16,6 +16,7 @@ import DateInput from '../components/ui/DateInput';
 import { hasCompleteClientProfile, INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
 import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
 import { formatStaffIdentifier } from '../utils/staff';
+import { hashParams } from '../utils/navigation';
 
 export default function ClientsPage() {
   const { clients, setClients, leads, setLeads, deals, setDeals, invoices, activities, setActivities, user, users } = useApp();
@@ -31,6 +32,18 @@ export default function ClientsPage() {
   const [quoteCurrency, setQuoteCurrency] = useState<Currency | ''>('');
   const [quoteAmount, setQuoteAmount] = useState('');
   const [quoteExchangeRate, setQuoteExchangeRate] = useState('');
+  useEffect(() => {
+    const syncSelectedClient = () => {
+      const requestedId = hashParams().get('id') ?? '';
+      if (requestedId && clients.some((client) => client.id === requestedId
+        && (user.role !== 'client' || client.id === user.clientId))) {
+        setSelectedId(requestedId);
+      }
+    };
+    syncSelectedClient();
+    window.addEventListener('hashchange', syncSelectedClient);
+    return () => window.removeEventListener('hashchange', syncSelectedClient);
+  }, [clients, user.clientId, user.role]);
   const visibleClients = user.role === 'client'
     ? clients.filter((client) => Boolean(portalClientId) && client.id === portalClientId)
     : clients;
