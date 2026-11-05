@@ -86,10 +86,10 @@ export default function Sidebar({
 
   return (
     <>
-      {open && <div className="fixed inset-0 bg-black/60 z-30 lg:hidden" onClick={onClose} />}
+      {open && <div className="fixed inset-0 z-30 bg-black/60 xl:hidden" onClick={onClose} />}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-40 w-[180px] bg-[#0B0C0E] border-r border-[#1B1E22] flex flex-col transition-transform duration-200 ${
-          open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        className={`fixed inset-y-0 left-0 z-40 flex w-[180px] shrink-0 flex-col border-r border-[#1B1E22] bg-[#0B0C0E] transition-transform duration-200 xl:static ${
+          open ? 'translate-x-0' : '-translate-x-full xl:translate-x-0'
         }`}
       >
         <div className="border-b border-ink-700 px-3 py-4">

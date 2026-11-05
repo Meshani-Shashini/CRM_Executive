@@ -632,6 +632,7 @@ export default function LeadsPage() {
   };
 
   return (
+    <div className="w-full max-w-full min-w-0">
     <div className={inspectedLeadId ? 'space-y-0' : 'space-y-2'}>
       <h2 className="sr-only">All Leads</h2>
       {!inspectedLeadId && <div className="flex flex-wrap items-center justify-between gap-2">
@@ -669,7 +670,7 @@ export default function LeadsPage() {
         <div className="mb-2 flex justify-end">
           <button type="button" className="text-xs text-muted hover:text-white" onClick={() => setView('forecast')}><TrendingUp size={13} className="mr-1 inline" />Forecast</button>
         </div>
-        <div className="overflow-x-auto pb-3">
+        <div className="max-w-full overflow-x-auto overscroll-x-contain pb-3">
         <div className="grid min-w-[1820px] grid-cols-7 gap-3">
           {leadsByBoardStage.map(({ stage, leads: stageLeads }) => {
             const StageIcon = boardStageIcon(stage);
@@ -763,7 +764,7 @@ export default function LeadsPage() {
           </div>
         </div>
       ) : (
-        <div className="overflow-x-auto overscroll-x-contain rounded-lg border border-[#1B1E22] bg-ink-950">
+        <div className="w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain rounded-lg border border-[#1B1E22] bg-ink-950">
           <table className="w-full min-w-[1120px] table-fixed text-[11px] leading-tight" aria-label="Leads">
             <colgroup>
               <col className="w-[12%]" />
@@ -1173,6 +1174,7 @@ export default function LeadsPage() {
           </button>
         </div>
       )}
+    </div>
     </div>
   );
 }

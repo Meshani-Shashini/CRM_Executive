@@ -508,7 +508,7 @@ function ProductManagement({
           </div>
           <button type="button" className="btn-primary !py-1.5" onClick={startAdd}><Plus size={14} /> Add Product</button>
         </div>
-        <div className="overflow-x-auto">
+        <div className="max-w-full overflow-x-auto overscroll-x-contain">
           <table className="w-full text-sm min-w-[1500px]">
             <thead className="text-[11px] tracking-wider text-muted border-b border-ink-600">
               <tr><th className="text-left px-3 py-2">Class</th><th className="text-left px-3 py-2">Product Code</th><th className="text-left px-3 py-2">Description</th><th className="text-right px-3 py-2">Brokerage %</th><th className="text-left px-3 py-2">Mandatory</th><th className="text-left px-3 py-2">Pipeline Model</th><th className="text-left px-3 py-2">Sales Cycle / Velocity</th><th className="text-left px-3 py-2">Risk Level</th><th className="text-left px-3 py-2 min-w-[360px]">Key Underwriting Intake Artifacts</th><th className="px-3 py-2" /></tr>

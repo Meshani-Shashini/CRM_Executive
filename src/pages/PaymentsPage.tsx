@@ -59,7 +59,7 @@ export default function PaymentsPage() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="w-full max-w-full min-w-0 space-y-5">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="glass rounded-2xl p-4">
           <div className="flex items-center justify-between">
@@ -98,8 +98,9 @@ export default function PaymentsPage() {
         <button className="btn-primary !py-1.5" onClick={() => setCreateOpen(true)} disabled={!invoices.some((invoice) => invoice.status !== 'Paid')} title={invoices.some((invoice) => invoice.status !== 'Paid') ? undefined : 'All invoices are paid'}><Plus size={14} /> Record Payment</button>
       </div>
 
-      <div className="glass rounded-2xl overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="glass min-w-0 rounded-2xl">
+        <div className="max-w-full overflow-x-auto overscroll-x-contain">
+        <table className="w-full min-w-[820px] text-sm">
           <thead className="bg-ink-900/60 text-muted text-[11px] tracking-wider">
             <tr>
               <th className="text-left px-4 py-3 font-medium">Receipt #</th>
@@ -131,6 +132,7 @@ export default function PaymentsPage() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Record Payment" subtitle="Record a payment against an invoice." footer={<><button type="button" className="btn-ghost" onClick={() => setCreateOpen(false)}><X size={14} /> Cancel</button><button type="submit" form="record-payment-form" className="btn-primary"><Plus size={14} /> Record Payment</button></>}>
         <form id="record-payment-form" onSubmit={recordPayment} className="space-y-3">

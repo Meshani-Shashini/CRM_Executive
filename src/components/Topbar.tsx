@@ -239,8 +239,8 @@ export default function Topbar({
 
   return (
     <header className="sticky top-0 z-20 bg-ink-900/80 backdrop-blur-xl border-b border-ink-600">
-      <div className="flex items-center gap-3 px-4 lg:px-6 h-14">
-        <button onClick={onMenu} className="lg:hidden p-2 -ml-2 rounded-lg hover:bg-ink-700 text-muted hover:text-white">
+      <div className="flex h-14 items-center gap-3 px-3 sm:px-4 lg:px-6">
+        <button type="button" onClick={onMenu} aria-label="Open navigation menu" className="shrink-0 rounded-lg p-2 -ml-2 text-muted hover:bg-ink-700 hover:text-white xl:hidden">
           <Menu size={18} />
         </button>
         <div className="flex-1 min-w-0">

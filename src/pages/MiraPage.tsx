@@ -32,7 +32,7 @@ export default function MiraPage() {
   };
 
   return (
-    <div className="space-y-5 print-report">
+    <div className="w-full max-w-full min-w-0 space-y-5 print-report">
       <div className="glass rounded-2xl p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-3">
@@ -65,7 +65,7 @@ export default function MiraPage() {
         </div>
       </div>
 
-      <div className="glass rounded-2xl overflow-hidden">
+      <div className="glass min-w-0 rounded-2xl overflow-hidden">
         <div className="px-5 py-4 border-b border-ink-600 flex items-center justify-between">
           <div>
             <div className="text-white font-semibold">{company.legalName}</div>
@@ -73,7 +73,7 @@ export default function MiraPage() {
           </div>
           <div className="text-xs text-muted">{rows.length} records</div>
         </div>
-        <div className="overflow-x-auto">
+        <div className="max-w-full overflow-x-auto overscroll-x-contain">
           <table className="w-full text-sm">
             <thead className="bg-ink-900/60 text-muted text-[11px] tracking-wider">
               <tr>

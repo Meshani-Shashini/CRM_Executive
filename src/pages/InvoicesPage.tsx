@@ -81,7 +81,7 @@ export default function InvoicesPage() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="w-full max-w-full min-w-0 space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-1 bg-ink-800/60 border border-ink-600 rounded-lg p-1">
           {(['all', 'outstanding', 'Pending', 'Paid', 'Overdue', 'Archived'] as const).map((t) => (
@@ -106,8 +106,9 @@ export default function InvoicesPage() {
         <Stat label="Active GST" value={activeGstRate !== undefined ? `${activeGstRate}%` : 'Not configured'} variant="brand" />
       </div>
 
-      <div className="glass rounded-2xl overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="glass min-w-0 rounded-2xl">
+        <div className="max-w-full overflow-x-auto overscroll-x-contain">
+        <table className="w-full min-w-[760px] text-sm">
           <thead className="bg-ink-900/60 text-muted text-[11px] tracking-wider">
             <tr>
               <th className="text-left px-4 py-3 font-medium">Invoice #</th>
@@ -143,6 +144,7 @@ export default function InvoicesPage() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       <Modal
@@ -176,8 +178,8 @@ export default function InvoicesPage() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-ink-600 overflow-hidden">
-              <table className="w-full text-sm">
+            <div className="max-w-full overflow-x-auto rounded-xl border border-ink-600">
+              <table className="w-full min-w-[480px] text-sm">
                 <thead className="bg-ink-800 text-muted text-[11px]">
                   <tr>
                     <th className="text-left px-3 py-2">Description</th>
