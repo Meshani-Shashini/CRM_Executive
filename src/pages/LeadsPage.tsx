@@ -13,6 +13,7 @@ import ProductSelect from '../components/ui/ProductSelect';
 import { calculateBrokerageCommission } from '../utils/insurance';
 import { INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
 import { getLeadContactedAt } from '../utils/leadSla';
+import { isValidPhoneNumber } from '../utils/communication';
 import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
 import DealWorkspace from './DealWorkspace';
 import {
@@ -129,7 +130,7 @@ export default function LeadsPage() {
       : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim()) ? '' : 'Enter a valid contact email address.',
     contactPhone: !validationAttempted ? '' : !contactPhone.trim()
       ? 'Contact phone is required.'
-      : /^[+()\d\s-]{7,}$/.test(contactPhone.trim()) ? '' : 'Enter a valid contact phone number.',
+      : isValidPhoneNumber(contactPhone) ? '' : 'Enter a valid contact phone number.',
     leadTitle: validationAttempted && !leadTitle.trim() ? 'Title is required.' : '',
     productCode: validationAttempted && !productCode ? 'Insurance product is required.' : '',
     selectedPipelineId: validationAttempted && !selectedPipeline ? 'Deal pipeline is required.' : '',
@@ -399,7 +400,7 @@ export default function LeadsPage() {
       const contactPhone = contact.phone.trim();
       return !contactName || !contact.role.trim()
         || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)
-        || !/^[+()\d\s-]{7,}$/.test(contactPhone);
+        || !isValidPhoneNumber(contactPhone);
     });
     const normalizedEmails = [email, ...additionalContactDrafts.map((contact) => contact.email.trim())]
       .filter(Boolean)
@@ -429,7 +430,7 @@ export default function LeadsPage() {
       setFormError('Enter a valid contact email address.');
       return;
     }
-    if (!/^[+()\d\s-]{7,}$/.test(phone)) {
+    if (!isValidPhoneNumber(phone)) {
       setFormError('Enter a valid contact phone number.');
       return;
     }

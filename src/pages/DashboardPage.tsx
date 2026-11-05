@@ -7,7 +7,7 @@ import Badge from '../components/ui/Badge';
 import { formatAmount, toMvr } from '../utils/currency';
 import { dashboardHref } from '../utils/navigation';
 import { formatDate } from '../utils/date';
-import { isStageSlaOverdue } from '../utils/stageSla';
+import { isStageSlaOverdue, isTerminalDealStage } from '../utils/stageSla';
 import { LEAD_LIFECYCLE_STAGES, lifecycleStageForLead } from '../utils/leadLifecycle';
 
 const tabs = ['Company', 'Leads', 'Deals', 'Staff'] as const;
@@ -167,7 +167,7 @@ function LeadsDashboard() {
   const maxStageCount = Math.max(1, ...stages.map((stage) => stage.count));
   const leadSlaOverdue = (lead: typeof leads[number]) => {
     const deal = deals.find((item) => item.id === lead.dealId || item.leadId === lead.id);
-    if (!deal) return false;
+    if (!deal || isTerminalDealStage(deal.stage, deal.disposition)) return false;
     const configuredStages = pipelineStages
       .filter((stage) => stage.pipelineId === deal.pipelineId)
       .sort((left, right) => left.stageOrder - right.stageOrder);
@@ -248,6 +248,7 @@ function DealsDashboard() {
     ? Math.round(deals.reduce((sum, deal) => sum + deal.probability, 0) / deals.length)
     : 0;
   const dealSlaOverdue = (deal: typeof deals[number]) => {
+    if (isTerminalDealStage(deal.stage, deal.disposition)) return false;
     const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
     if (!stage) return false;
     const activeHistory = stageHistory.find((entry) =>

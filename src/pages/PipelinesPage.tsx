@@ -9,7 +9,7 @@ import { formatAmount, toMvr } from '../utils/currency';
 import { formatDate } from '../utils/date';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile } from '../utils/customerProfile';
-import { getStageSlaElapsedDays, isStageSlaOverdue } from '../utils/stageSla';
+import { getStageSlaElapsedDays, isStageSlaOverdue, isTerminalDealStage } from '../utils/stageSla';
 
 const LOSS_REASONS = [
   'Price / premium',
@@ -113,7 +113,8 @@ function isLostStage(name: string) {
 function isWonStage(name: string) {
   const normalized = name.toLowerCase();
   return normalized.includes('policy bound') || normalized.includes('immediate cover')
-    || normalized.includes('policy issued') || normalized.includes('renewed') || normalized === 'closed-won';
+    || normalized.includes('policy issued') || normalized.includes('renewed') || normalized === 'closed-won'
+    || normalized.includes('bound') || normalized.includes('won');
 }
 
 function isRenewalPipeline(pipeline?: Pipeline) {
@@ -320,7 +321,7 @@ export default function PipelinesPage() {
 
   const moveDeal = (dealId: string, target: PipelineStage) => {
     const deal = deals.find((item) => item.id === dealId);
-    if (!deal) return;
+    if (!deal || isTerminalDealStage(deal.stage, deal.disposition)) return;
     const current = stageForDeal(deal);
     if (!current || current.id === target.id) return;
     if (requiresCommunicationChannels(target.name) && !hasCompleteCommunicationChannels(deal)) {
@@ -359,6 +360,7 @@ export default function PipelinesPage() {
   ) => {
     const now = new Date().toISOString();
     const movingDeal = deals.find((deal) => deal.id === dealId);
+    if (!movingDeal || isTerminalDealStage(movingDeal.stage, movingDeal.disposition)) return;
     const reachesPolicyBound = Boolean(movingDeal && isWonStage(to.name) && !isWonStage(movingDeal.stage));
     const boundClient = movingDeal && clients.find((client) => client.name.trim().toLowerCase() === movingDeal.client.trim().toLowerCase());
     const renewalPipeline = pipelines.find((pipeline) => pipeline.isActive && isRenewalPipeline(pipeline));
@@ -495,9 +497,13 @@ export default function PipelinesPage() {
     const isLost = disposition === 'lost';
     const lossReason = isLost ? String(data.get('lossReason') ?? '').trim() : undefined;
     if (isLost && !lossReason) return;
+    const winReason = disposition === 'won' ? String(data.get('winReason') ?? '').trim() : undefined;
+    if (disposition === 'won' && !winReason) return;
     const details = isLost
       ? String(data.get('notes') ?? '').trim()
-      : String(data.get('proposalSummary') ?? '').trim();
+      : disposition === 'won'
+        ? `Win reason: ${winReason}`
+        : String(data.get('proposalSummary') ?? '').trim();
     applyMove(deal.id, current, pendingMove.stage, details, lossReason, disposition || undefined);
   };
 
@@ -615,6 +621,7 @@ export default function PipelinesPage() {
   const stageElapsedDays = (dealId: string, currentStage: PipelineStage) => {
     const currentEntry = historyForDeal(dealId).find((entry) => entry.toStageId === currentStage.id && !entry.exitedAt);
     const deal = deals.find((item) => item.id === dealId);
+    if (deal && isTerminalDealStage(deal.stage, deal.disposition)) return null;
     const enteredAt = currentEntry?.enteredAt
       ?? deal?.stageChangedAt
       ?? deal?.createdAt;
@@ -625,7 +632,8 @@ export default function PipelinesPage() {
   const visibleDealsForStage = (stage: PipelineStage) => pipelineDeals
     .filter((deal) => stageForDeal(deal)?.id === stage.id)
     .filter((deal) => {
-      const health = dealHealth(stageElapsedDays(deal.id, stage), stage.stagnationDaysThreshold);
+      const targetDays = isTerminalDealStage(deal.stage, deal.disposition) ? 0 : stage.stagnationDaysThreshold;
+      const health = dealHealth(stageElapsedDays(deal.id, stage), targetDays);
       const intent = intentForDeal(deal);
       return (!healthFilter || health === healthFilter) && (!intentFilter || intent === intentFilter);
     });
@@ -750,13 +758,14 @@ export default function PipelinesPage() {
                 <div className="space-y-2 min-h-32">
                   {stageDeals.map((deal) => {
                     const elapsed = stageElapsedDays(deal.id, stage);
-                    const health = dealHealth(elapsed, stage.stagnationDaysThreshold);
+                    const targetDays = isTerminalDealStage(deal.stage, deal.disposition) ? 0 : stage.stagnationDaysThreshold;
+                    const health = dealHealth(elapsed, targetDays);
                     const activeHistory = historyForDeal(deal.id).find((entry) => entry.toStageId === stage.id && !entry.exitedAt);
                     const enteredAt = activeHistory?.enteredAt ?? deal.stageChangedAt ?? deal.createdAt;
-                    const slaOverdue = isStageSlaOverdue(enteredAt, stage.stagnationDaysThreshold, now);
-                    const momentum = dealMomentum(elapsed, stage.stagnationDaysThreshold);
+                    const slaOverdue = isStageSlaOverdue(enteredAt, targetDays, now);
+                    const momentum = dealMomentum(elapsed, targetDays);
                     const intent = intentForDeal(deal);
-                    const score = dealHealthScore(elapsed, stage.stagnationDaysThreshold, deal.probability);
+                    const score = dealHealthScore(elapsed, targetDays, deal.probability);
                     const recentHistory = historyForDeal(deal.id)[0];
                     const nextActivity = nextActivityBadge(deal.nextActivityAt);
                     return (
@@ -854,11 +863,13 @@ export default function PipelinesPage() {
         </>}
       >
         <form id="stage-gate-form" onSubmit={submitGatedMove} className="space-y-3">
-          {pendingMove && isWonStage(pendingMove.stage.name) && (
+          {pendingMove && (isWonStage(pendingMove.stage.name)
+            || (isRenewalPipeline(selectedPipeline) && pendingMove.stage.name.toLowerCase().includes('renewed'))) && <>
             <p className="rounded-lg border border-win/30 bg-win/5 p-3 text-sm text-muted">
               Confirm that the policy is bound. Proceed with invoicing and active-sales follow-up.
             </p>
-          )}
+            <Field label="Win reason (required)"><textarea className="input min-h-20" name="winReason" required maxLength={2000} placeholder="Record why the client selected this placement." /></Field>
+          </>}
           {pendingMove && isRenewalPipeline(selectedPipeline) && pendingMove.stage.name.toLowerCase().includes('renewed') && (
             <p className="rounded-lg border border-win/30 bg-win/5 p-3 text-sm text-muted">
               Confirm the policy renewal. It will remain in the Annual Renewals pipeline as Won; proceed with invoicing and active sales follow-up.

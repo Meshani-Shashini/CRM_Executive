@@ -1,3 +1,9 @@
+export function isTerminalDealStage(stageName: string, disposition?: 'won' | 'lost') {
+  const stage = stageName.toLowerCase();
+  return disposition !== undefined || ['lost', 'declined', 'bound', 'won', 'renewed', 'immediate cover', 'policy issued']
+    .some((terminal) => stage.includes(terminal));
+}
+
 export function isStageSlaOverdue(enteredAt: string | undefined, targetDays: number, now = Date.now()) {
   if (!enteredAt || targetDays <= 0) return false;
   const enteredAtTime = Date.parse(enteredAt);

@@ -10,7 +10,7 @@ import DateInput from '../components/ui/DateInput';
 import ProductSelect from '../components/ui/ProductSelect';
 import { calculateBrokerageCommission } from '../utils/insurance';
 import { normalizeDateInput } from '../utils/date';
-import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
+import { hasCompleteCommunicationChannels, isValidPhoneNumber, requiresCommunicationChannels } from '../utils/communication';
 import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
 import DealWorkspace from './DealWorkspace';
 import { TENANT_ID } from '../lib/supabase';
@@ -227,7 +227,7 @@ export default function DealsPage() {
     });
     const validContact = Boolean(contactName
       && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)
-      && /^[+()\d\s-]{7,}$/.test(dealPhone));
+      && isValidPhoneNumber(dealPhone));
     const dealContactProfile: CompanyContactProfile | undefined = validContact ? {
       id: matchingContact?.id ?? editingDeal?.contactProfileId ?? `contact-${crypto.randomUUID()}`,
       name: contactName,

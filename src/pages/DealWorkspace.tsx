@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
-  Activity as ActivityIcon, AlertTriangle, ArrowLeft, ArrowRight, Building2, CalendarDays, Check, Clock3, Columns3,
+  AlertTriangle, ArrowLeft, ArrowRight, Building2, CalendarDays, Check, Clock3, Columns3,
   FileText, List, Pencil, Plus, ShieldCheck, Wallet, Trash2,
 } from 'lucide-react';
 import Badge from '../components/ui/Badge';
@@ -16,7 +16,7 @@ import { formatDate } from '../utils/date';
 import { calculateBrokerageCommission } from '../utils/insurance';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile } from '../utils/customerProfile';
-import { isStageSlaOverdue } from '../utils/stageSla';
+import { isStageSlaOverdue, isTerminalDealStage } from '../utils/stageSla';
 import { linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
 import {
   appendLeadStageTransition, buildLeadTelemetryStages, LEAD_LIFECYCLE_STAGES,
@@ -225,6 +225,7 @@ export default function DealWorkspace({
   const [activityModal, setActivityModal] = useState<'meeting' | 'note' | 'quote' | 'task' | null>(null);
   const [moveStage, setMoveStage] = useState<PipelineStage | null>(null);
   const [lossReason, setLossReason] = useState('');
+  const [winReason, setWinReason] = useState('');
   const [moveError, setMoveError] = useState('');
   const [stageChangeRemarks, setStageChangeRemarks] = useState('');
   const [stageContactName, setStageContactName] = useState('');
@@ -354,7 +355,7 @@ export default function DealWorkspace({
     : undefined;
   const quotes = selectedActivities.filter((activity) => activity.type === 'quote' && activity.quoteAmount !== undefined);
   const selectedHistory = progressDeal
-    ? stageHistory.filter((entry) => entry.dealId === progressDeal.id).sort((left, right) => right.enteredAt.localeCompare(left.enteredAt))
+    ? stageHistory.filter((entry) => entry.dealId === progressDeal.id).sort((left, right) => Date.parse(left.enteredAt) - Date.parse(right.enteredAt))
     : [];
   const stageEntry = !selectedLead ? selectedHistory.find((entry) => !entry.exitedAt) : undefined;
   const enteredAt = (selectedLead
@@ -371,7 +372,10 @@ export default function DealWorkspace({
     ]
     : stages;
   const activeProgressIndex = progressStages.findIndex((stage) => (typeof stage === 'string' ? stage : stage.name) === activeProgressStage);
-  const activeTargetStage = selectedLead ? undefined : currentStage;
+  const activeTargetStage = selectedLead || !selectedDeal
+    || isTerminalDealStage(selectedDeal.stage, selectedDeal.disposition)
+    ? undefined
+    : currentStage;
   const targetDays = activeTargetStage?.stagnationDaysThreshold ?? 0;
   const stageEnteredAt = enteredAt ? Date.parse(enteredAt) : Number.NaN;
   const hasStageTimestamp = Number.isFinite(stageEnteredAt);
@@ -421,7 +425,7 @@ export default function DealWorkspace({
     : undefined;
   const progressStartDate = selectedLead
     ? leadStartDate
-    : selectedHistory[selectedHistory.length - 1]?.enteredAt ?? progressDeal?.createdAt ?? enteredAt;
+    : selectedHistory[0]?.enteredAt ?? progressDeal?.createdAt ?? enteredAt;
   const progressStartMilliseconds = progressStartDate ? Date.parse(progressStartDate) : Number.NaN;
   const stageTimeline = progressStages.map((stage, index) => {
     const name = typeof stage === 'string' ? stage : stage.name;
@@ -430,22 +434,27 @@ export default function DealWorkspace({
       const history = pipelineStage
         ? selectedHistory.find((entry) => entry.toStageId === pipelineStage.id)
         : undefined;
+      const historyIndex = history ? selectedHistory.indexOf(history) : -1;
+      const nextHistoryEntry = historyIndex >= 0 ? selectedHistory[historyIndex + 1] : undefined;
       const stageStart = history?.enteredAt
         ?? (index === 0 ? progressDeal.createdAt : undefined)
         ?? (name === progressDeal.stage ? progressDeal.stageChangedAt ?? progressDeal.createdAt : undefined);
       const isCurrent = name === progressDeal.stage;
-      const stageEnd = history?.exitedAt ?? (isCurrent && stageStart ? new Date(clockNow).toISOString() : undefined);
+      const terminalReached = isCurrent && isTerminalDealStage(name, progressDeal.disposition);
+      const stageEnd = history?.exitedAt
+        ?? nextHistoryEntry?.enteredAt
+        ?? (terminalReached ? stageStart : isCurrent && stageStart ? new Date(clockNow).toISOString() : undefined);
       const startMs = stageStart ? Date.parse(stageStart) : Number.NaN;
       const endMs = stageEnd ? Date.parse(stageEnd) : Number.NaN;
       const cumulative = Number.isFinite(startMs) && Number.isFinite(progressStartMilliseconds)
-        ? Math.max(0, (isCurrent ? clockNow : Number.isFinite(endMs) ? endMs : startMs) - progressStartMilliseconds)
+        ? Math.max(0, (isCurrent && !terminalReached ? clockNow : Number.isFinite(endMs) ? endMs : startMs) - progressStartMilliseconds)
         : undefined;
       return {
         key: pipelineStage?.id ?? name,
         name,
         index,
-        active: isCurrent,
-        done: activeProgressIndex >= 0 && index < activeProgressIndex,
+        active: isCurrent && !terminalReached,
+        done: (activeProgressIndex >= 0 && index < activeProgressIndex) || terminalReached,
         enteredAt: stageStart,
         duration: Number.isFinite(startMs) && Number.isFinite(endMs)
           ? Math.max(0, endMs - startMs)
@@ -453,7 +462,7 @@ export default function DealWorkspace({
             ? Math.max(0, history.durationSeconds * 1000)
             : undefined,
         cumulative,
-        targetDays: pipelineStage?.stagnationDaysThreshold ?? 0,
+        targetDays: terminalReached ? 0 : pipelineStage?.stagnationDaysThreshold ?? 0,
       };
     }
 
@@ -502,7 +511,9 @@ export default function DealWorkspace({
       .filter((stage) => stage.pipelineId === (recordDeal?.pipelineId ?? recordLead?.pipelineId))
       .sort((left, right) => left.stageOrder - right.stageOrder);
     const recordStage = recordDeal ? recordStages.find((stage) => stage.name === recordDeal.stage) : undefined;
-    if (!recordStage) return { overdue: false, targetDays: 0 };
+    if (!recordDeal || !recordStage || isTerminalDealStage(recordDeal.stage, recordDeal.disposition)) {
+      return { overdue: false, targetDays: 0 };
+    }
     const activeHistory = recordDeal && stageHistory.find((entry) =>
       entry.dealId === recordDeal.id && entry.toStageId === recordStage.id && !entry.exitedAt);
     const recordEnteredAt = activeHistory?.enteredAt
@@ -859,6 +870,10 @@ export default function DealWorkspace({
       setMoveError('Select a deal before changing its stage.');
       return;
     }
+    if (isTerminalDealStage(selectedDeal.stage, selectedDeal.disposition)) {
+      setMoveError('A terminal deal cannot be moved to another stage.');
+      return;
+    }
     if (!currentStage) {
       setMoveError('The deal’s current stage is not configured in its pipeline.');
       return;
@@ -866,8 +881,12 @@ export default function DealWorkspace({
     const now = new Date().toISOString();
     const lost = isLostStage(target.name);
     const bound = isBoundStage(target.name);
-    if (lost && !reason) {
+    if (lost && !reason?.trim()) {
       setMoveError('A loss reason is mandatory.');
+      return;
+    }
+    if (bound && !winReason.trim()) {
+      setMoveError('A win reason is mandatory.');
       return;
     }
     const requiresIntake = requiresCommunicationChannels(target.name);
@@ -928,8 +947,13 @@ export default function DealWorkspace({
         enteredAt: now,
         exitedAt: null,
         durationSeconds: null,
-        ...(stageChangeRemarks.trim() ? { details: stageChangeRemarks.trim() } : {}),
-        ...(lost ? { outcome: 'lost' as const, lossReason: reason } : bound ? { outcome: 'won' as const } : {}),
+        ...((bound || stageChangeRemarks.trim()) ? {
+          details: [
+            ...(bound ? [`Win reason: ${winReason.trim()}`] : []),
+            ...(stageChangeRemarks.trim() ? [`Remarks: ${stageChangeRemarks.trim()}`] : []),
+          ].join('\n'),
+        } : {}),
+        ...(lost ? { outcome: 'lost' as const, lossReason: reason?.trim() } : bound ? { outcome: 'won' as const } : {}),
       };
       return [...next, audit];
     });
@@ -958,7 +982,7 @@ export default function DealWorkspace({
           intakeCompleted: intakeComplete,
           probability: lost ? 0 : target.winProbabilityPct,
           weighted: Math.round(deal.value * (lost ? 0 : target.winProbabilityPct)) / 100,
-          ...(lost ? { disposition: 'lost' as const, lossReason: reason } : bound ? {
+          ...(lost ? { disposition: 'lost' as const, lossReason: reason?.trim() } : bound ? {
             disposition: 'won' as const,
             linkedInvoiceId: invoiceId,
             policyExpiry,
@@ -1057,16 +1081,18 @@ export default function DealWorkspace({
     }
     setMoveStage(null);
     setLossReason('');
+    setWinReason('');
     setMoveError('');
     setStageChangeRemarks('');
   };
 
   const requestStageChange = (target: PipelineStage, deal = selectedDeal) => {
-    if (!deal || target.name === deal.stage) return;
+    if (!deal || isTerminalDealStage(deal.stage, deal.disposition) || target.name === deal.stage) return;
     setSelectedKey(`deal:${deal.id}`);
     setContactError('');
     setMoveStage(target);
     setLossReason('');
+    setWinReason('');
     setMoveError('');
     setStageChangeRemarks('');
     setStageContactName(deal.contactName ?? '');
@@ -1374,12 +1400,6 @@ export default function DealWorkspace({
           <section aria-label={selectedLead ? 'Lead telemetry stage tracker' : 'Placement telemetry stage tracker'} className={`telemetry-panel relative w-full ${selectedLead ? 'order-4' : 'order-1'} mt-2 min-w-0 rounded-xl px-2 py-3`}>
             <h2 className="sr-only">{selectedLead ? 'Lead telemetry' : 'Placement telemetry'}</h2>
             {stageTimeline.length ? <>
-              {!selectedLead && <div className="mb-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
-                <ActivityIcon size={13} className="shrink-0 text-[#A7F2C5]" aria-hidden="true" />
-                <span className="text-[9px] tracking-[0.14em] text-[#A7F2C5]">{selectedPipeline?.name ?? 'Pipeline'}</span>
-                <span className="telemetry-live-dot shrink-0" aria-hidden="true" />
-                <span className="sr-only">Live tracking</span>
-              </div>}
               <div className="w-full min-w-0 overflow-x-auto py-1">
                 <ol className={`telemetry-track flex min-w-[700px] items-start justify-between pl-20 xl:min-w-0 ${selectedLead ? 'telemetry-track--lead' : ''} ${selectedLead && activeProgressStage === 'Lost' ? 'is-lost' : ''}`}>
                       {stageTimeline.map((stage) => {
@@ -1398,8 +1418,9 @@ export default function DealWorkspace({
                           : stage.duration;
                         const durationMilliseconds = stageElapsedMilliseconds;
                         const nextStageEnteredAt = stageTimeline[stage.index + 1]?.enteredAt;
-                        const interStageMilliseconds = elapsedBetweenDates(stage.enteredAt, nextStageEnteredAt)
-                          ?? (stage.active ? durationMilliseconds : stage.duration);
+                        const interStageMilliseconds = stage.duration
+                          ?? elapsedBetweenDates(stage.enteredAt, nextStageEnteredAt)
+                          ?? (stage.active ? durationMilliseconds : undefined);
                         const hasNextStage = stage.index < stageTimeline.length - 1;
                         const segmentDurationLabel = stage.done && hasNextStage
                           ? formatInterStageDays(interStageMilliseconds)
@@ -1429,7 +1450,7 @@ export default function DealWorkspace({
                         return <li key={stage.key} className="telemetry-step relative flex min-w-0 flex-1 flex-col items-center">
                           <button type="button" disabled={selectedLead
                             ? (activeRole !== 'admin' && activeRole !== 'sales') || isTerminalLeadStage(lifecycleStageForLead(selectedLead, Boolean(progressDeal)))
-                            : !pipelineStage || !progressDeal || stage.active || selectedDeal?.disposition === 'won' || selectedDeal?.disposition === 'lost'}
+                            : !pipelineStage || !progressDeal || stage.active || isTerminalDealStage(selectedDeal?.stage ?? '', selectedDeal?.disposition)}
                             onClick={() => {
                               if (selectedLead && isLeadLifecycleStage(stage.name)) {
                                 changeLeadTelemetryStage(stage.name);
@@ -1442,7 +1463,7 @@ export default function DealWorkspace({
                             aria-current={stage.active ? 'step' : undefined}
                             className={`telemetry-stage relative z-[1] flex w-full flex-col items-center border-0 bg-transparent px-0.5 py-0 text-center disabled:cursor-default ${lostTerminal ? 'is-lost' : stage.active ? 'is-active' : stage.done ? 'is-complete' : 'is-pending'}`}>
                             {!selectedLead && <span className="flex h-4 items-center justify-center whitespace-nowrap font-mono text-[10px] font-medium leading-none tabular-nums text-[#8B949E] sm:text-xs">
-                              {showStageDate && `${stage.active ? 'NOW · ' : ''}${stageDateLabel}`}
+                              {showStageDate && stageDateLabel}
                             </span>}
                             <span className={`flex h-7 w-full items-center justify-center px-1 text-[10px] font-semibold leading-3 tracking-normal sm:text-xs ${stage.active ? 'text-white' : stage.done ? 'text-[#A5DDBB]' : 'text-[#89919C]'}`}>
                               {displayStageName}
@@ -1472,12 +1493,11 @@ export default function DealWorkspace({
                   {stageTimeline.map((stage) => {
                     const isInitiated = stage.done || stage.active;
                     const nextStage = stageTimeline[stage.index + 1];
-                    const rawStageDate = stage.index === 0
-                      ? progressStartDate
-                      : stageDateFromFields(stage)
-                        ?? (stage.active
-                          ? selectedLead.stage_changed_at ?? selectedLead.stageChangedAt ?? selectedLead.routedAt
-                          : undefined);
+                    const rawStageDate = stageDateFromFields(stage)
+                      ?? (stage.index === 0 ? progressStartDate : undefined)
+                      ?? (stage.active
+                        ? selectedLead.stage_changed_at ?? selectedLead.stageChangedAt ?? selectedLead.routedAt
+                        : undefined);
                     const enteredDate = isInitiated
                       ? formatDate(stageDateFromFields({ enteredAt: rawStageDate }))
                       : undefined;
@@ -1489,7 +1509,7 @@ export default function DealWorkspace({
                       : undefined;
                     const stageTotal = reachedTerminal ? formatDays(stage.cumulative) : undefined;
                     const completedMilliseconds = stage.done && nextStage
-                      ? elapsedBetweenDates(rawStageDate, stageDateFromFields(nextStage)) ?? stage.duration
+                      ? stage.duration ?? elapsedBetweenDates(rawStageDate, stageDateFromFields(nextStage))
                       : undefined;
                     const completedDuration = formatMeasuredDays(completedMilliseconds);
                     const stageDuration = stage.done && !reachedTerminal
@@ -1764,8 +1784,8 @@ export default function DealWorkspace({
         </form>
       </Modal>
 
-      <Modal open={Boolean(moveStage)} onClose={() => { setMoveStage(null); setMoveError(''); }} title="Update deal stage" subtitle={`${selectedDeal?.client} · ${moveStage?.name}`} size="lg"
-        footer={<><button type="button" className="btn-ghost" onClick={() => { setMoveStage(null); setMoveError(''); }}>Cancel</button><button type="button" className="btn-primary" onClick={() => moveStage && applyStageChange(moveStage, lossReason)}>Save stage</button></>}>
+      <Modal open={Boolean(moveStage)} onClose={() => { setMoveStage(null); setMoveError(''); setWinReason(''); }} title="Update deal stage" subtitle={`${selectedDeal?.client} · ${moveStage?.name}`} size="lg"
+        footer={<><button type="button" className="btn-ghost" onClick={() => { setMoveStage(null); setMoveError(''); setWinReason(''); }}>Cancel</button><button type="button" className="btn-primary" onClick={() => moveStage && applyStageChange(moveStage, lossReason)}>Save stage</button></>}>
         <div className="space-y-3">
           <Field label="New stage"><input className="input" value={moveStage?.name ?? ''} readOnly aria-readonly="true" /></Field>
           {requiresCommunicationChannels(moveStage?.name ?? '') && <>
@@ -1787,7 +1807,10 @@ export default function DealWorkspace({
             </div>
           </>}
           {moveStage && isLostStage(moveStage.name) && <Field label="Loss reason (required)"><select className="input" value={lossReason} onChange={(event) => setLossReason(event.target.value)}><option value="">Select a reason</option>{LOSS_REASONS.map((reason) => <option key={reason}>{reason}</option>)}</select></Field>}
-          {moveStage && isBoundStage(moveStage.name) && <p className="rounded-lg border border-win/30 bg-win/5 p-3 text-sm text-muted">Confirm that the policy is bound. A pending premium invoice will be created automatically.</p>}
+          {moveStage && isBoundStage(moveStage.name) && <>
+            <p className="rounded-lg border border-win/30 bg-win/5 p-3 text-sm text-muted">Confirm that the policy is bound. A pending premium invoice will be created automatically.</p>
+            <Field label="Win reason (required)"><textarea className="input min-h-20" value={winReason} onChange={(event) => { setWinReason(event.target.value); setMoveError(''); }} placeholder="Record why the client selected this placement." maxLength={2000} /></Field>
+          </>}
           <Field label="Remarks / Notes (optional)"><textarea className="input min-h-20" value={stageChangeRemarks} onChange={(event) => setStageChangeRemarks(event.target.value)} placeholder="Add stage-change notes for the activity timeline." maxLength={2000} /></Field>
           {moveError && <p role="alert" className="text-sm text-hot">{moveError}</p>}
         </div>
