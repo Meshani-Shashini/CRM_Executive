@@ -24,6 +24,7 @@ import {
 import { reconcileContactAssociations } from '../utils/contactProfiles';
 import { buildLeadStageHistoryRecords, hydrateLeadStageHistory } from '../utils/leadLifecycle';
 import { migrateDealLeadLinks } from '../utils/dealFactory';
+import { createDemoSeed } from '../dev/demoSeed';
 
 interface AppState {
   user: User;
@@ -205,6 +206,7 @@ const DEMO_USER: User = {
   title: 'Development Demo Session',
 };
 const AUTH_BYPASS = import.meta.env.DEV && import.meta.env.VITE_AUTH_BYPASS === 'true';
+const DEMO_SEED_ENABLED = AUTH_BYPASS && import.meta.env.VITE_DEMO_SEED === 'true';
 const DEMO_ADMIN_USERNAME = import.meta.env.VITE_DEMO_ADMIN_USERNAME;
 const DEMO_ADMIN_PASSWORD = import.meta.env.VITE_DEMO_ADMIN_PASSWORD;
 const normalizeProduct = (product: ProductCode): ProductCode => {
@@ -445,27 +447,28 @@ function customerLookupRecord(options: CustomerLookups) {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User>(GUEST_USER);
+  const [demoSeed] = useState(() => DEMO_SEED_ENABLED ? createDemoSeed() : null);
+  const [user, setUser] = useState<User>(demoSeed ? DEMO_USER : GUEST_USER);
   const [viewAsRole, setViewAsRoleState] = useState<Role | null>(null);
   const [authLoading, setAuthLoading] = useState(!AUTH_BYPASS);
   const [authError, setAuthError] = useState<string | null>(null);
   const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
+  const [leads, setLeads] = useState<Lead[]>(demoSeed?.leads ?? []);
+  const [clients, setClients] = useState<Client[]>(demoSeed?.clients ?? []);
   const [customerLookups, setCustomerLookups] = useState<CustomerLookups>(createDefaultCustomerLookups);
   const [products, setProducts] = useState<ProductCode[]>(() => PRODUCT_CODES.map((product) => ({ ...product, id: product.code })));
-  const [activities, setActivities] = useState<Activity[]>([]);
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [quotationRequests, setQuotationRequests] = useState<QuotationRequest[]>([]);
-  const [deals, setDeals] = useState<Deal[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [activities, setActivities] = useState<Activity[]>(demoSeed?.activities ?? []);
+  const [vendors, setVendors] = useState<Vendor[]>(demoSeed?.vendors ?? []);
+  const [quotationRequests, setQuotationRequests] = useState<QuotationRequest[]>(demoSeed?.quotationRequests ?? []);
+  const [deals, setDeals] = useState<Deal[]>(demoSeed?.deals ?? []);
+  const [invoices, setInvoices] = useState<Invoice[]>(demoSeed?.invoices ?? []);
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<User[]>(demoSeed ? [DEMO_USER] : []);
   const [company, setCompany] = useState<typeof COMPANY>(COMPANY);
   const [emailTemplates, setEmailTemplates] = useState<Record<string, string>>(DEFAULT_EMAIL_TEMPLATES);
-  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
-  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>([]);
-  const [stageHistory, setStageHistory] = useState<StageHistoryAudit[]>([]);
+  const [pipelines, setPipelines] = useState<Pipeline[]>(demoSeed?.pipelines ?? []);
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>(demoSeed?.pipelineStages ?? []);
+  const [stageHistory, setStageHistory] = useState<StageHistoryAudit[]>(demoSeed?.stageHistory ?? []);
   const [dataReady, setDataReady] = useState(AUTH_BYPASS);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
@@ -973,6 +976,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useApp() {
   const context = useContext(AppContext);
   if (!context) throw new Error('useApp must be used within AppProvider');

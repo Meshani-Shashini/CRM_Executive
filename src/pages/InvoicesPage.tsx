@@ -9,6 +9,7 @@ import { downloadCsv } from '../utils/downloadCsv';
 import { hashParams } from '../utils/navigation';
 import { formatDate } from '../utils/date';
 import DateInput from '../components/ui/DateInput';
+import { invoiceTotalInMvr } from '../utils/invoiceTotals';
 
 const statusVariant: Record<string, 'win' | 'warm' | 'hot' | 'cold' | 'muted'> = {
   Paid: 'win', Partial: 'warm', Pending: 'cold', Overdue: 'hot', Archived: 'muted',
@@ -100,9 +101,9 @@ export default function InvoicesPage() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Stat label="Outstanding" value={`MVR ${invoices.filter((i) => i.status !== 'Paid').reduce((s, i) => s + computeTotals(i).total, 0).toLocaleString()}`} variant="warm" />
-        <Stat label="Overdue" value={`MVR ${invoices.filter((i) => i.status === 'Overdue').reduce((s, i) => s + computeTotals(i).total, 0).toLocaleString()}`} variant="hot" />
-        <Stat label="Collected" value={`MVR ${invoices.filter((i) => i.status === 'Paid').reduce((s, i) => s + computeTotals(i).total, 0).toLocaleString()}`} variant="win" />
+        <Stat label="Outstanding" value={`MVR ${invoices.filter((i) => i.status !== 'Paid').reduce((s, i) => s + invoiceTotalInMvr(i), 0).toLocaleString()}`} variant="warm" />
+        <Stat label="Overdue" value={`MVR ${invoices.filter((i) => i.status === 'Overdue').reduce((s, i) => s + invoiceTotalInMvr(i), 0).toLocaleString()}`} variant="hot" />
+        <Stat label="Collected" value={`MVR ${invoices.filter((i) => i.status === 'Paid').reduce((s, i) => s + invoiceTotalInMvr(i), 0).toLocaleString()}`} variant="win" />
         <Stat label="Active GST" value={activeGstRate !== undefined ? `${activeGstRate}%` : 'Not configured'} variant="brand" />
       </div>
 

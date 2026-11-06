@@ -250,7 +250,7 @@ function makeId() {
 
 export default function PipelinesPage() {
   const {
-    user, deals, setDeals, leads, setLeads, clients, pipelines, setPipelines, pipelineStages, setPipelineStages,
+    user, deals, setDeals, setLeads, clients, pipelines, setPipelines, pipelineStages, setPipelineStages,
     stageHistory, setStageHistory, invoices, setInvoices, quotationRequests,
   } = useApp();
   const [pipelineId, setPipelineId] = useState(pipelines.find((pipeline) => pipeline.isActive)?.id ?? '');
@@ -470,6 +470,8 @@ export default function PipelinesPage() {
         id: makeId(),
         tenantId: TENANT_ID,
         dealId,
+        userId: user.id,
+        userName: user.name,
         fromStageId: from.id,
         toStageId: to.id,
         enteredAt: now,

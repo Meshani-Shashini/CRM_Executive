@@ -81,6 +81,7 @@ export function buildLeadConversion(input: LeadConversionInput) {
     stageHistory,
     leadUpdate: {
       ...linked.lead,
+      pipelineId: pipeline.id,
       contactProfileId: lead.contactProfileId ?? primaryContact?.id,
       contactEmail: lead.contactEmail || primaryContact?.email || '',
       contactPhone: contactChannels.contactPhone || lead.contactPhone || '',

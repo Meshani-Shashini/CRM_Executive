@@ -1,5 +1,6 @@
 import type { Insurer, ProductCode } from '../types';
 
+// One-time migration seed only; new UI must use vendors instead.
 export const INSURERS: Insurer[] = [
   { id: 'ins1', name: 'Allied Insurance Company', shortName: 'Allied', commissionRate: 15, address: '' },
   { id: 'ins2', name: 'Dhivehi Insurance Company', shortName: 'Dhivehi', commissionRate: 12, address: '' },

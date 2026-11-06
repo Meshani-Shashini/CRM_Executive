@@ -1,5 +1,9 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
+
+type ModalLayer = 'base' | 'overlay';
+
+const openModals: Array<{ element: HTMLDivElement; layer: ModalLayer }> = [];
 
 interface ModalProps {
   open: boolean;
@@ -9,14 +13,47 @@ interface ModalProps {
   children: ReactNode;
   footer?: ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl';
-  layer?: 'base' | 'overlay';
+  layer?: ModalLayer;
 }
 
 export default function Modal({ open, onClose, title, subtitle, children, footer, size = 'md', layer = 'base' }: ModalProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!open || !rootRef.current) return undefined;
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const element = rootRef.current;
+    openModals.push({ element, layer });
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const topModal = openModals.reduce<{ element: HTMLDivElement; layer: ModalLayer } | undefined>(
+        (top, modal) => !top || modal.layer === 'overlay' || top.layer === 'base' ? modal : top,
+        undefined,
+      );
+      if (event.key === 'Escape' && topModal?.element === element) {
+        event.preventDefault();
+        onCloseRef.current();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      const index = openModals.findIndex((modal) => modal.element === element);
+      if (index >= 0) openModals.splice(index, 1);
+      if (openerRef.current?.isConnected) openerRef.current.focus();
+    };
+  }, [layer, open]);
+
   if (!open) return null;
   const w = { sm: 'max-w-md', md: 'max-w-xl', lg: 'max-w-3xl', xl: 'max-w-5xl' }[size];
   return (
-    <div className={`fixed inset-0 ${layer === 'overlay' ? 'z-[60]' : 'z-50'} flex items-center justify-center p-4 animate-fadeIn`} onClick={onClose}>
+    <div ref={rootRef} className={`fixed inset-0 ${layer === 'overlay' ? 'z-[60]' : 'z-50'} flex items-center justify-center p-4 animate-fadeIn`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClose();
+      }}>
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
       <div
         className={`relative ${w} w-full glass rounded-2xl shadow-glass flex flex-col max-h-[90vh] animate-slideUp`}

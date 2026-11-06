@@ -4,6 +4,10 @@ type CommunicationChannels = {
   telegram?: string;
 };
 
+export function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 export function isValidPhoneNumber(value: string) {
   return /^\+960[\s-]?\d{7}$/.test(value.trim());
 }

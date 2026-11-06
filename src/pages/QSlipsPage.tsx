@@ -9,8 +9,10 @@ import { formatAmount } from '../utils/currency';
 import { formatDate } from '../utils/date';
 import { isTerminalDealStage } from '../utils/stageSla';
 import { dashboardHref, hashParams } from '../utils/navigation';
+import {
+  canTransitionQuotationRequestStatus, quotationRequestStatusOptions, type QuotationRequestStatus,
+} from '../utils/quotationRequestStatus';
 
-type QuotationRequestStatus = QuotationRequest['status'];
 const STATUSES: QuotationRequestStatus[] = ['Draft', 'Sent', 'Responses received', 'Closed'];
 const QUOTATION_REQUEST_COLUMNS = [
   'Ref', 'Deal', 'Lead', 'Client', 'Vendors', 'Product',
@@ -41,7 +43,8 @@ function statusTone(status: QuotationRequestStatus): 'muted' | 'brand' | 'warm' 
 
 export default function QSlipsPage() {
   const {
-    clients, deals, leads, products, pipelineStages, quotationRequests, setQuotationRequests, vendors, user, viewAsRole,
+    clients, deals, leads, products, pipelineStages, quotationRequests, setQuotationRequests,
+    vendors, user, viewAsRole,
   } = useApp();
   const activeRole = viewAsRole ?? user.role;
   const insurerOptions = vendors.filter((vendor) =>
@@ -101,9 +104,9 @@ export default function QSlipsPage() {
     ? products.find((product) => product.code === selectedDeal.productCode)
       ?? products.find((product) => product.name === selectedDeal.product || product.code === selectedDeal.product)
     : undefined;
-  const vendorNames = (vendorIds: string[]) => vendorIds
+  const vendorNames = useCallback((vendorIds: string[]) => vendorIds
     .map((vendorId) => vendors.find((vendor) => vendor.id === vendorId)?.name)
-    .filter((name): name is string => Boolean(name));
+    .filter((name): name is string => Boolean(name)), [vendors]);
   const filteredRequests = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
     return quotationRequests.filter((request) => {
@@ -122,7 +125,7 @@ export default function QSlipsPage() {
         && (!clientFilter || request.clientId === clientFilter)
         && searchable.includes(normalizedQuery);
     }).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-  }, [clientFilter, clients, deals, leads, products, quotationRequests, requestFilter, searchQuery, statusFilter, vendorFilter, vendors]);
+  }, [clientFilter, clients, deals, leads, products, quotationRequests, requestFilter, searchQuery, statusFilter, vendorFilter, vendorNames]);
 
   const submitRequest = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -180,9 +183,10 @@ export default function QSlipsPage() {
   };
 
   const updateStatus = (request: QuotationRequest, status: QuotationRequestStatus) => {
-    if (status === request.status) return;
+    if (!canTransitionQuotationRequestStatus(request.status, status, activeRole)) return;
+    const now = new Date().toISOString();
     setQuotationRequests((current) => current.map((item) => item.id === request.id
-      ? { ...item, status, updatedAt: new Date().toISOString() }
+      ? { ...item, status, updatedAt: now }
       : item));
   };
 
@@ -272,7 +276,9 @@ export default function QSlipsPage() {
                           value={request.status}
                           onChange={(event) => updateStatus(request, event.target.value as QuotationRequestStatus)}
                         >
-                          {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                          {quotationRequestStatusOptions(request.status, activeRole).map(({ status, label, disabled }) => (
+                            <option key={status} value={status} disabled={disabled}>{label}</option>
+                          ))}
                         </select>
                       ) : <Badge variant={statusTone(request.status)}>{request.status}</Badge>}
                     </td>

@@ -7,13 +7,13 @@ import Badge from '../components/ui/Badge';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
 import LeadContactSlaBadge from '../components/LeadContactSlaBadge';
 import Modal from '../components/ui/Modal';
+import TableRowActionsMenu from '../components/ui/TableRowActionsMenu';
 import ActivityTimelineItem from '../components/ActivityTimelineItem';
 import { useApp } from '../store/AppContext';
 import { TENANT_ID } from '../lib/supabase';
 import type { Activity, CompanyContactProfile, Deal, Lead, PipelineStage, StageHistoryAudit } from '../types';
 import { formatAmount } from '../utils/currency';
 import { formatDate } from '../utils/date';
-import { calculateBrokerageCommission } from '../utils/insurance';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile } from '../utils/customerProfile';
 import {
@@ -250,6 +250,7 @@ export default function DealWorkspace({
   const changePipelineFilter = onPipelineFilterChange ?? setKanbanPipelineId;
   const [dealListSearch, setDealListSearch] = useState('');
   const [openDealActionsId, setOpenDealActionsId] = useState('');
+  const [dealActionsAnchor, setDealActionsAnchor] = useState<HTMLButtonElement | null>(null);
   const [query, setQuery] = useState('');
   const [productFilter, setProductFilter] = useState('');
   const [activityModal, setActivityModal] = useState<'meeting' | 'note' | 'quote' | 'task' | null>(null);
@@ -959,6 +960,8 @@ export default function DealWorkspace({
         id: `stage-${crypto.randomUUID()}`,
         tenantId: TENANT_ID,
         dealId: selectedDeal.id,
+        userId: user.id,
+        userName: user.name,
         fromStageId: currentStage.id,
         toStageId: target.id,
         enteredAt: now,
@@ -1353,8 +1356,10 @@ export default function DealWorkspace({
                       ? 'Lost'
                       : terminal ? 'Closed' : 'Open';
                   return (
-                    <tr key={deal.id} tabIndex={0} onClick={() => { setSelectedKey(`deal:${deal.id}`); setWorkspaceView('inspection'); }}
+                    <tr key={deal.id} role="link" tabIndex={0} aria-label={`Open deal details for ${dealTitle}`}
+                      onClick={() => { setSelectedKey(`deal:${deal.id}`); setWorkspaceView('inspection'); }}
                       onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) return;
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault();
                           setSelectedKey(`deal:${deal.id}`);
@@ -1375,7 +1380,7 @@ export default function DealWorkspace({
                       <td data-label={dealListColumns[4].label} className="text-muted">{pipeline?.name ?? 'Unknown pipeline'}</td>
                       <td data-label={dealListColumns[5].label}>
                         <div className="deal-list-stage-cell">
-                          <select className="input deal-list-stage-select !min-h-7 !py-1 !text-[inherit]" value={stage?.id ?? ''} disabled={!stage || (activeRole !== 'admin' && activeRole !== 'sales')}
+                          <select className="input deal-list-stage-select" title={stage?.name} value={stage?.id ?? ''} disabled={!stage || (activeRole !== 'admin' && activeRole !== 'sales')}
                             aria-label={`Change stage for ${dealTitle}`} onClick={(event) => event.stopPropagation()} onChange={(event) => {
                               const target = dealStages.find((item) => item.id === event.target.value);
                               if (target) requestStageChange(target, deal);
@@ -1396,12 +1401,24 @@ export default function DealWorkspace({
                       <td data-label={dealListColumns[11].label} className="whitespace-nowrap text-muted">{deal.closeDate ? formatDate(deal.closeDate) : '—'}</td>
                       <td data-label={dealListColumns[12].label} className="relative text-right" onClick={(event) => event.stopPropagation()}>
                         <button type="button" className="rounded-md p-1.5 text-muted hover:bg-ink-700 hover:text-white" aria-label={`Actions for ${dealTitle}`} aria-haspopup="menu" aria-expanded={openDealActionsId === deal.id}
-                          onClick={() => setOpenDealActionsId((current) => current === deal.id ? '' : deal.id)}><MoreHorizontal size={15} /></button>
-                        {openDealActionsId === deal.id && <div role="menu" className="absolute right-1 top-8 z-20 min-w-28 rounded-lg border border-ink-600 bg-ink-900 p-1 text-left shadow-xl">
-                          {onEditDeal && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs text-white hover:bg-ink-700" onClick={() => { setOpenDealActionsId(''); onEditDeal(deal); }}><Pencil size={12} /> Edit deal</button>}
-                          {onDeleteDeal && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs text-hot hover:bg-ink-700" onClick={() => { setOpenDealActionsId(''); onDeleteDeal(deal); }}><Trash2 size={12} /> Delete deal</button>}
-                          <span className="block px-2.5 py-2 text-[10px] text-muted">{outcome}</span>
-                        </div>}
+                          onClick={(event) => {
+                            if (openDealActionsId === deal.id) {
+                              setOpenDealActionsId('');
+                              setDealActionsAnchor(null);
+                            } else {
+                              setOpenDealActionsId(deal.id);
+                              setDealActionsAnchor(event.currentTarget);
+                            }
+                          }}><MoreHorizontal size={15} /></button>
+                        <TableRowActionsMenu
+                          open={openDealActionsId === deal.id}
+                          anchor={dealActionsAnchor}
+                          label={`Deal actions for ${dealTitle}`}
+                        >
+                          {onEditDeal && <button type="button" role="menuitem" className="table-row-actions-item text-white hover:bg-ink-700" onClick={() => { setOpenDealActionsId(''); setDealActionsAnchor(null); onEditDeal(deal); }}><Pencil size={12} /> Edit deal</button>}
+                          {onDeleteDeal && <button type="button" role="menuitem" className="table-row-actions-item text-hot hover:bg-ink-700" onClick={() => { setOpenDealActionsId(''); setDealActionsAnchor(null); onDeleteDeal(deal); }}><Trash2 size={12} /> Delete deal</button>}
+                          <span className="block px-3 py-2 text-[10px] text-muted">{outcome}</span>
+                        </TableRowActionsMenu>
                       </td>
                     </tr>
                   );

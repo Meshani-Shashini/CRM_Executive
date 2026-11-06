@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
+import TableRowActionsMenu from '../components/ui/TableRowActionsMenu';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
 import { useApp } from '../store/AppContext';
 import { AlertTriangle, ArrowRight, CalendarDays, CheckCircle2, CircleDot, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, TrendingUp, UserRound, X } from 'lucide-react';
@@ -16,7 +17,7 @@ import ProductSelect from '../components/ui/ProductSelect';
 import { calculateBrokerageCommission } from '../utils/insurance';
 import { INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
 import { getLeadContactedAt } from '../utils/leadSla';
-import { isValidPhoneNumber, isValidTelegramContact } from '../utils/communication';
+import { isValidEmail, isValidPhoneNumber, isValidTelegramContact } from '../utils/communication';
 import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
 import DealWorkspace from './DealWorkspace';
 import {
@@ -135,6 +136,7 @@ export default function LeadsPage() {
   const [insuranceClassFilter, setInsuranceClassFilter] = useState(() => hashParams().get('insuranceClass') ?? '');
   const [pendingLeadDeletion, setPendingLeadDeletion] = useState<Lead | null>(null);
   const [openLeadActionsId, setOpenLeadActionsId] = useState('');
+  const [leadActionsAnchor, setLeadActionsAnchor] = useState<HTMLButtonElement | null>(null);
   const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
   const linkedDealIds = useMemo(() => new Set(deals.map((deal) => deal.id)), [deals]);
   const linkedLeadIds = useMemo(() => new Set(deals.flatMap((deal) => deal.leadId ? [deal.leadId] : [])), [deals]);
@@ -150,7 +152,7 @@ export default function LeadsPage() {
     primaryContactName: validationAttempted && !primaryContactName.trim() ? 'Primary contact name is required.' : '',
     contactEmail: !validationAttempted ? '' : !contactEmail.trim()
       ? 'Contact email is required.'
-      : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim()) ? '' : 'Enter a valid contact email address.',
+      : isValidEmail(contactEmail) ? '' : 'Enter a valid contact email address.',
     contactPhone: !validationAttempted ? '' : !contactPhone.trim()
       ? 'Contact phone is required.'
       : isValidPhoneNumber(contactPhone) ? '' : 'Enter a valid Maldives phone number starting with +960 and seven subscriber digits.',
@@ -452,7 +454,7 @@ export default function LeadsPage() {
       const contactEmail = contact.email.trim();
       const contactPhone = contact.phone.trim();
       return !contactName || !contact.role.trim()
-        || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)
+        || !isValidEmail(contactEmail)
         || !isValidPhoneNumber(contactPhone)
         || Boolean(contact.whatsapp.trim() && !isValidPhoneNumber(contact.whatsapp))
         || Boolean(contact.telegram.trim() && !isValidTelegramContact(contact.telegram));
@@ -862,19 +864,32 @@ export default function LeadsPage() {
                   <td data-label={leadTableColumns[8].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={tableDate(lead.closeDate ?? lead.renewalDate)}>{tableDate(lead.closeDate ?? lead.renewalDate)}</span></td>
                   <td data-label={leadTableColumns[9].label} className="relative px-1 py-2 text-right" onClick={(event) => event.stopPropagation()}>
                     <button type="button" className="rounded-md p-1.5 text-muted transition hover:bg-ink-700 hover:text-white" aria-label={`Actions for ${lead.title ?? lead.client}`} aria-haspopup="menu" aria-expanded={openLeadActionsId === lead.id}
-                      onClick={() => setOpenLeadActionsId((current) => current === lead.id ? '' : lead.id)}>
+                      onClick={(event) => {
+                        if (openLeadActionsId === lead.id) {
+                          setOpenLeadActionsId('');
+                          setLeadActionsAnchor(null);
+                        } else {
+                          setOpenLeadActionsId(lead.id);
+                          setLeadActionsAnchor(event.currentTarget);
+                        }
+                      }}>
                       <MoreHorizontal size={15} />
                     </button>
-                    {openLeadActionsId === lead.id && <div role="menu" aria-label={`Lead actions for ${lead.title ?? lead.client}`} className="absolute right-2 top-9 z-20 min-w-32 rounded-lg border border-ink-600 bg-ink-900 p-1 text-left shadow-xl">
-                      {(user.role === 'admin' || user.role === 'sales') && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs text-[#DCE5E0] hover:bg-ink-700"
-                        onClick={() => { setOpenLeadActionsId(''); openEditLead(lead); }}><Pencil size={12} /> Edit lead</button>}
+                    <TableRowActionsMenu
+                      open={openLeadActionsId === lead.id}
+                      anchor={leadActionsAnchor}
+                      label={`Lead actions for ${lead.title ?? lead.client}`}
+                    >
+                      {(user.role === 'admin' || user.role === 'sales') && <button type="button" role="menuitem" className="table-row-actions-item text-[#DCE5E0] hover:bg-ink-700"
+                        onClick={() => { setOpenLeadActionsId(''); setLeadActionsAnchor(null); openEditLead(lead); }}><Pencil size={12} /> Edit lead</button>}
                       {(user.role === 'admin' || user.role === 'sales')
                         && !lead.dealId
                         && !deals.some((deal) => deal.leadId === lead.id)
                         && lead.disposition !== 'lost'
-                        && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs text-brand-200 hover:bg-ink-700"
+                        && <button type="button" role="menuitem" className="table-row-actions-item text-brand-200 hover:bg-ink-700"
                         onClick={() => {
                           setOpenLeadActionsId('');
+                          setLeadActionsAnchor(null);
                           if (lead.dealId || deals.some((deal) => deal.leadId === lead.id)) {
                             window.alert('This lead is already linked to a deal and cannot be converted again.');
                             return;
@@ -905,8 +920,8 @@ export default function LeadsPage() {
                           setInspectedLeadId(lead.id);
                         }}><ArrowRight size={12} /> Convert to Deal</button>}
                       {activeRole === 'admin' && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs text-hot hover:bg-ink-700"
-                        onClick={() => { setOpenLeadActionsId(''); deleteLead(lead); }}><X size={12} /> Delete lead</button>}
-                    </div>}
+                        onClick={() => { setOpenLeadActionsId(''); setLeadActionsAnchor(null); deleteLead(lead); }}><X size={12} /> Delete lead</button>}
+                    </TableRowActionsMenu>
                   </td>
                 </tr>;
               })}

@@ -42,6 +42,33 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   overflow-x: hidden;
 }
 
+.table-row-actions-menu {
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 10rem;
+  max-width: calc(100vw - 1.5rem);
+  max-height: calc(100vh - 1.5rem);
+  overflow: auto;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.table-row-actions-menu .table-row-actions-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  text-align: left;
+  font-size: 0.75rem;
+}
+
 .fit-wrap table {
   width: 100%;
   table-layout: fixed;
@@ -203,10 +230,6 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
     text-align: right;
   }
 
-  .fit-wrap tbody td[data-label="Actions"] [role="menu"] {
-    right: 0;
-  }
-
   .fit-wrap tbody td[data-label="Funnel Stage"] > span {
     flex-wrap: wrap;
   }
@@ -227,8 +250,8 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
 .fit-wrap.deals-list-fit col:nth-child(2) { width: 9%; }
 .fit-wrap.deals-list-fit col:nth-child(3) { width: 8%; }
 .fit-wrap.deals-list-fit col:nth-child(4) { width: 9%; }
-.fit-wrap.deals-list-fit col:nth-child(5) { width: 8%; }
-.fit-wrap.deals-list-fit col:nth-child(6) { width: 13%; }
+.fit-wrap.deals-list-fit col:nth-child(5) { width: 6%; }
+.fit-wrap.deals-list-fit col:nth-child(6) { width: 15%; }
 .fit-wrap.deals-list-fit col:nth-child(7) { width: 8%; }
 .fit-wrap.deals-list-fit col:nth-child(8) { width: 8%; }
 .fit-wrap.deals-list-fit col:nth-child(9) { width: 8%; }
@@ -257,8 +280,18 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  min-height: 0;
+  height: auto;
+  padding: 0.25em 1.6em 0.25em 0.5em;
+  font-size: inherit;
+  line-height: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.fit-wrap.deals-list-fit .deal-list-stage-cell .pill {
+  font-size: 0.85em;
 }
 
 .fit-wrap.deals-list-fit .deal-list-owner-avatar {
@@ -340,17 +373,8 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
     text-align: right;
   }
 
-  .fit-wrap.deals-list-fit tbody td[data-label="Actions"] [role="menu"] {
-    right: 0;
-  }
-
   .fit-wrap.deals-list-fit .deal-list-stage-cell {
     align-items: start;
-  }
-
-  .fit-wrap.deals-list-fit .deal-list-stage-select {
-    min-height: 2rem;
-    white-space: normal;
   }
 
   .fit-wrap.deals-list-fit tbody td[data-label="Expected close"] {

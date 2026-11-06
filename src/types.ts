@@ -377,6 +377,8 @@ export interface StageHistoryAudit {
   id: string;
   tenantId: string;
   dealId: string;
+  userId?: string;
+  userName?: string;
   fromStageId: string | null;
   toStageId: string;
   enteredAt: string;

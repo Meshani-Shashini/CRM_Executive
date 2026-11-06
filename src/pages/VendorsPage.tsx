@@ -4,7 +4,7 @@ import Modal from '../components/ui/Modal';
 import { VENDOR_TYPES, normalizeVendorName } from '../data/vendors';
 import { useApp } from '../store/AppContext';
 import type { CompanyContactProfile, Vendor } from '../types';
-import { isValidPhoneNumber } from '../utils/communication';
+import { isValidEmail, isValidPhoneNumber } from '../utils/communication';
 
 const EMPTY_VENDOR_FORM = {
   name: '',
@@ -79,6 +79,10 @@ export default function VendorsPage() {
     const name = form.name.trim();
     if (!name) {
       setFormError('Vendor name is required.');
+      return;
+    }
+    if (form.email.trim() && !isValidEmail(form.email)) {
+      setFormError('Enter a valid email address.');
       return;
     }
     if (form.phone && !isValidPhoneNumber(form.phone)) {
