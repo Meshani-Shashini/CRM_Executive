@@ -1278,8 +1278,8 @@ export default function DealWorkspace({
               {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
             </select>
           </div>
-          {kanbanStages.length ? <div className="overflow-x-auto pb-3">
-            <div className="grid min-w-[1200px] gap-3" style={{ gridTemplateColumns: `repeat(${kanbanStages.length}, minmax(190px, 1fr))` }}>
+          {kanbanStages.length ? <div className="deals-fit">
+            <div className="deals-board grid gap-3">
               {kanbanStages.map((stage) => {
                 const stageDeals = deals.filter((deal) => deal.pipelineId === kanbanPipeline?.id && deal.stage === stage.name);
                 return <section key={stage.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
@@ -1289,7 +1289,7 @@ export default function DealWorkspace({
                   if (droppedDeal) requestStageChange(stage, droppedDeal);
                 }} className="min-w-0 rounded-xl border border-ink-700 bg-ink-900/55 p-2.5">
                   <header className="mb-2 flex items-center justify-between gap-2 px-1">
-                    <h3 className="text-sm font-semibold text-white">{stage.name}</h3><Badge variant="muted">{stageDeals.length}</Badge>
+                    <h3 className="min-w-0 break-words text-sm font-semibold text-white">{stage.name}</h3><Badge variant="muted">{stageDeals.length}</Badge>
                   </header>
                   <div className="max-h-[calc(100vh-310px)] min-h-48 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
                     {stageDeals.map((deal) => <button key={deal.id} type="button" draggable
@@ -1298,7 +1298,7 @@ export default function DealWorkspace({
                       className="w-full cursor-grab rounded-lg border border-ink-700 bg-ink-800/80 p-3 text-left shadow-sm transition hover:border-brand-400/50 active:cursor-grabbing">
                       <span className="block truncate text-sm font-semibold text-white">{deal.client}</span>
                       <span className="mt-1 block truncate text-xs text-muted">{deal.product} · {deal.insurer}</span>
-                      <span className="mt-2 block text-xs text-brand-300">{formatAmount(deal.value, deal.currency)}</span>
+                      <span className="mt-2 block text-xs text-brand-300">{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
                     </button>)}
                     {!stageDeals.length && <p className="py-7 text-center text-[11px] text-muted/60">Drop deals here</p>}
                   </div>

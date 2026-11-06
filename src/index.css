@@ -223,6 +223,50 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   }
 }
 
+.deals-fit {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  container-type: inline-size;
+  container-name: deals-fit;
+  overflow-x: hidden;
+}
+
+.deals-board {
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.deals-board > section,
+.deals-board > section > header,
+.deals-board > section > header h3 {
+  min-width: 0;
+}
+
+.deals-board > section > header h3 {
+  overflow-wrap: anywhere;
+}
+
+.deals-board > section > div > button,
+.deals-board > section > div > button > span {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@container deals-fit (max-width: 999px) {
+  .deals-board {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container deals-fit (max-width: 639px) {
+  .deals-board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @layer components {
   .glass {
     @apply bg-ink-800/70 border border-ink-600 backdrop-blur-xl;
