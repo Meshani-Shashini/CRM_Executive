@@ -3,7 +3,7 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
 import { useApp } from '../store/AppContext';
-import { AlertTriangle, CalendarDays, CheckCircle2, CircleDot, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, TrendingUp, UserRound, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CalendarDays, CheckCircle2, CircleDot, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, TrendingUp, UserRound, X } from 'lucide-react';
 import type { Client, CompanyContactProfile, Lead, LeadTemperature } from '../types';
 import {
   DEFAULT_USD_TO_MVR_RATE, formatAmount, formatCurrencyInput, formatCurrencyInputForDisplay,
@@ -25,6 +25,7 @@ import {
   type LeadLifecycleStage,
 } from '../utils/leadLifecycle';
 import { formatStaffIdentifier } from '../utils/staff';
+import { buildLeadConversion } from '../utils/leadConversion';
 
 const tableBadgeClass = 'inline-flex h-6 items-center gap-1 whitespace-nowrap rounded-full border px-1.5 text-[9px] font-bold leading-none tracking-wide uppercase';
 
@@ -85,8 +86,9 @@ function boardStageIcon(stage: LeadLifecycleStage) {
 
 export default function LeadsPage() {
   const {
-    leads, setLeads, deals, clients, setClients, user, users, pipelines,
-    customerLookups, setCustomerLookups, products, activities, setActivities, viewAsRole,
+    leads, setLeads, deals, setDeals, clients, setClients, user, users, pipelines,
+    pipelineStages, setStageHistory, customerLookups, setCustomerLookups, products, activities, setActivities, viewAsRole,
+    quotationRequests,
   } = useApp();
   const activeRole = viewAsRole ?? user.role;
   const PRODUCT_CODES = products;
@@ -256,11 +258,22 @@ export default function LeadsPage() {
     setLeads((current) => current.map((item) => item.id === lead.id ? { ...item, temperature, updatedAt } : item));
   };
 
+  const hasLinkedQuotationRequest = (lead: Lead) => {
+    const linkedDealIds = new Set(deals
+      .filter((deal) => deal.id === lead.dealId || deal.leadId === lead.id)
+      .map((deal) => deal.id));
+    if (lead.dealId) linkedDealIds.add(lead.dealId);
+    return quotationRequests.some((request) => request.leadId === lead.id || linkedDealIds.has(request.dealId));
+  };
+
   const deleteLead = (lead: Lead) => {
     if (activeRole !== 'admin') return;
     const linkedDeal = deals.some((deal) => deal.id === lead.dealId || deal.leadId === lead.id);
-    if (linkedDeal) {
-      window.alert('This Lead cannot be deleted because it has an associated Deal. Reassign or delete the associated Deal first.');
+    const linkedRequest = hasLinkedQuotationRequest(lead);
+    if (linkedDeal || linkedRequest) {
+      window.alert(linkedRequest
+        ? 'This Lead cannot be deleted because it has a linked quotation request.'
+        : 'This Lead cannot be deleted because it has an associated Deal. Reassign or delete the associated Deal first.');
       return;
     }
     setPendingLeadDeletion(lead);
@@ -268,8 +281,9 @@ export default function LeadsPage() {
 
   const confirmDeleteLead = () => {
     if (!pendingLeadDeletion || activeRole !== 'admin') return;
-    if (deals.some((deal) => deal.leadId === pendingLeadDeletion.id || deal.id === pendingLeadDeletion.dealId)) {
-      window.alert('This Lead cannot be deleted while it is linked to a Deal.');
+    if (deals.some((deal) => deal.leadId === pendingLeadDeletion.id || deal.id === pendingLeadDeletion.dealId)
+      || hasLinkedQuotationRequest(pendingLeadDeletion)) {
+      window.alert('This Lead cannot be deleted while it is linked to a Deal or quotation request.');
       return;
     }
     setClients((current) => current.map((client) => ({
@@ -854,6 +868,42 @@ export default function LeadsPage() {
                     {openLeadActionsId === lead.id && <div role="menu" aria-label={`Lead actions for ${lead.title ?? lead.client}`} className="absolute right-2 top-9 z-20 min-w-32 rounded-lg border border-ink-600 bg-ink-900 p-1 text-left shadow-xl">
                       {(user.role === 'admin' || user.role === 'sales') && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs text-[#DCE5E0] hover:bg-ink-700"
                         onClick={() => { setOpenLeadActionsId(''); openEditLead(lead); }}><Pencil size={12} /> Edit lead</button>}
+                      {(user.role === 'admin' || user.role === 'sales')
+                        && !lead.dealId
+                        && !deals.some((deal) => deal.leadId === lead.id)
+                        && lead.disposition !== 'lost'
+                        && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs text-brand-200 hover:bg-ink-700"
+                        onClick={() => {
+                          setOpenLeadActionsId('');
+                          if (lead.dealId || deals.some((deal) => deal.leadId === lead.id)) {
+                            window.alert('This lead is already linked to a deal and cannot be converted again.');
+                            return;
+                          }
+                          const client = clients.find((item) => item.id === lead.clientId) ?? clients.find((item) => item.name.trim().toLowerCase() === lead.client.trim().toLowerCase());
+                          const product = products.find((item) => item.code === lead.productCode);
+                          const pipeline = pipelines.find((item) => item.id === lead.pipelineId && item.isActive) ?? pipelines.find((item) => item.isActive);
+                          const firstStage = pipeline ? pipelineStages.filter((stage) => stage.pipelineId === pipeline.id).sort((left, right) => left.stageOrder - right.stageOrder)[0] : undefined;
+                          if (!product || !pipeline || !firstStage) {
+                            window.alert('Configure a valid product, active pipeline, and first stage before converting this lead.');
+                            return;
+                          }
+                          const conversion = buildLeadConversion({
+                            lead,
+                            client,
+                            product,
+                            pipeline,
+                            firstStage,
+                            contactChannels: { contactPhone: lead.contactPhone || '', whatsapp: lead.whatsapp || '', telegram: lead.telegram || '' },
+                          });
+                          if (!conversion) {
+                            window.alert('Complete the client profile and contact details before converting this lead.');
+                            return;
+                          }
+                          setDeals((current) => [conversion.deal, ...current]);
+                          setLeads((current) => current.map((item) => item.id === lead.id ? { ...item, ...conversion.leadUpdate, contacts: mergeContactProfiles(item.contacts, []), contactEmail: item.contactEmail || conversion.leadUpdate.contactEmail || '' } : item));
+                          setStageHistory((current) => [...current, conversion.stageHistoryEntry]);
+                          setInspectedLeadId(lead.id);
+                        }}><ArrowRight size={12} /> Convert to Deal</button>}
                       {activeRole === 'admin' && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs text-hot hover:bg-ink-700"
                         onClick={() => { setOpenLeadActionsId(''); deleteLead(lead); }}><X size={12} /> Delete lead</button>}
                     </div>}

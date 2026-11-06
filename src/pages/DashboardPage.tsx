@@ -7,7 +7,9 @@ import Badge from '../components/ui/Badge';
 import { formatAmount, toMvr } from '../utils/currency';
 import { dashboardHref } from '../utils/navigation';
 import { formatDate } from '../utils/date';
-import { isStageSlaOverdue, isTerminalDealStage } from '../utils/stageSla';
+import {
+  isLostPipelineStage, isStageSlaOverdue, isTerminalDealStage, isWonPipelineStage,
+} from '../utils/stageSla';
 import { LEAD_LIFECYCLE_STAGES, lifecycleStageForLead } from '../utils/leadLifecycle';
 
 const tabs = ['Company', 'Leads', 'Deals', 'Staff'] as const;
@@ -15,7 +17,7 @@ type DashboardTab = typeof tabs[number];
 
 export default function DashboardPage() {
   const [tab, setTab] = useState<DashboardTab>('Company');
-  const { deals, leads, clients, activities, invoices, payments, viewAsRole } = useApp();
+  const { deals, leads, clients, activities, invoices, payments, pipelineStages, viewAsRole } = useApp();
   useEffect(() => {
     setTab(viewAsRole === 'sales' ? 'Leads' : 'Company');
   }, [viewAsRole]);
@@ -25,13 +27,9 @@ export default function DashboardPage() {
   );
   const wonDeals = deals.filter((deal) => {
     if (deal.disposition) return deal.disposition === 'won';
-    const stage = deal.stage.trim().toLowerCase();
-    if ((stage.includes('bound') || stage.includes('won')) && (stage.includes('lost') || stage.includes('declin'))) return false;
-    return stage === 'closed-won'
-      || stage.includes('won')
-      || stage.includes('bound')
-      || stage.includes('renewed')
-      || stage === 'policy issued';
+    const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage)
+      ?? deal.stage;
+    return isWonPipelineStage(stage) && !isLostPipelineStage(stage);
   });
   const wonValue = wonDeals.reduce(
     (total, deal) => total + toMvr(deal.value, deal.currency, deal.exchangeRate),
@@ -167,7 +165,11 @@ function LeadsDashboard() {
   const maxStageCount = Math.max(1, ...stages.map((stage) => stage.count));
   const leadSlaOverdue = (lead: typeof leads[number]) => {
     const deal = deals.find((item) => item.id === lead.dealId || item.leadId === lead.id);
-    if (!deal || isTerminalDealStage(deal.stage, deal.disposition)) return false;
+    if (!deal || isTerminalDealStage(
+      deal.stage,
+      deal.disposition,
+      pipelineStages.find((stage) => stage.pipelineId === deal.pipelineId && stage.name === deal.stage),
+    )) return false;
     const configuredStages = pipelineStages
       .filter((stage) => stage.pipelineId === deal.pipelineId)
       .sort((left, right) => left.stageOrder - right.stageOrder);
@@ -248,8 +250,8 @@ function DealsDashboard() {
     ? Math.round(deals.reduce((sum, deal) => sum + deal.probability, 0) / deals.length)
     : 0;
   const dealSlaOverdue = (deal: typeof deals[number]) => {
-    if (isTerminalDealStage(deal.stage, deal.disposition)) return false;
     const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
+    if (isTerminalDealStage(deal.stage, deal.disposition, stage)) return false;
     if (!stage) return false;
     const activeHistory = stageHistory.find((entry) =>
       entry.dealId === deal.id && entry.toStageId === stage.id && !entry.exitedAt);

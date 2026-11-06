@@ -189,6 +189,44 @@ export interface Activity {
   actorName?: string;
 }
 
+export type VendorType = 'Insurer' | 'Reinsurer' | 'Surveyor' | 'Loss Adjuster' | 'Other';
+
+export interface Vendor {
+  id: string;
+  name: string;
+  vendorType: VendorType;
+  country: string;
+  currency: 'MVR' | 'USD';
+  address: string;
+  taxId?: string;
+  licenseNo?: string;
+  email?: string;
+  phone?: string;
+  contacts?: CompanyContactProfile[];
+  status: 'active' | 'inactive';
+  notes?: string;
+  createdAt: string;
+}
+
+export interface QuotationRequest {
+  id: string;
+  ref: string;
+  dealId: string;
+  leadId: string;
+  clientId: string;
+  vendorIds: string[];
+  productCode: string;
+  sumInsured: number;
+  currency: 'MVR' | 'USD';
+  requiredBy: string;
+  notes: string;
+  attachments?: string[];
+  status: 'Draft' | 'Sent' | 'Responses received' | 'Closed';
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Insurer {
   id: string;
   name: string;
@@ -294,7 +332,8 @@ export interface Deal {
   ownerId: string;
   closeDate: string;
   insurer: string;
-  leadId?: string;
+  vendorId?: string;
+  leadId: string;
   contactName?: string;
   contactProfileId?: string;
   contactRole?: string;
@@ -329,6 +368,9 @@ export interface PipelineStage {
   stageOrder: number;
   winProbabilityPct: number;
   stagnationDaysThreshold: number;
+  isClosedWon?: boolean;
+  isClosedLost?: boolean;
+  requiresApproval?: boolean;
 }
 
 export interface StageHistoryAudit {

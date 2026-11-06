@@ -223,6 +223,391 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   }
 }
 
+.fit-wrap.deals-list-fit col:nth-child(1) { width: 7%; }
+.fit-wrap.deals-list-fit col:nth-child(2) { width: 9%; }
+.fit-wrap.deals-list-fit col:nth-child(3) { width: 8%; }
+.fit-wrap.deals-list-fit col:nth-child(4) { width: 9%; }
+.fit-wrap.deals-list-fit col:nth-child(5) { width: 8%; }
+.fit-wrap.deals-list-fit col:nth-child(6) { width: 13%; }
+.fit-wrap.deals-list-fit col:nth-child(7) { width: 8%; }
+.fit-wrap.deals-list-fit col:nth-child(8) { width: 8%; }
+.fit-wrap.deals-list-fit col:nth-child(9) { width: 8%; }
+.fit-wrap.deals-list-fit col:nth-child(10) { width: 4%; }
+.fit-wrap.deals-list-fit col:nth-child(11) { width: 5%; }
+.fit-wrap.deals-list-fit col:nth-child(12) { width: 7%; }
+.fit-wrap.deals-list-fit col:nth-child(13) { width: 4%; }
+
+.fit-wrap.deals-list-fit th,
+.fit-wrap.deals-list-fit td {
+  padding: 0.45em 0.35em;
+  vertical-align: top;
+}
+
+.fit-wrap.deals-list-fit td[data-label="Expected close"] {
+  white-space: nowrap;
+}
+
+.fit-wrap.deals-list-fit .deal-list-stage-cell {
+  display: grid;
+  min-width: 0;
+  gap: 0.25em;
+}
+
+.fit-wrap.deals-list-fit .deal-list-stage-select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.fit-wrap.deals-list-fit .deal-list-owner-avatar {
+  display: none;
+}
+
+.fit-wrap.deals-list-fit .deals-list-empty td::before {
+  display: none;
+}
+
+@container (min-width: 900px) {
+  .fit-wrap.deals-list-fit table {
+    font-size: clamp(9px, calc(0.42cqw + 5px), 20px);
+  }
+}
+
+@container (min-width: 640px) and (max-width: 899px) {
+  .fit-wrap.deals-list-fit col:nth-child(1) { width: 7%; }
+  .fit-wrap.deals-list-fit col:nth-child(2) { width: 8%; }
+  .fit-wrap.deals-list-fit col:nth-child(3) { width: 7%; }
+  .fit-wrap.deals-list-fit col:nth-child(4) { width: 9%; }
+  .fit-wrap.deals-list-fit col:nth-child(5) { width: 8%; }
+  .fit-wrap.deals-list-fit col:nth-child(6) { width: 19%; }
+  .fit-wrap.deals-list-fit col:nth-child(7) { width: 7%; }
+  .fit-wrap.deals-list-fit col:nth-child(8) { width: 7%; }
+  .fit-wrap.deals-list-fit col:nth-child(9) { width: 8%; }
+  .fit-wrap.deals-list-fit col:nth-child(10) { width: 4%; }
+  .fit-wrap.deals-list-fit col:nth-child(11) { width: 4%; }
+  .fit-wrap.deals-list-fit col:nth-child(12) { width: 8%; }
+  .fit-wrap.deals-list-fit col:nth-child(13) { width: 4%; }
+
+  .fit-wrap.deals-list-fit th,
+  .fit-wrap.deals-list-fit td {
+    padding: 0.45em 0.25em;
+    overflow-wrap: anywhere;
+  }
+
+  .fit-wrap.deals-list-fit .owner-name {
+    display: none;
+  }
+
+  .fit-wrap.deals-list-fit .deal-list-owner-avatar {
+    display: inline-flex;
+    width: 1.8em;
+    height: 1.8em;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background: #1E2024;
+    color: #A4A6AE;
+    font-size: 0.85em;
+    font-weight: 700;
+  }
+}
+
+@container (max-width: 639px) {
+  .fit-wrap.deals-list-fit tbody tr {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fit-wrap.deals-list-fit tbody td[data-label="Deal title"] {
+    grid-column: 1 / -1;
+    padding-right: 2.5rem;
+    color: white;
+    font-size: 1.1em;
+    font-weight: 700;
+  }
+
+  .fit-wrap.deals-list-fit tbody td[data-label="Deal title"]::before,
+  .fit-wrap.deals-list-fit tbody td[data-label="Actions"]::before,
+  .fit-wrap.deals-list-fit tbody tr.deals-list-empty td::before {
+    display: none;
+  }
+
+  .fit-wrap.deals-list-fit tbody td[data-label="Actions"] {
+    position: absolute;
+    top: 0.5em;
+    right: 0.5em;
+    text-align: right;
+  }
+
+  .fit-wrap.deals-list-fit tbody td[data-label="Actions"] [role="menu"] {
+    right: 0;
+  }
+
+  .fit-wrap.deals-list-fit .deal-list-stage-cell {
+    align-items: start;
+  }
+
+  .fit-wrap.deals-list-fit .deal-list-stage-select {
+    min-height: 2rem;
+    white-space: normal;
+  }
+
+  .fit-wrap.deals-list-fit tbody td[data-label="Expected close"] {
+    white-space: nowrap;
+  }
+
+  .fit-wrap.deals-list-fit tbody tr.deals-list-empty td {
+    grid-column: 1 / -1;
+  }
+}
+
+.fit-wrap.qrs-list-fit col:nth-child(1) { width: 8%; }
+.fit-wrap.qrs-list-fit col:nth-child(2) { width: 10%; }
+.fit-wrap.qrs-list-fit col:nth-child(3) { width: 11%; }
+.fit-wrap.qrs-list-fit col:nth-child(4) { width: 10%; }
+.fit-wrap.qrs-list-fit col:nth-child(5) { width: 14%; }
+.fit-wrap.qrs-list-fit col:nth-child(6) { width: 10%; }
+.fit-wrap.qrs-list-fit col:nth-child(7) { width: 12%; }
+.fit-wrap.qrs-list-fit col:nth-child(8) { width: 8%; }
+.fit-wrap.qrs-list-fit col:nth-child(9) { width: 10%; }
+.fit-wrap.qrs-list-fit col:nth-child(10) { width: 7%; }
+
+.fit-wrap.qrs-list-fit th,
+.fit-wrap.qrs-list-fit td {
+  padding: 0.55em 0.35em;
+  vertical-align: top;
+}
+
+.fit-wrap.qrs-list-fit td[data-label="Required by"] {
+  white-space: nowrap;
+}
+
+.fit-wrap.qrs-list-fit .qrs-status-select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.fit-wrap.qrs-list-fit .qrs-list-empty td::before {
+  display: none;
+}
+
+@container (min-width: 900px) {
+  .fit-wrap.qrs-list-fit table {
+    font-size: clamp(9px, calc(0.42cqw + 5px), 20px);
+  }
+}
+
+@container (min-width: 640px) and (max-width: 899px) {
+  .fit-wrap.qrs-list-fit col:nth-child(1) { width: 8%; }
+  .fit-wrap.qrs-list-fit col:nth-child(2) { width: 10%; }
+  .fit-wrap.qrs-list-fit col:nth-child(3) { width: 11%; }
+  .fit-wrap.qrs-list-fit col:nth-child(4) { width: 10%; }
+  .fit-wrap.qrs-list-fit col:nth-child(5) { width: 12%; }
+  .fit-wrap.qrs-list-fit col:nth-child(6) { width: 9%; }
+  .fit-wrap.qrs-list-fit col:nth-child(7) { width: 13%; }
+  .fit-wrap.qrs-list-fit col:nth-child(8) { width: 9%; }
+  .fit-wrap.qrs-list-fit col:nth-child(9) { width: 10%; }
+  .fit-wrap.qrs-list-fit col:nth-child(10) { width: 8%; }
+
+  .fit-wrap.qrs-list-fit th,
+  .fit-wrap.qrs-list-fit td {
+    padding: 0.5em 0.25em;
+    overflow-wrap: anywhere;
+  }
+}
+
+@container (max-width: 639px) {
+  .fit-wrap.qrs-list-fit tbody tr {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fit-wrap.qrs-list-fit tbody td[data-label="Ref"] {
+    grid-column: 1 / -1;
+    padding-right: 2.5rem;
+    color: #A7B8FF;
+    font-weight: 700;
+  }
+
+  .fit-wrap.qrs-list-fit tbody td[data-label="Actions"] {
+    position: absolute;
+    top: 0.5em;
+    right: 0.5em;
+    text-align: right;
+  }
+
+  .fit-wrap.qrs-list-fit tbody td[data-label="Actions"]::before {
+    display: none;
+  }
+
+  .fit-wrap.qrs-list-fit tbody td[data-label="Required by"] {
+    white-space: nowrap;
+  }
+
+  .fit-wrap.qrs-list-fit tbody tr.qrs-list-empty td {
+    grid-column: 1 / -1;
+  }
+}
+
+.fit-wrap.invoice-list-fit col:nth-child(1) { width: 12%; }
+.fit-wrap.invoice-list-fit col:nth-child(2) { width: 13%; }
+.fit-wrap.invoice-list-fit col:nth-child(3) { width: 12%; }
+.fit-wrap.invoice-list-fit col:nth-child(4) { width: 15%; }
+.fit-wrap.invoice-list-fit col:nth-child(5) { width: 13%; }
+.fit-wrap.invoice-list-fit col:nth-child(6) { width: 10%; }
+.fit-wrap.invoice-list-fit col:nth-child(7) { width: 18%; }
+.fit-wrap.invoice-list-fit col:nth-child(8) { width: 7%; }
+
+.fit-wrap.payment-list-fit col:nth-child(1) { width: 12%; }
+.fit-wrap.payment-list-fit col:nth-child(2) { width: 10%; }
+.fit-wrap.payment-list-fit col:nth-child(3) { width: 14%; }
+.fit-wrap.payment-list-fit col:nth-child(4) { width: 9%; }
+.fit-wrap.payment-list-fit col:nth-child(5) { width: 12%; }
+.fit-wrap.payment-list-fit col:nth-child(6) { width: 10%; }
+.fit-wrap.payment-list-fit col:nth-child(7) { width: 14%; }
+.fit-wrap.payment-list-fit col:nth-child(8) { width: 12%; }
+.fit-wrap.payment-list-fit col:nth-child(9) { width: 7%; }
+
+.fit-wrap.product-list-fit col:nth-child(1) { width: 9%; }
+.fit-wrap.product-list-fit col:nth-child(2) { width: 9%; }
+.fit-wrap.product-list-fit col:nth-child(3) { width: 14%; }
+.fit-wrap.product-list-fit col:nth-child(4) { width: 6%; }
+.fit-wrap.product-list-fit col:nth-child(5) { width: 8%; }
+.fit-wrap.product-list-fit col:nth-child(6) { width: 10%; }
+.fit-wrap.product-list-fit col:nth-child(7) { width: 11%; }
+.fit-wrap.product-list-fit col:nth-child(8) { width: 8%; }
+.fit-wrap.product-list-fit col:nth-child(9) { width: 19%; }
+.fit-wrap.product-list-fit col:nth-child(10) { width: 6%; }
+
+.fit-wrap.mira-list-fit col:nth-child(1) { width: 5%; }
+.fit-wrap.mira-list-fit col:nth-child(2) { width: 11%; }
+.fit-wrap.mira-list-fit col:nth-child(3) { width: 16%; }
+.fit-wrap.mira-list-fit col:nth-child(4) { width: 13%; }
+.fit-wrap.mira-list-fit col:nth-child(5) { width: 12%; }
+.fit-wrap.mira-list-fit col:nth-child(6) { width: 11%; }
+.fit-wrap.mira-list-fit col:nth-child(7) { width: 8%; }
+.fit-wrap.mira-list-fit col:nth-child(8) { width: 13%; }
+.fit-wrap.mira-list-fit col:nth-child(9) { width: 11%; }
+
+.fit-wrap.invoice-list-fit th,
+.fit-wrap.invoice-list-fit td,
+.fit-wrap.payment-list-fit th,
+.fit-wrap.payment-list-fit td,
+.fit-wrap.product-list-fit th,
+.fit-wrap.product-list-fit td,
+.fit-wrap.mira-list-fit th,
+.fit-wrap.mira-list-fit td {
+  padding: 0.55em 0.35em;
+  vertical-align: top;
+}
+
+.fit-wrap.invoice-list-fit td[data-label="Actions"],
+.fit-wrap.payment-list-fit td[data-label="Actions"],
+.fit-wrap.product-list-fit td[data-label="Actions"] {
+  text-align: right;
+}
+
+@container (min-width: 900px) {
+  .fit-wrap.invoice-list-fit table,
+  .fit-wrap.payment-list-fit table,
+  .fit-wrap.product-list-fit table {
+    font-size: clamp(9px, calc(0.42cqw + 5px), 20px);
+  }
+
+  .fit-wrap.mira-list-fit table {
+    font-size: clamp(9px, calc(0.42cqw + 5px), 20px);
+  }
+}
+
+@container (min-width: 640px) and (max-width: 899px) {
+  .fit-wrap.invoice-list-fit col:nth-child(1) { width: 12%; }
+  .fit-wrap.invoice-list-fit col:nth-child(2) { width: 12%; }
+  .fit-wrap.invoice-list-fit col:nth-child(3) { width: 11%; }
+  .fit-wrap.invoice-list-fit col:nth-child(4) { width: 15%; }
+  .fit-wrap.invoice-list-fit col:nth-child(5) { width: 12%; }
+  .fit-wrap.invoice-list-fit col:nth-child(6) { width: 11%; }
+  .fit-wrap.invoice-list-fit col:nth-child(7) { width: 17%; }
+  .fit-wrap.invoice-list-fit col:nth-child(8) { width: 10%; }
+
+  .fit-wrap.payment-list-fit col:nth-child(1) { width: 12%; }
+  .fit-wrap.payment-list-fit col:nth-child(2) { width: 10%; }
+  .fit-wrap.payment-list-fit col:nth-child(3) { width: 13%; }
+  .fit-wrap.payment-list-fit col:nth-child(4) { width: 9%; }
+  .fit-wrap.payment-list-fit col:nth-child(5) { width: 12%; }
+  .fit-wrap.payment-list-fit col:nth-child(6) { width: 10%; }
+  .fit-wrap.payment-list-fit col:nth-child(7) { width: 14%; }
+  .fit-wrap.payment-list-fit col:nth-child(8) { width: 11%; }
+  .fit-wrap.payment-list-fit col:nth-child(9) { width: 8%; }
+
+  .fit-wrap.product-list-fit col:nth-child(1) { width: 9%; }
+  .fit-wrap.product-list-fit col:nth-child(2) { width: 9%; }
+  .fit-wrap.product-list-fit col:nth-child(3) { width: 14%; }
+  .fit-wrap.product-list-fit col:nth-child(4) { width: 6%; }
+  .fit-wrap.product-list-fit col:nth-child(5) { width: 8%; }
+  .fit-wrap.product-list-fit col:nth-child(6) { width: 10%; }
+  .fit-wrap.product-list-fit col:nth-child(7) { width: 11%; }
+  .fit-wrap.product-list-fit col:nth-child(8) { width: 8%; }
+  .fit-wrap.product-list-fit col:nth-child(9) { width: 19%; }
+  .fit-wrap.product-list-fit col:nth-child(10) { width: 6%; }
+
+  .fit-wrap.mira-list-fit col:nth-child(1) { width: 5%; }
+  .fit-wrap.mira-list-fit col:nth-child(2) { width: 11%; }
+  .fit-wrap.mira-list-fit col:nth-child(3) { width: 16%; }
+  .fit-wrap.mira-list-fit col:nth-child(4) { width: 13%; }
+  .fit-wrap.mira-list-fit col:nth-child(5) { width: 12%; }
+  .fit-wrap.mira-list-fit col:nth-child(6) { width: 11%; }
+  .fit-wrap.mira-list-fit col:nth-child(7) { width: 8%; }
+  .fit-wrap.mira-list-fit col:nth-child(8) { width: 13%; }
+  .fit-wrap.mira-list-fit col:nth-child(9) { width: 11%; }
+
+  .fit-wrap.invoice-list-fit th,
+  .fit-wrap.invoice-list-fit td,
+  .fit-wrap.payment-list-fit th,
+  .fit-wrap.payment-list-fit td,
+  .fit-wrap.product-list-fit th,
+  .fit-wrap.product-list-fit td,
+  .fit-wrap.mira-list-fit th,
+  .fit-wrap.mira-list-fit td {
+    padding: 0.45em 0.25em;
+    overflow-wrap: anywhere;
+  }
+}
+
+@container (max-width: 639px) {
+  .fit-wrap.mira-list-fit tfoot {
+    display: block;
+  }
+
+  .fit-wrap.mira-list-fit tfoot tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.7em 1em;
+    margin: 0.6em;
+    padding: 0.9em 1em;
+    border: 1px solid #1B1E22;
+    border-radius: 0.75rem;
+  }
+
+  .fit-wrap.mira-list-fit tfoot td {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    text-align: left;
+    overflow-wrap: anywhere;
+  }
+
+  .fit-wrap.mira-list-fit tfoot td[data-label="Totals"] {
+    grid-column: 1 / -1;
+  }
+
+  .fit-wrap.mira-list-fit tfoot td[data-label="Comm. %"] {
+    display: none;
+  }
+}
+
 .deals-fit {
   width: 100%;
   max-width: 100%;

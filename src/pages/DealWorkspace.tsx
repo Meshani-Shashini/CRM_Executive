@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, Building2, CalendarDays, Check, Clock3, Columns3,
-  FileText, List, Pencil, Plus, ShieldCheck, Wallet, Trash2,
+  AlertTriangle, ArrowLeft, ArrowRight, Building2, CalendarDays, Check, Clock3, Columns3, Filter,
+  FileText, List, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, Wallet, Trash2,
 } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
@@ -16,15 +16,20 @@ import { formatDate } from '../utils/date';
 import { calculateBrokerageCommission } from '../utils/insurance';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile } from '../utils/customerProfile';
-import { isStageSlaOverdue, isTerminalDealStage } from '../utils/stageSla';
+import {
+  getStageSlaElapsedDays, isLostPipelineStage, isStageSlaOverdue, isTerminalDealStage, isWonPipelineStage,
+} from '../utils/stageSla';
 import { linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
+import { linkDealToLead } from '../utils/dealFactory';
 import {
   appendLeadStageTransition, buildLeadTelemetryStages, LEAD_LIFECYCLE_STAGES,
   isLeadLifecycleStage, isTerminalLeadStage, lifecycleStageForLead,
   parseLeadStageTransition, type LeadLifecycleStage,
 } from '../utils/leadLifecycle';
-import { getLeadContactedAt } from '../utils/leadSla';
 import { formatStaffIdentifier } from '../utils/staff';
+import { getLeadContactedAt } from '../utils/leadSla';
+import { buildLeadConversion } from '../utils/leadConversion';
+import { dashboardHref, promptQuotationRequestForDeal } from '../utils/navigation';
 
 const LOSS_REASONS = [
   'Price / premium',
@@ -62,20 +67,35 @@ const EMPTY_CONTACT_DRAFT: ContactEditorDraft = {
   telegram: '',
 };
 
-function isLostStage(name: string) {
-  return name.toLowerCase().includes('lost') || name.toLowerCase().includes('declined');
+const dealListColumns = [
+  { key: 'id', label: 'Deal ID' },
+  { key: 'title', label: 'Deal title' },
+  { key: 'client', label: 'Client' },
+  { key: 'lead', label: 'Linked Lead' },
+  { key: 'pipeline', label: 'Pipeline' },
+  { key: 'stage', label: 'Deal Stage' },
+  { key: 'product', label: 'Insurance type/product' },
+  { key: 'vendor', label: 'Vendor' },
+  { key: 'value', label: 'Value + currency' },
+  { key: 'win', label: 'Win %' },
+  { key: 'owner', label: 'Owner' },
+  { key: 'close', label: 'Expected close' },
+  { key: 'actions', label: 'Actions' },
+] as const;
+
+function isLostStage(stage: string | PipelineStage) {
+  return isLostPipelineStage(stage);
 }
 
-function isBoundStage(name: string) {
-  const stage = name.toLowerCase();
-  return stage.includes('bound') || stage.includes('won') || stage.includes('renewed')
-    || stage.includes('immediate cover') || stage.includes('policy issued');
+function isBoundStage(stage: string | PipelineStage) {
+  return isWonPipelineStage(stage);
 }
 
-function stageBadgeTone(name: string): 'hot' | 'warm' | 'win' | 'brand' {
-  if (isLostStage(name)) return 'hot';
+function stageBadgeTone(stage: string | PipelineStage): 'hot' | 'warm' | 'win' | 'brand' {
+  const name = typeof stage === 'string' ? stage : stage.name;
+  if (isLostStage(stage)) return 'hot';
   if (name.toLowerCase().includes('converted to deal')) return 'win';
-  if (isBoundStage(name)) return 'win';
+  if (isBoundStage(stage)) return 'win';
   if (requiresCommunicationChannels(name)) return 'warm';
   return 'brand';
 }
@@ -191,35 +211,45 @@ function stageSlaHealth(durationMilliseconds: number | undefined, targetDays: nu
 function isBusinessActivity(activity: Activity) {
   if (!activity.id.startsWith('audit-')) return true;
   return /^(?:Lead|Deal) created$|^(?:Lead|Deal) stage changed:|^Lead temperature changed:/.test(activity.title)
+    || /^Quotation request (?:created|status changed)$/.test(activity.title)
     || (activity.title === 'Lead updated' && activity.description.includes('Activity status:'));
 }
 
 export default function DealWorkspace({
   deals,
-  onCreateDeal,
   onEditDeal,
   onEditLead,
   onDeleteLead,
   onDeleteDeal,
+  onOpenFilters,
+  pipelineFilter,
+  onPipelineFilterChange,
   initialSelectedKey,
   onClose,
 }: {
   deals: Deal[];
-  onCreateDeal?: () => void;
   onEditDeal?: (deal: Deal) => void;
   onEditLead?: (lead: Lead) => void;
   onDeleteLead?: (lead: Lead) => void;
   onDeleteDeal?: (deal: Deal) => void;
+  onOpenFilters?: () => void;
+  pipelineFilter?: string;
+  onPipelineFilterChange?: (pipelineId: string) => void;
   initialSelectedKey?: string;
   onClose?: () => void;
 }) {
   const {
     activities, setActivities, clients, setClients, deals: allDeals, setDeals, leads, setLeads,
-    products, pipelines, pipelineStages, stageHistory, setStageHistory, invoices, setInvoices, user, users, viewAsRole,
+    products, pipelines, pipelineStages, stageHistory, setStageHistory, invoices, setInvoices, user, users, vendors, viewAsRole,
+    quotationRequests,
   } = useApp();
   const [selectedKey, setSelectedKey] = useState('');
-  const [workspaceView, setWorkspaceView] = useState<'kanban' | 'inspection'>('kanban');
+  const [workspaceView, setWorkspaceView] = useState<'list' | 'kanban' | 'inspection'>('list');
   const [kanbanPipelineId, setKanbanPipelineId] = useState('');
+  const selectedPipelineFilter = pipelineFilter ?? kanbanPipelineId;
+  const changePipelineFilter = onPipelineFilterChange ?? setKanbanPipelineId;
+  const [dealListSearch, setDealListSearch] = useState('');
+  const [openDealActionsId, setOpenDealActionsId] = useState('');
   const [query, setQuery] = useState('');
   const [productFilter, setProductFilter] = useState('');
   const [activityModal, setActivityModal] = useState<'meeting' | 'note' | 'quote' | 'task' | null>(null);
@@ -268,6 +298,11 @@ export default function DealWorkspace({
   const linkedLead = selectedLead ?? (selectedDeal
     ? leads.find((lead) => lead.id === selectedDeal.leadId || lead.dealId === selectedDeal.id)
     : undefined);
+  const linkedQuotationRequests = quotationRequests.filter((request) =>
+    (Boolean(selectedDeal) && request.dealId === selectedDeal?.id)
+    || (Boolean(linkedLead) && request.leadId === linkedLead?.id)
+    || (Boolean(progressDeal) && request.dealId === progressDeal?.id),
+  );
   const activeRole = viewAsRole ?? user.role;
   const dealHasInvoice = Boolean(selectedDeal && (selectedDeal.linkedInvoiceId
     || invoices.some((invoice) => invoice.linkedDealId === selectedDeal.id)));
@@ -373,7 +408,7 @@ export default function DealWorkspace({
     : stages;
   const activeProgressIndex = progressStages.findIndex((stage) => (typeof stage === 'string' ? stage : stage.name) === activeProgressStage);
   const activeTargetStage = selectedLead || !selectedDeal
-    || isTerminalDealStage(selectedDeal.stage, selectedDeal.disposition)
+    || isTerminalDealStage(selectedDeal.stage, selectedDeal.disposition, currentStage)
     ? undefined
     : currentStage;
   const targetDays = activeTargetStage?.stagnationDaysThreshold ?? 0;
@@ -440,7 +475,7 @@ export default function DealWorkspace({
         ?? (index === 0 ? progressDeal.createdAt : undefined)
         ?? (name === progressDeal.stage ? progressDeal.stageChangedAt ?? progressDeal.createdAt : undefined);
       const isCurrent = name === progressDeal.stage;
-      const terminalReached = isCurrent && isTerminalDealStage(name, progressDeal.disposition);
+      const terminalReached = isCurrent && isTerminalDealStage(name, progressDeal.disposition, pipelineStage);
       const stageEnd = history?.exitedAt
         ?? nextHistoryEntry?.enteredAt
         ?? (terminalReached ? stageStart : isCurrent && stageStart ? new Date(clockNow).toISOString() : undefined);
@@ -511,7 +546,7 @@ export default function DealWorkspace({
       .filter((stage) => stage.pipelineId === (recordDeal?.pipelineId ?? recordLead?.pipelineId))
       .sort((left, right) => left.stageOrder - right.stageOrder);
     const recordStage = recordDeal ? recordStages.find((stage) => stage.name === recordDeal.stage) : undefined;
-    if (!recordDeal || !recordStage || isTerminalDealStage(recordDeal.stage, recordDeal.disposition)) {
+    if (!recordDeal || !recordStage || isTerminalDealStage(recordDeal.stage, recordDeal.disposition, recordStage)) {
       return { overdue: false, targetDays: 0 };
     }
     const activeHistory = recordDeal && stageHistory.find((entry) =>
@@ -528,11 +563,37 @@ export default function DealWorkspace({
     };
   };
   const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
-  const kanbanPipeline = activePipelines.find((pipeline) => pipeline.id === kanbanPipelineId)
-    ?? activePipelines.find((pipeline) => deals.some((deal) => deal.pipelineId === pipeline.id))
-    ?? activePipelines[0];
-  const kanbanStages = pipelineStages.filter((stage) => stage.pipelineId === kanbanPipeline?.id)
-    .sort((left, right) => left.stageOrder - right.stageOrder);
+  const dealReferences = useMemo(() => {
+    const sortedDeals = [...allDeals].sort((left, right) => {
+      const leftYear = (left.createdAt ? new Date(left.createdAt).getFullYear() : new Date().getFullYear());
+      const rightYear = (right.createdAt ? new Date(right.createdAt).getFullYear() : new Date().getFullYear());
+      return leftYear - rightYear
+        || (left.createdAt ?? '').localeCompare(right.createdAt ?? '')
+        || left.id.localeCompare(right.id);
+    });
+    const yearSequence = new Map<number, number>();
+    return new Map(sortedDeals.map((deal) => {
+      const timestamp = deal.createdAt ? Date.parse(deal.createdAt) : Number.NaN;
+      const year = Number.isFinite(timestamp) ? new Date(timestamp).getFullYear() : new Date().getFullYear();
+      const sequence = (yearSequence.get(year) ?? 0) + 1;
+      yearSequence.set(year, sequence);
+      return [deal.id, `DL-${year}-${String(sequence).padStart(4, '0')}`];
+    }));
+  }, [allDeals]);
+  const listDeals = deals.filter((deal) => {
+    if (selectedPipelineFilter && deal.pipelineId !== selectedPipelineFilter) return false;
+    const lead = leads.find((item) => item.id === deal.leadId || item.dealId === deal.id);
+    const vendor = vendors.find((item) => item.id === deal.vendorId)?.name ?? deal.insurer;
+    const title = lead?.title ?? deal.proposalSummary ?? `${deal.product} placement`;
+    const reference = dealReferences.get(deal.id) ?? deal.id;
+    const searchable = `${reference} ${deal.id} ${title} ${deal.client} ${lead?.id ?? ''} ${vendor}`.toLowerCase();
+    return searchable.includes(dealListSearch.trim().toLowerCase());
+  });
+  const kanbanPipeline = activePipelines.find((pipeline) => pipeline.id === selectedPipelineFilter);
+  const kanbanStages = kanbanPipeline
+    ? pipelineStages.filter((stage) => stage.pipelineId === kanbanPipeline.id)
+      .sort((left, right) => left.stageOrder - right.stageOrder)
+    : [];
   const timelineEntries: TimelineEntry[] = [
     ...(selectedLead && leadCreatedAt ? [{
       key: `lead-created-${selectedLead.id}`,
@@ -611,9 +672,9 @@ export default function DealWorkspace({
     : timelineEntries.filter((entry) => entry.category === timelineFilter);
 
   useEffect(() => {
-    if (!kanbanPipeline || kanbanPipelineId === kanbanPipeline.id) return;
-    setKanbanPipelineId(kanbanPipeline.id);
-  }, [kanbanPipeline, kanbanPipelineId]);
+    if (!selectedPipelineFilter || kanbanPipeline) return;
+    changePipelineFilter('');
+  }, [changePipelineFilter, kanbanPipeline, selectedPipelineFilter]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClockNow(Date.now()), 60_000);
@@ -700,25 +761,12 @@ export default function DealWorkspace({
 
   const convertLead = () => {
     if (!selectedLead) return;
-    if (selectedLead.disposition === 'lost') {
-      setContactError('A Lost lead cannot be converted to a deal.');
-      return;
-    }
-    const contactChannels = {
-      contactPhone: resolvedContactPhone,
-      whatsapp: resolvedWhatsapp,
-      telegram: resolvedTelegram,
-    };
-    if (!hasCompleteCommunicationChannels(contactChannels)) {
-      setContactError('Complete phone, WhatsApp, and Telegram before converting this lead to a deal.');
-      return;
-    }
-    if (!selectedClient || !hasCompleteClientProfile(selectedClient)) {
-      setContactError('Complete the company profile before converting this lead to a deal.');
-      return;
-    }
     const existing = allDeals.find((deal) => deal.leadId === selectedLead.id || deal.id === selectedLead.dealId);
-    if (existing) {
+    if (selectedLead.dealId || existing) {
+      if (!existing) {
+        setContactError('This lead already references a deal that could not be found. Resolve the existing link before converting again.');
+        return;
+      }
       const enteredAt = new Date().toISOString();
       const stageHistory = appendLeadStageTransition(selectedLead, 'Converted to deal', enteredAt);
       setLeads((current) => current.map((lead) => lead.id === selectedLead.id
@@ -737,60 +785,38 @@ export default function DealWorkspace({
       return;
     }
     const product = products.find((item) => item.code === selectedLead.productCode);
-    const pipeline = pipelines.find((item) => item.id === selectedLead.pipelineId && item.isActive);
-    const firstStage = pipelineStages.filter((stage) => stage.pipelineId === pipeline?.id)
+    const pipeline = pipelines.find((item) => item.id === selectedLead.pipelineId && item.isActive) ?? activePipelines[0];
+    const firstStage = pipeline && pipelineStages.filter((stage) => stage.pipelineId === pipeline.id)
       .sort((left, right) => left.stageOrder - right.stageOrder)[0];
-    if (!product || !pipeline || !firstStage) {
-      setContactError('The lead needs a valid product, active pipeline, and configured first stage before conversion.');
+    const contactChannels = {
+      contactPhone: resolvedContactPhone,
+      whatsapp: resolvedWhatsapp,
+      telegram: resolvedTelegram,
+    };
+    const conversion = buildLeadConversion({
+      lead: selectedLead,
+      client: selectedClient,
+      product,
+      pipeline,
+      firstStage,
+      contactChannels,
+      primaryContact: primaryContactProfile ?? primaryContact,
+    });
+    if (!conversion) {
+      setContactError('Complete the company profile and contact details before converting this lead to a deal.');
       return;
     }
-    const enteredAt = new Date().toISOString();
-    const stageHistory = appendLeadStageTransition(selectedLead, 'Converted to deal', enteredAt);
-    const value = selectedLead.value ?? selectedLead.sumInsured ?? selectedLead.premium;
-    const deal: Deal = {
-      id: `deal-${crypto.randomUUID()}`,
-      leadId: selectedLead.id,
-      pipelineId: pipeline.id,
-      createdAt: enteredAt,
-      stageChangedAt: enteredAt,
-      client: selectedLead.client,
-      clientId: selectedLead.clientId,
-      contactName: selectedLead.contact,
-      contactProfileId: selectedLead.contactProfileId ?? primaryContactProfile?.id,
-      contactRole: selectedLead.contactRole,
-      contactEmail: selectedLead.contactEmail || primaryContactProfile?.email || '',
-      ...contactChannels,
-      product: product.name,
-      productCode: product.code,
-      value,
-      weighted: Math.round(value * firstStage.winProbabilityPct) / 100,
-      brokerageRatePct: product.standardBrokerageRatePct,
-      brokerageCommission: calculateBrokerageCommission(value, product),
-      currency: selectedLead.currency ?? 'MVR',
-      ...(selectedLead.exchangeRate ? { exchangeRate: selectedLead.exchangeRate } : {}),
-      stage: firstStage.name,
-      probability: firstStage.winProbabilityPct,
-      ownerId: selectedLead.ownerId,
-      closeDate: selectedLead.closeDate ?? selectedLead.renewalDate,
-      insurer: 'Not assigned',
-      source: selectedLead.source,
-      notes: selectedLead.notes,
-    };
-    setDeals((current) => [deal, ...current]);
     const linkedLeadContacts = mergeContactProfiles(
       selectedLead.contacts,
       contactProfiles.filter((contact) => contact.linkedLeadIds?.includes(selectedLead.id)),
       primaryContact ? [primaryContact] : undefined,
     )
-      .map((contact) => linkContactProfile(contact, selectedLead.id, deal.id));
+      .map((contact) => linkContactProfile(contact, selectedLead.id, conversion.deal.id));
+    setDeals((current) => [conversion.deal, ...current]);
     setLeads((current) => current.map((lead) => lead.id === selectedLead.id
       ? {
         ...lead,
-        dealId: deal.id,
-        funnelStage: 'Converted to deal',
-        disposition: 'converted',
-        stageHistory,
-        stageChangedAt: enteredAt,
+        ...conversion.leadUpdate,
         contactProfileId: lead.contactProfileId ?? primaryContactProfile?.id,
         contactEmail: lead.contactEmail || primaryContactProfile?.email || '',
         ...contactChannels,
@@ -802,17 +828,8 @@ export default function DealWorkspace({
         ? { ...client, contacts: mergeContactProfiles(client.contacts, linkedLeadContacts) }
         : client));
     }
-    setStageHistory((current) => [...current, {
-      id: `stage-${crypto.randomUUID()}`,
-      tenantId: TENANT_ID,
-      dealId: deal.id,
-      fromStageId: null,
-      toStageId: firstStage.id,
-      enteredAt,
-      exitedAt: null,
-      durationSeconds: null,
-    }]);
-    setSelectedKey(`deal:${deal.id}`);
+    setStageHistory((current) => [...current, conversion.stageHistoryEntry]);
+    setSelectedKey(`deal:${conversion.deal.id}`);
   };
 
   const changeLeadTelemetryStage = (target: LeadLifecycleStage) => {
@@ -870,7 +887,7 @@ export default function DealWorkspace({
       setMoveError('Select a deal before changing its stage.');
       return;
     }
-    if (isTerminalDealStage(selectedDeal.stage, selectedDeal.disposition)) {
+    if (isTerminalDealStage(selectedDeal.stage, selectedDeal.disposition, currentStage)) {
       setMoveError('A terminal deal cannot be moved to another stage.');
       return;
     }
@@ -879,8 +896,8 @@ export default function DealWorkspace({
       return;
     }
     const now = new Date().toISOString();
-    const lost = isLostStage(target.name);
-    const bound = isBoundStage(target.name);
+    const lost = isLostStage(target);
+    const bound = isBoundStage(target);
     if (lost && !reason?.trim()) {
       setMoveError('A loss reason is mandatory.');
       return;
@@ -963,6 +980,35 @@ export default function DealWorkspace({
     const renewalStage = pipelineStages.filter((stage) => stage.pipelineId === renewalPipeline?.id)
       .sort((left, right) => left.stageOrder - right.stageOrder)[0];
     const renewalDealId = `renewal-for-${selectedDeal.id}`;
+    const renewalValue = selectedClient?.premium ?? selectedDeal.value;
+    const linkedRenewal = bound && policyExpiry && renewalPipeline && renewalStage && !allDeals.some((deal) => deal.id === renewalDealId)
+      ? linkDealToLead({
+        id: renewalDealId,
+        pipelineId: renewalPipeline.id,
+        createdAt: now,
+        stageChangedAt: now,
+        renewalForClientId: selectedClient?.id ?? selectedDeal.clientId,
+        renewalForDealId: selectedDeal.id,
+        renewalExpiry: policyExpiry,
+        policyExpiry,
+        client: selectedDeal.client,
+        clientId: selectedClient?.id ?? selectedDeal.clientId,
+        product: selectedDeal.product,
+        productCode: selectedDeal.productCode,
+        value: renewalValue,
+        weighted: Math.round(renewalValue * renewalStage.winProbabilityPct) / 100,
+        currency: selectedDeal.currency,
+        ...(selectedDeal.exchangeRate ? { exchangeRate: selectedDeal.exchangeRate } : {}),
+        stage: renewalStage.name,
+        probability: renewalStage.winProbabilityPct,
+        ownerId: selectedDeal.ownerId,
+        closeDate: dateBefore(policyExpiry, 90),
+        insurer: selectedDeal.insurer,
+        nextActivityAt: dateBefore(policyExpiry, 90),
+        nextActivityTitle: 'Start 90-day renewal retention review',
+        nextActivityCreatedAt: now,
+      }, undefined, { source: 'Renewal automation', client: selectedClient })
+      : undefined;
     setDeals((current) => {
       const updated = current.map((deal) => deal.id === selectedDeal.id
         ? {
@@ -990,35 +1036,14 @@ export default function DealWorkspace({
           } : {}),
         }
         : deal);
-      if (!bound || !policyExpiry || !renewalPipeline || !renewalStage
-        || current.some((deal) => deal.id === renewalDealId)) return updated;
-      const renewalValue = selectedClient?.premium ?? selectedDeal.value;
-      return [...updated, {
-        id: renewalDealId,
-        pipelineId: renewalPipeline.id,
-        createdAt: now,
-        stageChangedAt: now,
-        renewalForClientId: selectedClient?.id,
-        renewalForDealId: selectedDeal.id,
-        renewalExpiry: policyExpiry,
-        policyExpiry,
-        client: selectedDeal.client,
-        product: selectedDeal.product,
-        productCode: selectedDeal.productCode,
-        value: renewalValue,
-        weighted: Math.round(renewalValue * renewalStage.winProbabilityPct) / 100,
-        currency: selectedDeal.currency,
-        ...(selectedDeal.exchangeRate ? { exchangeRate: selectedDeal.exchangeRate } : {}),
-        stage: renewalStage.name,
-        probability: renewalStage.winProbabilityPct,
-        ownerId: selectedDeal.ownerId,
-        closeDate: dateBefore(policyExpiry, 90),
-        insurer: selectedDeal.insurer,
-        nextActivityAt: dateBefore(policyExpiry, 90),
-        nextActivityTitle: 'Start 90-day renewal retention review',
-        nextActivityCreatedAt: now,
-      }];
+      if (!linkedRenewal || current.some((deal) => deal.id === renewalDealId)) return updated;
+      return [...updated, linkedRenewal.deal];
     });
+    if (linkedRenewal) {
+      setLeads((current) => current.some((lead) => lead.id === linkedRenewal.lead.id)
+        ? current
+        : [linkedRenewal.lead, ...current]);
+    }
     if (selectedClient && contactProfileId && stageContactName.trim() && stageContactEmail.trim()) {
       setClients((current) => current.map((client) => {
         if (client.id !== selectedClient.id) return client;
@@ -1084,10 +1109,20 @@ export default function DealWorkspace({
     setWinReason('');
     setMoveError('');
     setStageChangeRemarks('');
+    const dealPipeline = pipelines.find((pipeline) => pipeline.id === selectedDeal.pipelineId);
+    if (dealPipeline?.code.toUpperCase() === 'COMMERCIAL'
+      && target.stageOrder === 2
+      && !quotationRequests.some((request) => request.dealId === selectedDeal.id)) {
+      promptQuotationRequestForDeal(selectedDeal.id);
+    }
   };
 
   const requestStageChange = (target: PipelineStage, deal = selectedDeal) => {
-    if (!deal || isTerminalDealStage(deal.stage, deal.disposition) || target.name === deal.stage) return;
+    if (!deal || isTerminalDealStage(
+      deal.stage,
+      deal.disposition,
+      pipelineStages.find((stage) => stage.pipelineId === deal.pipelineId && stage.name === deal.stage),
+    ) || target.name === deal.stage) return;
     setSelectedKey(`deal:${deal.id}`);
     setContactError('');
     setMoveStage(target);
@@ -1263,18 +1298,125 @@ export default function DealWorkspace({
 
   return (
     <div className="space-y-2">
-      {(workspaceView === 'kanban' || !selectedItem) && <div className="flex flex-wrap items-center justify-between gap-2">
+      {(workspaceView === 'list' || workspaceView === 'kanban' || !selectedItem) && <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-1 rounded-lg border border-ink-600 bg-ink-800/60 p-1" role="tablist" aria-label="Deal workspace views">
+          <button type="button" role="tab" aria-selected={workspaceView === 'list'} onClick={() => setWorkspaceView('list')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'list' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>List</button>
           <button type="button" role="tab" aria-selected={workspaceView === 'kanban'} onClick={() => setWorkspaceView('kanban')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'kanban' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>Kanban</button>
           <button type="button" role="tab" aria-selected={workspaceView === 'inspection'} onClick={() => setWorkspaceView('inspection')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'inspection' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>Inspection</button>
         </div>
         {onClose && <button type="button" className="btn-ghost !py-1.5" onClick={onClose}>Back to leads</button>}
       </div>}
-      {workspaceView === 'kanban' ? (
+      {workspaceView === 'list' ? (
+        <div className="min-w-0 space-y-3">
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h2 className="text-sm font-semibold text-white">Deals list</h2>
+              <Badge variant="brand">{listDeals.length} {listDeals.length === 1 ? 'deal' : 'deals'}</Badge>
+              <select className="input !w-auto max-w-full !py-1.5 !text-xs" value={selectedPipelineFilter} onChange={(event) => changePipelineFilter(event.target.value)} aria-label="Filter deals by pipeline">
+                <option value="">All pipelines</option>
+                {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
+              </select>
+            </div>
+            <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+              <label className="relative min-w-0 flex-1 sm:max-w-72">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                <input className="input !py-1.5 pl-9 !text-xs" type="search" value={dealListSearch} onChange={(event) => setDealListSearch(event.target.value)} placeholder="Search deals" aria-label="Search deal ID, title, client, lead or vendor" />
+              </label>
+              {onOpenFilters && <button type="button" className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={onOpenFilters}><Filter size={13} /> Filters</button>}
+            </div>
+          </div>
+          <div className="fit-wrap deals-list-fit w-full max-w-full min-w-0 rounded-lg border border-[#1B1E22] bg-ink-950">
+            <table className="table-fixed w-full text-left">
+              <colgroup>{dealListColumns.map((column) => <col key={column.key} />)}</colgroup>
+              <thead className="bg-ink-900/70 text-muted">
+                <tr>{dealListColumns.map((column) => <th key={column.key} scope="col" className="px-2 py-2 font-medium">{column.label}</th>)}</tr>
+              </thead>
+              <tbody>
+                {listDeals.map((deal) => {
+                  const lead = leads.find((item) => item.id === deal.leadId || item.dealId === deal.id);
+                  const pipeline = pipelines.find((item) => item.id === deal.pipelineId);
+                  const dealStages = pipelineStages.filter((stage) => stage.pipelineId === deal.pipelineId)
+                    .sort((left, right) => left.stageOrder - right.stageOrder);
+                  const stage = dealStages.find((item) => item.name === deal.stage);
+                  const stageEntry = stageHistory.find((entry) => entry.dealId === deal.id && entry.toStageId === stage?.id && !entry.exitedAt);
+                  const enteredAt = stageEntry?.enteredAt ?? deal.stageChangedAt ?? deal.createdAt;
+                  const elapsedDays = getStageSlaElapsedDays(enteredAt, clockNow);
+                  const isOverdue = stage ? isStageSlaOverdue(enteredAt, stage.stagnationDaysThreshold, clockNow) : false;
+                  const vendorName = vendors.find((vendor) => vendor.id === deal.vendorId)?.name ?? deal.insurer ?? 'Not assigned';
+                  const dealTitle = lead?.title ?? deal.proposalSummary ?? `${deal.product} placement`;
+                  const leadStage = lead ? lifecycleStageForLead(lead, true) : 'No linked lead';
+                  const ownerName = users.find((person) => person.id === deal.ownerId)?.name ?? formatStaffIdentifier(deal.ownerId);
+                  const terminal = isTerminalDealStage(deal.stage, deal.disposition, stage);
+                  const outcome = deal.disposition === 'won' || stage?.isClosedWon
+                    ? 'Won'
+                    : deal.disposition === 'lost' || stage?.isClosedLost
+                      ? 'Lost'
+                      : terminal ? 'Closed' : 'Open';
+                  return (
+                    <tr key={deal.id} tabIndex={0} onClick={() => { setSelectedKey(`deal:${deal.id}`); setWorkspaceView('inspection'); }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setSelectedKey(`deal:${deal.id}`);
+                          setWorkspaceView('inspection');
+                        }
+                      }}
+                      className="cursor-pointer border-t border-ink-700/80 hover:bg-ink-800/70 focus:bg-ink-800/70">
+                      <td data-label={dealListColumns[0].label} className="font-mono text-muted">{dealReferences.get(deal.id) ?? deal.id}</td>
+                      <td data-label={dealListColumns[1].label} className="font-semibold text-white">{dealTitle}</td>
+                      <td data-label={dealListColumns[2].label} className="text-white">{deal.client}</td>
+                      <td data-label={dealListColumns[3].label}>
+                        {lead ? <button type="button" className="text-left text-brand-300 hover:text-brand-200" onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedKey(`lead:${lead.id}`);
+                          setWorkspaceView('inspection');
+                        }}><span className="block font-mono">{lead.id}</span><span className="block text-muted">{leadStage}</span></button> : <span className="text-hot">Missing lead link</span>}
+                      </td>
+                      <td data-label={dealListColumns[4].label} className="text-muted">{pipeline?.name ?? 'Unknown pipeline'}</td>
+                      <td data-label={dealListColumns[5].label}>
+                        <div className="deal-list-stage-cell">
+                          <select className="input deal-list-stage-select !min-h-7 !py-1 !text-[inherit]" value={stage?.id ?? ''} disabled={!stage || (activeRole !== 'admin' && activeRole !== 'sales')}
+                            aria-label={`Change stage for ${dealTitle}`} onClick={(event) => event.stopPropagation()} onChange={(event) => {
+                              const target = dealStages.find((item) => item.id === event.target.value);
+                              if (target) requestStageChange(target, deal);
+                            }}>
+                            {dealStages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                          </select>
+                          <Badge variant={isOverdue ? 'hot' : 'muted'}>{stage?.stagnationDaysThreshold ? `${elapsedDays ?? 0}/${stage.stagnationDaysThreshold}d` : 'No SLA'}</Badge>
+                        </div>
+                      </td>
+                      <td data-label={dealListColumns[6].label} className="text-muted">{deal.productCode ?? deal.product}</td>
+                      <td data-label={dealListColumns[7].label} className="text-muted">{vendorName}</td>
+                      <td data-label={dealListColumns[8].label} className="font-semibold text-brand-300">{formatAmount(deal.value, deal.currency ?? 'USD')}</td>
+                      <td data-label={dealListColumns[9].label} className="text-muted">{deal.probability}%</td>
+                      <td data-label={dealListColumns[10].label}>
+                        <span className="deal-list-owner-avatar" title={ownerName}>{avatarCode(ownerName)}</span>
+                        <span className="owner-name">{ownerName}</span>
+                      </td>
+                      <td data-label={dealListColumns[11].label} className="whitespace-nowrap text-muted">{deal.closeDate ? formatDate(deal.closeDate) : '—'}</td>
+                      <td data-label={dealListColumns[12].label} className="relative text-right" onClick={(event) => event.stopPropagation()}>
+                        <button type="button" className="rounded-md p-1.5 text-muted hover:bg-ink-700 hover:text-white" aria-label={`Actions for ${dealTitle}`} aria-haspopup="menu" aria-expanded={openDealActionsId === deal.id}
+                          onClick={() => setOpenDealActionsId((current) => current === deal.id ? '' : deal.id)}><MoreHorizontal size={15} /></button>
+                        {openDealActionsId === deal.id && <div role="menu" className="absolute right-1 top-8 z-20 min-w-28 rounded-lg border border-ink-600 bg-ink-900 p-1 text-left shadow-xl">
+                          {onEditDeal && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs text-white hover:bg-ink-700" onClick={() => { setOpenDealActionsId(''); onEditDeal(deal); }}><Pencil size={12} /> Edit deal</button>}
+                          {onDeleteDeal && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs text-hot hover:bg-ink-700" onClick={() => { setOpenDealActionsId(''); onDeleteDeal(deal); }}><Trash2 size={12} /> Delete deal</button>}
+                          <span className="block px-2.5 py-2 text-[10px] text-muted">{outcome}</span>
+                        </div>}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!listDeals.length && <tr className="deals-list-empty"><td data-label={dealListColumns[0].label} colSpan={dealListColumns.length} className="px-4 py-8 text-center text-muted">No deals match these filters.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : workspaceView === 'kanban' ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div><h2 className="text-sm font-semibold text-white">Deals pipeline</h2><p className="mt-1 text-xs text-muted">Drag a deal to another stage to review and save the change.</p></div>
-            <select className="input !w-auto" value={kanbanPipeline?.id ?? ''} onChange={(event) => setKanbanPipelineId(event.target.value)} aria-label="Select deal pipeline">
+            <select className="input !w-auto" value={selectedPipelineFilter} onChange={(event) => changePipelineFilter(event.target.value)} aria-label="Select deal pipeline">
+              <option value="">All pipelines</option>
               {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
             </select>
           </div>
@@ -1313,7 +1455,6 @@ export default function DealWorkspace({
         <div className="border-b border-ink-600 p-4">
           <div className="flex items-center justify-between">
             <div><h2 className="font-semibold text-white">Deals & Leads</h2><p className="mt-1 text-xs text-muted">{records.length} records</p></div>
-            {onCreateDeal && <button type="button" className="btn-primary !px-2.5 !py-2 !text-xs" onClick={onCreateDeal}>+ Deal</button>}
           </div>
           <input className="input mt-3" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search client, product, stage…" aria-label="Search deals and leads" />
           <select className="input mt-2" value={productFilter} onChange={(event) => setProductFilter(event.target.value)} aria-label="Filter by product">
@@ -1341,7 +1482,9 @@ export default function DealWorkspace({
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-1">
                 <span className="pill border border-ink-600 bg-ink-800 text-muted !px-2 !py-0.5">{item.productCode ?? 'No product'}</span>
-                <Badge variant={stageBadgeTone(itemStage)}>{itemStage}</Badge>
+                <Badge variant={stageBadgeTone(kind === 'deal'
+                  ? pipelineStages.find((stage) => stage.pipelineId === (item as Deal).pipelineId && stage.name === itemStage) ?? itemStage
+                  : itemStage)}>{itemStage}</Badge>
                 {slaStatus.overdue && <Badge variant="hot"><Clock3 size={11} /> SLA overdue</Badge>}
               </div>
               <div className="mt-2 text-xs text-brand-300">
@@ -1352,7 +1495,6 @@ export default function DealWorkspace({
           })}
           {records.length === 0 && <div className="p-5 text-center text-sm text-muted">No matching deals or leads.</div>}
         </div>
-        {onCreateDeal && <button type="button" className="btn-ghost m-3 !text-xs" onClick={onCreateDeal}>+ Deal</button>}
       </aside>}
 
       <main className={`glass min-h-[460px] min-w-0 overflow-y-auto rounded-2xl px-3 py-1.5 sm:px-4 sm:py-1.5 xl:min-h-0 ${selectedLead ? 'flex flex-col' : ''}`}>
@@ -1450,7 +1592,11 @@ export default function DealWorkspace({
                         return <li key={stage.key} className="telemetry-step relative flex min-w-0 flex-1 flex-col items-center">
                           <button type="button" disabled={selectedLead
                             ? (activeRole !== 'admin' && activeRole !== 'sales') || isTerminalLeadStage(lifecycleStageForLead(selectedLead, Boolean(progressDeal)))
-                            : !pipelineStage || !progressDeal || stage.active || isTerminalDealStage(selectedDeal?.stage ?? '', selectedDeal?.disposition)}
+                            : !pipelineStage || !progressDeal || stage.active || isTerminalDealStage(
+                              selectedDeal?.stage ?? '',
+                              selectedDeal?.disposition,
+                              currentStage,
+                            )}
                             onClick={() => {
                               if (selectedLead && isLeadLifecycleStage(stage.name)) {
                                 changeLeadTelemetryStage(stage.name);
@@ -1527,6 +1673,36 @@ export default function DealWorkspace({
                 </ol>}
                 {selectedLead && contactError && <p role="alert" className="mt-2 text-xs text-hot">{contactError}</p>}
               </div></> : <p className="py-1 text-[10px] text-muted">No stages are configured for this pipeline.</p>}
+          </section>
+
+          <section aria-label="Lead 360" className="order-2 mt-3 rounded-xl border border-ink-600 bg-ink-900/30 p-4">
+            <h2 className="mb-3 text-sm font-semibold text-white">Lead 360 · Lead → Deal → Quotation Requests</h2>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="min-w-0">
+                <div className="mb-1 text-[10px] uppercase tracking-wide text-muted">Lead</div>
+                {linkedLead
+                  ? <button type="button" className="block max-w-full truncate text-left text-sm text-brand-300 hover:text-white" onClick={() => setSelectedKey(`lead:${linkedLead.id}`)}>{linkedLead.title ?? linkedLead.client}</button>
+                  : <div className="text-sm text-muted">No linked lead</div>}
+              </div>
+              <div className="min-w-0">
+                <div className="mb-1 text-[10px] uppercase tracking-wide text-muted">Deal</div>
+                {progressDeal
+                  ? <button type="button" className="block max-w-full truncate text-left text-sm text-brand-300 hover:text-white" onClick={() => setSelectedKey(`deal:${progressDeal.id}`)}>{progressDeal.client} · {progressDeal.product}</button>
+                  : <div className="text-sm text-muted">No linked deal</div>}
+              </div>
+              <div className="min-w-0">
+                <div className="mb-1 text-[10px] uppercase tracking-wide text-muted">Quotation Requests</div>
+                {linkedQuotationRequests.length ? (
+                  <div className="space-y-1">
+                    {linkedQuotationRequests.map((request) => (
+                      <a key={request.id} href={dashboardHref('qslips', { requestId: request.id })} className="flex items-center justify-between gap-2 text-sm text-brand-300 hover:text-white">
+                        <span className="truncate">{request.ref}</span><Badge variant={request.status === 'Responses received' ? 'warm' : request.status === 'Closed' ? 'win' : request.status === 'Sent' ? 'brand' : 'muted'}>{request.status}</Badge>
+                      </a>
+                    ))}
+                  </div>
+                ) : <div className="text-sm text-muted">No quotation requests</div>}
+              </div>
+            </div>
           </section>
 
           {selectedLead ? (
@@ -1713,8 +1889,8 @@ export default function DealWorkspace({
               <h2 className="text-sm font-semibold text-white">Binding actions</h2>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <button type="button" className="btn-ghost !px-2 !py-2 text-xs" disabled={!selectedDeal} onClick={() => setActivityModal('quote')}><FileText size={13} /> Add quote</button>
-                <button type="button" className="btn-primary !px-2 !py-2 text-xs" disabled={!selectedDeal || !stages.find((stage) => isBoundStage(stage.name))} onClick={() => {
-                  const finalStage = stages.find((stage) => isBoundStage(stage.name));
+                <button type="button" className="btn-primary !px-2 !py-2 text-xs" disabled={!selectedDeal || !stages.find((stage) => isBoundStage(stage))} onClick={() => {
+                  const finalStage = stages.find((stage) => isBoundStage(stage));
                   if (finalStage) requestStageChange(finalStage);
                 }}><ShieldCheck size={13} /> Bind policy</button>
               </div>
@@ -1806,8 +1982,8 @@ export default function DealWorkspace({
               </label>
             </div>
           </>}
-          {moveStage && isLostStage(moveStage.name) && <Field label="Loss reason (required)"><select className="input" value={lossReason} onChange={(event) => setLossReason(event.target.value)}><option value="">Select a reason</option>{LOSS_REASONS.map((reason) => <option key={reason}>{reason}</option>)}</select></Field>}
-          {moveStage && isBoundStage(moveStage.name) && <>
+          {moveStage && isLostStage(moveStage) && <Field label="Loss reason (required)"><select className="input" value={lossReason} onChange={(event) => setLossReason(event.target.value)}><option value="">Select a reason</option>{LOSS_REASONS.map((reason) => <option key={reason}>{reason}</option>)}</select></Field>}
+          {moveStage && isBoundStage(moveStage) && <>
             <p className="rounded-lg border border-win/30 bg-win/5 p-3 text-sm text-muted">Confirm that the policy is bound. A pending premium invoice will be created automatically.</p>
             <Field label="Win reason (required)"><textarea className="input min-h-20" value={winReason} onChange={(event) => { setWinReason(event.target.value); setMoveError(''); }} placeholder="Record why the client selected this placement." maxLength={2000} /></Field>
           </>}

@@ -73,8 +73,9 @@ export default function MiraPage() {
           </div>
           <div className="text-xs text-muted">{rows.length} records</div>
         </div>
-        <div className="max-w-full overflow-x-auto overscroll-x-contain">
-          <table className="w-full text-sm">
+        <div className="fit-wrap mira-list-fit w-full max-w-full min-w-0">
+          <table className="table-fixed w-full text-sm">
+            <colgroup>{Array.from({ length: 9 }, (_, index) => <col key={index} />)}</colgroup>
             <thead className="bg-ink-900/60 text-muted text-[11px] tracking-wider">
               <tr>
                 <th className="text-left px-4 py-3 font-medium w-10">#</th>
@@ -92,26 +93,26 @@ export default function MiraPage() {
               {rows.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-muted">No MIRA records in this period.</td></tr>}
               {rows.map((r, i) => (
                 <tr key={r.id} className="table-row">
-                  <td className="px-4 py-3 text-muted">{i + 1}</td>
-                  <td className="px-4 py-3 text-muted text-xs">{formatDate(r.date)}</td>
-                  <td className="px-4 py-3 text-white">{r.insured}</td>
-                  <td className="px-4 py-3 text-muted">{r.insurer}</td>
-                  <td className="px-4 py-3 text-right text-white">{r.sumInsured.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-right text-white">{r.premium.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-right text-muted">{r.commissionPct}%</td>
-                  <td className="px-4 py-3 text-right text-win">{r.commissionAmount.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-right text-muted">{r.brokerageFee.toLocaleString()}</td>
+                  <td data-label="#" className="text-muted">{i + 1}</td>
+                  <td data-label="Date" className="text-muted text-xs">{formatDate(r.date)}</td>
+                  <td data-label="Insured Risk" className="text-white">{r.insured}</td>
+                  <td data-label="Insurer" className="text-muted">{r.insurer}</td>
+                  <td data-label="Sum Insured" className="text-white">{r.sumInsured.toLocaleString()}</td>
+                  <td data-label="Premium" className="text-white">{r.premium.toLocaleString()}</td>
+                  <td data-label="Comm. %" className="text-muted">{r.commissionPct}%</td>
+                  <td data-label="Commission" className="text-win">{r.commissionAmount.toLocaleString()}</td>
+                  <td data-label="Brokerage Fee" className="text-muted">{r.brokerageFee.toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot className="bg-ink-800/80 text-white font-semibold">
               <tr className="border-t-2 border-ink-600">
-                <td colSpan={4} className="px-4 py-3 text-right text-muted text-xs">Totals</td>
-                <td className="px-4 py-3 text-right">{totals.sumInsured.toLocaleString()}</td>
-                <td className="px-4 py-3 text-right">{totals.premium.toLocaleString()}</td>
-                <td></td>
-                <td className="px-4 py-3 text-right text-win">{totals.commission.toLocaleString()}</td>
-                <td className="px-4 py-3 text-right">{totals.brokerage.toLocaleString()}</td>
+                <td data-label="Totals" colSpan={4} className="text-right text-muted text-xs">Totals</td>
+                <td data-label="Sum Insured" className="text-right">{totals.sumInsured.toLocaleString()}</td>
+                <td data-label="Premium" className="text-right">{totals.premium.toLocaleString()}</td>
+                <td data-label="Comm. %" />
+                <td data-label="Commission" className="text-right text-win">{totals.commission.toLocaleString()}</td>
+                <td data-label="Brokerage Fee" className="text-right">{totals.brokerage.toLocaleString()}</td>
               </tr>
             </tfoot>
           </table>

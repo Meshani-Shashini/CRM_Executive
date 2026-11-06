@@ -9,7 +9,7 @@ import {
 import type { Role } from '../types';
 
 export type NavKey =
-  | 'dashboard' | 'plans' | 'leads' | 'deals' | 'clients' | 'calendar' | 'reports' | 'documents'
+  | 'dashboard' | 'plans' | 'leads' | 'deals' | 'clients' | 'vendors' | 'calendar' | 'reports' | 'documents'
   | 'quotations' | 'qslips' | 'internal-slips' | 'invoices' | 'payments' | 'pay-requests'
   | 'renewals' | 'info-requests' | 'rate-cards'
   | 'settings' | 'funnels' | 'pipelines' | 'targets' | 'audit-log'
@@ -37,6 +37,7 @@ const GROUPS: NavGroup[] = [
       { key: 'leads', label: 'Leads', icon: FolderKanban, roles: ['admin', 'sales'] },
       { key: 'deals', label: 'Deals', icon: Wallet, roles: ['admin', 'sales'] },
       { key: 'clients', label: 'Clients', icon: Users, roles: ['admin', 'sales', 'finance', 'client'] },
+      { key: 'vendors', label: 'Vendors', icon: Briefcase, roles: ['admin', 'sales', 'finance'] },
       { key: 'calendar', label: 'Calendar', icon: CalendarDays, roles: ['admin', 'sales'] },
       { key: 'reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'finance'] },
       { key: 'documents', label: 'Documents', icon: Files, roles: ['admin', 'sales', 'finance', 'client'] },

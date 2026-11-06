@@ -508,24 +508,25 @@ function ProductManagement({
           </div>
           <button type="button" className="btn-primary !py-1.5" onClick={startAdd}><Plus size={14} /> Add Product</button>
         </div>
-        <div className="max-w-full overflow-x-auto overscroll-x-contain">
-          <table className="w-full text-sm min-w-[1500px]">
+        <div className="fit-wrap product-list-fit w-full max-w-full min-w-0">
+          <table className="table-fixed w-full text-sm">
+            <colgroup>{Array.from({ length: 10 }, (_, index) => <col key={index} />)}</colgroup>
             <thead className="text-[11px] tracking-wider text-muted border-b border-ink-600">
-              <tr><th className="text-left px-3 py-2">Class</th><th className="text-left px-3 py-2">Product Code</th><th className="text-left px-3 py-2">Description</th><th className="text-right px-3 py-2">Brokerage %</th><th className="text-left px-3 py-2">Mandatory</th><th className="text-left px-3 py-2">Pipeline Model</th><th className="text-left px-3 py-2">Sales Cycle / Velocity</th><th className="text-left px-3 py-2">Risk Level</th><th className="text-left px-3 py-2 min-w-[360px]">Key Underwriting Intake Artifacts</th><th className="px-3 py-2" /></tr>
+              <tr><th className="text-left px-3 py-2">Class</th><th className="text-left px-3 py-2">Product Code</th><th className="text-left px-3 py-2">Description</th><th className="text-right px-3 py-2">Brokerage %</th><th className="text-left px-3 py-2">Mandatory</th><th className="text-left px-3 py-2">Pipeline Model</th><th className="text-left px-3 py-2">Sales Cycle / Velocity</th><th className="text-left px-3 py-2">Risk Level</th><th className="text-left px-3 py-2">Key Underwriting Intake Artifacts</th><th className="text-left px-3 py-2">Actions</th></tr>
             </thead>
             <tbody>
               {products.map((product) => (
                 <tr key={product.code} className="border-b border-ink-700/60">
-                  <td className="px-3 py-2 text-muted">{product.classType}</td>
-                  <td className="px-3 py-2 text-white font-medium">{product.code}</td>
-                  <td className="px-3 py-2 text-muted">{product.description || product.name}</td>
-                  <td className="px-3 py-2 text-right text-brand-300">{product.standardBrokerageRatePct}%</td>
-                  <td className="px-3 py-2"><Badge variant={product.isStatutoryMandatory ? 'hot' : 'muted'}>{product.isStatutoryMandatory ? 'Yes' : 'No'}</Badge></td>
-                  <td className="px-3 py-2 text-muted">Shared product-filtered</td>
-                  <td className="px-3 py-2 text-muted">{product.salesCycleVelocity ?? '14–30 Days'}</td>
-                  <td className="px-3 py-2"><Badge variant={product.riskLevel === 'Very High' || product.riskLevel === 'High' ? 'hot' : product.riskLevel === 'Low' ? 'cold' : 'muted'}>{product.riskLevel ?? 'Medium'}</Badge></td>
-                  <td className="px-3 py-2 text-muted whitespace-normal">{product.keyUnderwritingIntakeArtifacts ?? 'Completed proposal form, asset/risk schedule and prior claims history'}</td>
-                  <td className="px-3 py-2"><div className="flex justify-end gap-1"><button type="button" className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white" onClick={() => startEdit(product)} aria-label={`Edit ${product.name}`}><Pencil size={14} /></button><button type="button" className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-hot" onClick={() => handleDeleteProduct(product)} aria-label={`Delete ${product.name}`} title={builtInCodes.has(product.code) ? 'Seeded NM CODES products cannot be deleted' : 'Delete custom product'}><Trash2 size={14} /></button></div></td>
+                  <td data-label="Class" className="text-muted">{product.classType}</td>
+                  <td data-label="Product Code" className="text-white font-medium">{product.code}</td>
+                  <td data-label="Description" className="text-muted">{product.description || product.name}</td>
+                  <td data-label="Brokerage %" className="text-brand-300">{product.standardBrokerageRatePct}%</td>
+                  <td data-label="Mandatory"><Badge variant={product.isStatutoryMandatory ? 'hot' : 'muted'}>{product.isStatutoryMandatory ? 'Yes' : 'No'}</Badge></td>
+                  <td data-label="Pipeline Model" className="text-muted">Shared product-filtered</td>
+                  <td data-label="Sales Cycle / Velocity" className="text-muted">{product.salesCycleVelocity ?? '14–30 Days'}</td>
+                  <td data-label="Risk Level"><Badge variant={product.riskLevel === 'Very High' || product.riskLevel === 'High' ? 'hot' : product.riskLevel === 'Low' ? 'cold' : 'muted'}>{product.riskLevel ?? 'Medium'}</Badge></td>
+                  <td data-label="Key Underwriting Intake Artifacts" className="text-muted whitespace-normal">{product.keyUnderwritingIntakeArtifacts ?? 'Completed proposal form, asset/risk schedule and prior claims history'}</td>
+                  <td data-label="Actions"><div className="flex justify-end gap-1"><button type="button" className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white" onClick={() => startEdit(product)} aria-label={`Edit ${product.name}`}><Pencil size={14} /></button><button type="button" className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-hot" onClick={() => handleDeleteProduct(product)} aria-label={`Delete ${product.name}`} title={builtInCodes.has(product.code) ? 'Seeded NM CODES products cannot be deleted' : 'Delete custom product'}><Trash2 size={14} /></button></div></td>
                 </tr>
               ))}
             </tbody>

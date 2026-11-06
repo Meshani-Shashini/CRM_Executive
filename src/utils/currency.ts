@@ -2,8 +2,9 @@ export type Currency = 'MVR' | 'USD';
 
 export const DEFAULT_USD_TO_MVR_RATE = 15.42;
 
-export function toMvr(amount: number, currency: Currency, exchangeRate?: number | null) {
-  if (currency === 'MVR') return amount;
+export function toMvr(amount: number, currency?: Currency | null, exchangeRate?: number | null) {
+  const normalizedCurrency = currency && (currency === 'MVR' || currency === 'USD') ? currency : 'MVR';
+  if (normalizedCurrency === 'MVR') return amount;
   const rate = exchangeRate == null || exchangeRate === 0
     ? DEFAULT_USD_TO_MVR_RATE
     : exchangeRate;
@@ -13,8 +14,10 @@ export function toMvr(amount: number, currency: Currency, exchangeRate?: number 
   return amount * rate;
 }
 
-export function formatAmount(amount: number, currency: Currency) {
-  return `${currency} ${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+export function formatAmount(amount: number, currency?: Currency | null) {
+  const normalizedCurrency = currency && (currency === 'MVR' || currency === 'USD') ? currency : null;
+  const value = amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return normalizedCurrency ? `${normalizedCurrency} ${value}` : value;
 }
 
 export function parseCurrencyInput(value: string) {

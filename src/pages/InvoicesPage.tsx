@@ -107,8 +107,9 @@ export default function InvoicesPage() {
       </div>
 
       <div className="glass min-w-0 rounded-2xl">
-        <div className="max-w-full overflow-x-auto overscroll-x-contain">
-        <table className="w-full min-w-[760px] text-sm">
+        <div className="fit-wrap invoice-list-fit w-full max-w-full min-w-0">
+        <table className="table-fixed w-full text-sm">
+          <colgroup>{Array.from({ length: 8 }, (_, index) => <col key={index} />)}</colgroup>
           <thead className="bg-ink-900/60 text-muted text-[11px] tracking-wider">
             <tr>
               <th className="text-left px-4 py-3 font-medium">Invoice #</th>
@@ -126,14 +127,14 @@ export default function InvoicesPage() {
               const t = computeTotals(inv);
               return (
                 <tr key={inv.id} className="table-row">
-                  <td className="px-4 py-3 text-brand-400">{inv.number}</td>
-                  <td className="px-4 py-3 text-white">{inv.clientName}</td>
-                  <td className="px-4 py-3 text-muted">{inv.insurer}</td>
-                  <td className="px-4 py-3 text-muted text-xs">{inv.policyNo}</td>
-                  <td className="px-4 py-3 text-muted text-xs">{formatDate(inv.issueDate)}</td>
-                  <td className="px-4 py-3"><Badge variant={statusVariant[inv.status]} dot>{inv.status}</Badge></td>
-                  <td className="px-4 py-3 text-right text-white font-medium">{inv.currency} {t.total.toLocaleString()}</td>
-                  <td className="px-4 py-3">
+                  <td data-label="Invoice #" className="text-brand-400">{inv.number}</td>
+                  <td data-label="Client" className="text-white">{inv.clientName}</td>
+                  <td data-label="Insurer" className="text-muted">{inv.insurer}</td>
+                  <td data-label="Policy" className="text-muted text-xs">{inv.policyNo}</td>
+                  <td data-label="Issue Date" className="text-muted text-xs">{formatDate(inv.issueDate)}</td>
+                  <td data-label="Status"><Badge variant={statusVariant[inv.status]} dot>{inv.status}</Badge></td>
+                  <td data-label="Amount" className="text-white font-medium">{inv.currency} {t.total.toLocaleString()}</td>
+                  <td data-label="Actions">
                     <div className="flex justify-end gap-1">
                       <button onClick={() => setSelected(inv)} className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white" title="View"><Eye size={14} /></button>
                       <button onClick={() => downloadInvoice(inv)} className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white" title="Download CSV" aria-label={`Download ${inv.number}`}><Download size={14} /></button>

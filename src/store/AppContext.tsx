@@ -4,9 +4,10 @@ import {
 } from 'react';
 import type {
   Activity, Client, Deal, Invoice, Lead, LeadStageHistoryRecord, Payment, Pipeline, PipelineStage,
-  Role, StageHistoryAudit, TaxRate, User, ProductCode,
+  QuotationRequest, Role, StageHistoryAudit, TaxRate, User, ProductCode, Vendor,
 } from '../types';
 import { COMPANY, PRODUCT_CODES } from '../data/catalogs';
+import { migrateVendorData } from '../data/vendors';
 import {
   createDefaultCustomerLookups,
   mergeCustomerLookups,
@@ -22,6 +23,7 @@ import {
 } from '../lib/sampleLeads';
 import { reconcileContactAssociations } from '../utils/contactProfiles';
 import { buildLeadStageHistoryRecords, hydrateLeadStageHistory } from '../utils/leadLifecycle';
+import { migrateDealLeadLinks } from '../utils/dealFactory';
 
 interface AppState {
   user: User;
@@ -46,6 +48,10 @@ interface AppState {
   setProducts: Dispatch<SetStateAction<ProductCode[]>>;
   activities: Activity[];
   setActivities: (items: Activity[]) => void;
+  vendors: Vendor[];
+  setVendors: Dispatch<SetStateAction<Vendor[]>>;
+  quotationRequests: QuotationRequest[];
+  setQuotationRequests: Dispatch<SetStateAction<QuotationRequest[]>>;
   deals: Deal[];
   setDeals: Dispatch<SetStateAction<Deal[]>>;
   invoices: Invoice[];
@@ -213,6 +219,160 @@ const normalizeProduct = (product: ProductCode): ProductCode => {
     keyUnderwritingIntakeArtifacts: product.keyUnderwritingIntakeArtifacts || catalogProduct?.keyUnderwritingIntakeArtifacts || 'Completed proposal form, asset/risk schedule and prior claims history',
   };
 };
+
+const PIPELINE_TEMPLATE_STAGE_SEEDS: Record<string, Array<{
+  name: string;
+  winProbabilityPct: number;
+  stagnationDaysThreshold: number;
+  isClosedWon?: boolean;
+  isClosedLost?: boolean;
+  requiresApproval?: boolean;
+}>> = {
+  COMMERCIAL: [
+    { name: 'Fact-Finding & Risk Survey', winProbabilityPct: 20, stagnationDaysThreshold: 10, isClosedWon: false, isClosedLost: false, requiresApproval: false },
+    { name: 'Market Tender & Placing Slip Submission', winProbabilityPct: 40, stagnationDaysThreshold: 14, isClosedWon: false, isClosedLost: false, requiresApproval: false },
+    { name: 'Comparative Analysis & Presentation', winProbabilityPct: 60, stagnationDaysThreshold: 7, isClosedWon: false, isClosedLost: false, requiresApproval: false },
+    { name: 'Underwriter Negotiation & Structuring', winProbabilityPct: 80, stagnationDaysThreshold: 5, isClosedWon: false, isClosedLost: false, requiresApproval: true },
+    { name: 'Policy Bound / Won', winProbabilityPct: 100, stagnationDaysThreshold: 0, isClosedWon: true, isClosedLost: false, requiresApproval: false },
+    { name: 'Lost / Market Declined', winProbabilityPct: 0, stagnationDaysThreshold: 0, isClosedWon: false, isClosedLost: true, requiresApproval: false },
+  ],
+  SME_VELOCITY: [
+    { name: 'Intake & Automated Rating', winProbabilityPct: 25, stagnationDaysThreshold: 2, isClosedWon: false, isClosedLost: false, requiresApproval: false },
+    { name: 'Standard Package Quoted', winProbabilityPct: 50, stagnationDaysThreshold: 3, isClosedWon: false, isClosedLost: false, requiresApproval: false },
+    { name: 'Client Confirmation', winProbabilityPct: 80, stagnationDaysThreshold: 2, isClosedWon: false, isClosedLost: false, requiresApproval: false },
+    { name: 'Payment & Immediate Cover', winProbabilityPct: 100, stagnationDaysThreshold: 0, isClosedWon: true, isClosedLost: false, requiresApproval: false },
+    { name: 'Closed-Lost', winProbabilityPct: 0, stagnationDaysThreshold: 0, isClosedWon: false, isClosedLost: true, requiresApproval: false },
+  ],
+  RENEWALS: [
+    { name: 'Renewal Audit & Loss Review (T-90d)', winProbabilityPct: 30, stagnationDaysThreshold: 10, isClosedWon: false, isClosedLost: false, requiresApproval: false },
+    { name: 'Expiring Carrier Terms / Market Re-tender (T-60d)', winProbabilityPct: 50, stagnationDaysThreshold: 14, isClosedWon: false, isClosedLost: false, requiresApproval: false },
+    { name: 'Renewal Terms Presentation (T-30d)', winProbabilityPct: 70, stagnationDaysThreshold: 7, isClosedWon: false, isClosedLost: false, requiresApproval: false },
+    { name: 'Client Renewal Sign-Off (T-15d)', winProbabilityPct: 90, stagnationDaysThreshold: 5, isClosedWon: false, isClosedLost: false, requiresApproval: false },
+    { name: 'Policy Renewed & Re-Invoiced', winProbabilityPct: 100, stagnationDaysThreshold: 0, isClosedWon: true, isClosedLost: false, requiresApproval: false },
+    { name: 'Lapsed / Lost to Competitor', winProbabilityPct: 0, stagnationDaysThreshold: 0, isClosedWon: false, isClosedLost: true, requiresApproval: false },
+  ],
+  CLAIMS: [
+    { name: 'Claim Notified', winProbabilityPct: 20, stagnationDaysThreshold: 7 },
+    { name: 'Surveyor Assigned', winProbabilityPct: 40, stagnationDaysThreshold: 14 },
+    { name: 'Adjuster Assessment', winProbabilityPct: 60, stagnationDaysThreshold: 30 },
+    { name: 'Underwriter Settlement', winProbabilityPct: 80, stagnationDaysThreshold: 30 },
+    { name: 'Cheque Dispatched', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
+  ],
+};
+
+const LEGACY_STAGE_ALIASES: Record<string, Record<string, string>> = {
+  COMMERCIAL: {
+    'Lead Identified': 'Fact-Finding & Risk Survey',
+    'Contact Made': 'Market Tender & Placing Slip Submission',
+    'Key Person Identified': 'Market Tender & Placing Slip Submission',
+    Quoted: 'Comparative Analysis & Presentation',
+    'Internal Slip': 'Underwriter Negotiation & Structuring',
+    'Closed-Won': 'Policy Bound / Won',
+    'Policy Bound / Won': 'Policy Bound / Won',
+    'Closed-Lost': 'Lost / Market Declined',
+    'Market Placement / Tender': 'Market Tender & Placing Slip Submission',
+    'Qualified (Discovery)': 'Fact-Finding & Risk Survey',
+    'Proposal / Business Case': 'Comparative Analysis & Presentation',
+    'Quote Comparison Presented': 'Comparative Analysis & Presentation',
+    'Negotiation & Legal': 'Underwriter Negotiation & Structuring',
+  },
+  SME_VELOCITY: {
+    'Intake & Rating': 'Intake & Automated Rating',
+    Quoted: 'Standard Package Quoted',
+    'Payment & Immediate Cover': 'Payment & Immediate Cover',
+    'Closed-Lost': 'Closed-Lost',
+  },
+  RENEWALS: {
+    'T-90d Audit': 'Renewal Audit & Loss Review (T-90d)',
+    'T-60d Re-tender': 'Expiring Carrier Terms / Market Re-tender (T-60d)',
+    'T-30d Presentation': 'Renewal Terms Presentation (T-30d)',
+    'T-15d Sign-Off': 'Client Renewal Sign-Off (T-15d)',
+    'Renewed & Re-Invoiced': 'Policy Renewed & Re-Invoiced',
+    'Closed-Lost': 'Lapsed / Lost to Competitor',
+  },
+};
+
+function canonicalStageName(pipelineCode: string | undefined, stageName: string): string {
+  const value = stageName.trim();
+  if (!pipelineCode) return value;
+  const aliases = LEGACY_STAGE_ALIASES[pipelineCode.toUpperCase()];
+  return aliases?.[value] ?? value;
+}
+
+function migratePipelineStageData(pipelines: Pipeline[], pipelineStages: PipelineStage[], deals: Deal[]) {
+  const normalizedDeals = deals.map((deal) => {
+    const pipeline = pipelines.find((item) => item.id === deal.pipelineId);
+    const canonicalName = pipeline ? canonicalStageName(pipeline.code, deal.stage) : deal.stage;
+    return canonicalName && canonicalName !== deal.stage ? { ...deal, stage: canonicalName } : deal;
+  });
+
+  const dedupedStages = [...pipelineStages];
+  const seen = new Map<string, PipelineStage>();
+  for (const stage of dedupedStages) {
+    const slug = `${stage.pipelineId}:${stage.name.trim().toLowerCase()}`;
+    if (!seen.has(slug)) {
+      seen.set(slug, stage);
+    }
+  }
+
+  for (const pipeline of pipelines) {
+    const code = pipeline.code.toUpperCase();
+    const seed = PIPELINE_TEMPLATE_STAGE_SEEDS[code];
+    if (!seed) continue;
+    const pipelineStagesForPipeline = dedupedStages.filter((stage) => stage.pipelineId === pipeline.id);
+    for (let index = 0; index < seed.length; index += 1) {
+      const templateStage = seed[index];
+      const match = pipelineStagesForPipeline.find((stage) => {
+        const migratedName = canonicalStageName(code, stage.name);
+        return migratedName === templateStage.name;
+      });
+      if (!match) {
+        dedupedStages.push({
+          id: `stage-${crypto.randomUUID()}`,
+          pipelineId: pipeline.id,
+          name: templateStage.name,
+          stageOrder: index + 1,
+          winProbabilityPct: templateStage.winProbabilityPct,
+          stagnationDaysThreshold: templateStage.stagnationDaysThreshold,
+          isClosedWon: templateStage.isClosedWon,
+          isClosedLost: templateStage.isClosedLost,
+          requiresApproval: templateStage.requiresApproval,
+        });
+      }
+    }
+  }
+
+  const cleanedStages: PipelineStage[] = [];
+  const cleanedSeen = new Set<string>();
+  for (const stage of dedupedStages) {
+    const slug = `${stage.pipelineId}:${canonicalStageName(
+      pipelines.find((pipeline) => pipeline.id === stage.pipelineId)?.code,
+      stage.name,
+    ).trim().toLowerCase()}`;
+    if (cleanedSeen.has(slug)) continue;
+    cleanedSeen.add(slug);
+    cleanedStages.push({ ...stage, name: canonicalStageName(
+      pipelines.find((pipeline) => pipeline.id === stage.pipelineId)?.code,
+      stage.name,
+    ) });
+  }
+  const normalizedStages = cleanedStages.map((stage) => {
+    const pipelineCode = pipelines.find((pipeline) => pipeline.id === stage.pipelineId)?.code.toUpperCase();
+    const templateStage = pipelineCode
+      ? PIPELINE_TEMPLATE_STAGE_SEEDS[pipelineCode]?.[stage.stageOrder - 1]
+      : undefined;
+    return templateStage ? {
+      ...stage,
+      isClosedWon: templateStage.isClosedWon,
+      isClosedLost: templateStage.isClosedLost,
+      requiresApproval: templateStage.requiresApproval,
+    } : stage;
+  });
+  normalizedStages.sort((left, right) => left.pipelineId.localeCompare(right.pipelineId) || left.stageOrder - right.stageOrder);
+
+  return { deals: normalizedDeals, pipelineStages: normalizedStages };
+}
+
 const DEFAULT_EMAIL_TEMPLATES = Object.fromEntries([
   'Renewal Reminder (30/60/90)', 'Quotation Sent', 'Invoice Issued', 'Payment Receipt', 'Payment Overdue',
 ].map((name) => [name, '']));
@@ -295,6 +455,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [customerLookups, setCustomerLookups] = useState<CustomerLookups>(createDefaultCustomerLookups);
   const [products, setProducts] = useState<ProductCode[]>(() => PRODUCT_CODES.map((product) => ({ ...product, id: product.code })));
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [quotationRequests, setQuotationRequests] = useState<QuotationRequest[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -307,7 +469,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [dataReady, setDataReady] = useState(AUTH_BYPASS);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
-  const auditSnapshot = useRef<{ leads: Lead[]; deals: Deal[]; clients: Client[] } | null>(null);
+  const auditSnapshot = useRef<{
+    leads: Lead[];
+    deals: Deal[];
+    clients: Client[];
+    vendors: Vendor[];
+    quotationRequests: QuotationRequest[];
+  } | null>(null);
   const auditUserId = useRef('');
   const setViewAsRole = useCallback((role: Role | null) => {
     if (user.role !== 'admin' && !AUTH_BYPASS) return;
@@ -401,6 +569,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setDeals([]);
       setClients([]);
       setActivities([]);
+      setVendors([]);
+      setQuotationRequests([]);
       setPipelines([]);
       setPipelineStages([]);
       setStageHistory([]);
@@ -456,6 +626,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCustomerLookups(createDefaultCustomerLookups());
     setProducts(PRODUCT_CODES.map((product) => ({ ...product, id: product.code })));
     setActivities([]);
+    setVendors([]);
+    setQuotationRequests([]);
     setDeals([]);
     setInvoices([]);
     setPayments([]);
@@ -509,19 +681,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const loadedClients = asArray<Client>(records, 'clients');
         const loadedDeals = asArray<Deal>(records, 'deals');
         const leadsWithHistory = hydrateLeadStageHistory(loadedLeads, leadStageHistory);
-        const contactsReconciled = reconcileContactAssociations(leadsWithHistory, loadedClients, loadedDeals);
+        const rawPipelines = asArray<Pipeline>(records, 'pipelines');
+        const rawPipelineStages = asArray<PipelineStage>(records, 'pipeline-stages');
+        const migrated = migratePipelineStageData(rawPipelines, rawPipelineStages, loadedDeals);
+        const linkedRecords = migrateDealLeadLinks(migrated.deals, leadsWithHistory, loadedClients);
+        const contactsReconciled = reconcileContactAssociations(linkedRecords.leads, loadedClients, linkedRecords.deals);
         setLeads(contactsReconciled.leads);
         setClients(contactsReconciled.clients);
         const customerLookupsRecord = records.find((record) => record.resource === 'customer-lookups');
         setCustomerLookups(mergeCustomerLookups(customerLookupsRecord?.data.options));
         const savedProducts = asArray<ProductCode>(records, 'products');
         setProducts(savedProducts.length > 0 ? savedProducts.map(normalizeProduct) : PRODUCT_CODES.map((product) => ({ ...product, id: product.code })));
+        const rawVendors = asArray<Vendor>(records, 'vendors');
+        setQuotationRequests(asArray<QuotationRequest>(records, 'quotation-requests'));
         setActivities(asArray<Activity>(records, 'activities'));
-        setDeals(loadedDeals);
+        const vendorMigration = migrateVendorData(rawVendors, linkedRecords.deals, loadedClients);
+        setDeals(vendorMigration.deals);
+        setVendors(vendorMigration.vendors);
+        setPipelines(rawPipelines);
+        setPipelineStages(migrated.pipelineStages);
         setInvoices(asArray<Invoice>(records, 'invoices'));
         setPayments(asArray<Payment>(records, 'payments'));
-        setPipelines(asArray<Pipeline>(records, 'pipelines'));
-        setPipelineStages(asArray<PipelineStage>(records, 'pipeline-stages'));
         setStageHistory(asArray<StageHistoryAudit>(records, 'stage-history'));
         const companyRecord = records.find((record) => record.resource === 'company');
         setCompany(companyRecord ? companyRecord.data as typeof COMPANY : COMPANY);
@@ -552,6 +732,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       'customer-lookups': [customerLookupRecord(customerLookups)],
       products,
       activities,
+      vendors,
+      'quotation-requests': quotationRequests,
       deals,
       invoices,
       payments,
@@ -564,7 +746,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     const writableByRole: Record<Role, string[]> = {
       admin: Object.keys(allResources),
-      sales: ['leads', 'clients', 'customer-lookups', 'activities', 'deals', 'stage-history', 'lead-stage-history'],
+      sales: ['leads', 'clients', 'customer-lookups', 'activities', 'vendors', 'quotation-requests', 'deals', 'stage-history', 'lead-stage-history'],
       finance: ['invoices', 'payments'],
       client: [],
     };
@@ -591,7 +773,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }, 500);
     return () => window.clearTimeout(timer);
   }, [
-    dataReady, user.id, user.role, taxRates, leads, clients, activities, deals,
+    dataReady, user.id, user.role, taxRates, leads, clients, activities, vendors, quotationRequests, deals,
     invoices, payments, pipelines, pipelineStages, stageHistory, company, emailTemplates, customerLookups, products,
   ]);
 
@@ -603,7 +785,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     if (!auditSnapshot.current || auditUserId.current !== user.id) {
-      auditSnapshot.current = { leads, deals, clients };
+      auditSnapshot.current = { leads, deals, clients, vendors, quotationRequests };
       auditUserId.current = user.id;
       return;
     }
@@ -656,11 +838,63 @@ export function AppProvider({ children }: { children: ReactNode }) {
         actorName: user.name,
       }];
     });
+    const vendorAudits = vendors.flatMap((vendor) => {
+      const oldVendor = previous.vendors.find((item) => item.id === vendor.id);
+      if (!oldVendor) return [{
+        id: `audit-${crypto.randomUUID()}`,
+        clientId: '',
+        type: 'note' as const,
+        title: 'Vendor created',
+        description: `Vendor created: ${vendor.name}`,
+        date: now,
+        createdAt: now,
+        userId: user.id,
+        actorName: user.name,
+      }];
+      const changedFields = (['name', 'vendorType', 'country', 'currency', 'status', 'phone', 'email', 'notes'] as const)
+        .filter((field) => JSON.stringify(oldVendor[field]) !== JSON.stringify(vendor[field]));
+      if (!changedFields.length) return [];
+      return [{
+        id: `audit-${crypto.randomUUID()}`,
+        clientId: '',
+        type: 'note' as const,
+        title: 'Vendor updated',
+        description: changedFields.map((field) => `${auditFieldName(field)}: ${auditValue(oldVendor[field])} → ${auditValue(vendor[field])}`).join(' · '),
+        date: now,
+        createdAt: now,
+        userId: user.id,
+        actorName: user.name,
+      }];
+    });
 
-    auditSnapshot.current = { leads, deals, clients };
-    const audits = [...leadAudits, ...dealAudits, ...contactAudits];
+    const quotationRequestAudits = quotationRequests.flatMap((request) => {
+      const previousRequest = previous.quotationRequests.find((item) => item.id === request.id);
+      if (previousRequest && previousRequest.status === request.status) return [];
+      const isCreated = !previousRequest;
+      const vendorNames = request.vendorIds
+        .map((vendorId) => vendors.find((vendor) => vendor.id === vendorId)?.name)
+        .filter((name): name is string => Boolean(name));
+      return [{
+        id: `audit-${crypto.randomUUID()}`,
+        clientId: request.clientId,
+        leadId: request.leadId,
+        dealId: request.dealId,
+        type: 'note' as const,
+        title: isCreated ? 'Quotation request created' : 'Quotation request status changed',
+        description: isCreated
+          ? `${request.ref} created with status ${request.status}${vendorNames.length ? ` for ${vendorNames.join(', ')}` : ''}.`
+          : `${request.ref}: ${previousRequest.status} → ${request.status}`,
+        date: now,
+        createdAt: now,
+        userId: user.id,
+        actorName: user.name,
+      }];
+    });
+
+    auditSnapshot.current = { leads, deals, clients, vendors, quotationRequests };
+    const audits = [...leadAudits, ...dealAudits, ...contactAudits, ...vendorAudits, ...quotationRequestAudits];
     if (audits.length) setActivities((current) => [...audits, ...current]);
-  }, [clients, dataReady, deals, leads, user, setActivities]);
+  }, [clients, dataReady, deals, leads, quotationRequests, user, vendors, setActivities]);
 
   useEffect(() => {
     if (AUTH_BYPASS || authLoading || user.role !== 'admin' || user.id === DEMO_USER.id) return;
@@ -726,13 +960,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     user, authLoading, authError, viewAsRole, setViewAsRole,
     signIn, register, signOut, initializeSampleLeads, hasAccess,
     taxRates, setTaxRates, leads, setLeads, clients, setClients, customerLookups, setCustomerLookups, products, setProducts,
-    activities, setActivities,
+    activities, setActivities, vendors, setVendors, quotationRequests, setQuotationRequests,
     deals, setDeals, invoices, setInvoices, payments, setPayments, users, setUsers,
     createUser, updateUserProfile, company, setCompany, emailTemplates, setEmailTemplates, persistenceError,
     pipelines, setPipelines, pipelineStages, setPipelineStages, stageHistory, setStageHistory,
   }), [
     user, authLoading, authError, viewAsRole, setViewAsRole, signIn, register, signOut, initializeSampleLeads, hasAccess,
-    taxRates, leads, clients, customerLookups, products, activities, deals, invoices, payments, users,
+    taxRates, leads, clients, customerLookups, products, activities, vendors, quotationRequests, deals, invoices, payments, users,
     createUser, updateUserProfile, company, emailTemplates, persistenceError, pipelines, pipelineStages, stageHistory,
   ]);
 

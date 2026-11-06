@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { INSURERS, PRODUCT_CODES } from '../data/catalogs';
+import { PRODUCT_CODES } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import ActivityTimelineItem from '../components/ActivityTimelineItem';
@@ -19,7 +19,7 @@ import { formatStaffIdentifier } from '../utils/staff';
 import { hashParams } from '../utils/navigation';
 
 export default function ClientsPage() {
-  const { clients, setClients, leads, setLeads, deals, setDeals, invoices, activities, setActivities, user, users } = useApp();
+  const { clients, setClients, leads, setLeads, deals, setDeals, invoices, activities, setActivities, user, users, vendors } = useApp();
   const [selectedId, setSelectedId] = useState('');
   const [portalClientId, setPortalClientId] = useState(user.clientId ?? '');
   const [query, setQuery] = useState('');
@@ -635,7 +635,7 @@ export default function ClientsPage() {
             <Modal open={quoteOpen} onClose={() => setQuoteOpen(false)} title="Create Quote" subtitle={`Prepare a quote for ${selected?.name ?? ''}.`} footer={<><button type="button" className="btn-ghost" onClick={() => setQuoteOpen(false)}>Cancel</button><button type="submit" form="new-quote-form" className="btn-primary">Save Quote</button></>}>
               <form id="new-quote-form" onSubmit={(event) => addActivity(event, 'quote')} className="space-y-3">
                 <Field label="Product"><select className="input" name="title" required defaultValue=""><option value="">Select product</option>{PRODUCT_CODES.map((product) => <option key={product.code} value={`${product.name} quote`}>{product.code} · {product.name}</option>)}</select></Field>
-                <Field label="Insurer"><select className="input" name="insurer" required defaultValue=""><option value="">Select insurer</option>{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
+                <Field label="Insurer"><select className="input" name="insurer" required defaultValue=""><option value="">Select insurer</option>{vendors.filter((vendor) => ['Insurer', 'Reinsurer'].includes(vendor.vendorType) && vendor.status === 'active').map((vendor) => <option key={vendor.id} value={vendor.name}>{vendor.name}</option>)}</select></Field>
                 <Field label="Currency"><select className="input" name="currency" required value={quoteCurrency} onChange={(event) => { const currency = event.target.value as Currency | ''; setQuoteCurrency(currency); setQuoteAmount(''); setQuoteExchangeRate(currency === 'USD' ? String(DEFAULT_USD_TO_MVR_RATE) : ''); }}><option value="">Select currency</option><option value="MVR">MVR</option><option value="USD">USD</option></select></Field>
                 <Field label={`Premium${quoteCurrency ? ` (${quoteCurrency})` : ''}`}><input className="input" name="premium" type="number" min="0" step="0.01" required value={quoteAmount} onChange={(event) => setQuoteAmount(event.target.value)} /></Field>
                 {quoteCurrency === 'USD' && <Field label="Exchange rate (1 USD = MVR)"><input className="input" name="exchangeRate" type="number" min="0.000001" step="any" required value={quoteExchangeRate} onChange={(event) => setQuoteExchangeRate(event.target.value)} /></Field>}

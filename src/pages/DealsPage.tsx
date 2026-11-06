@@ -1,5 +1,4 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { INSURERS } from '../data/catalogs';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
 import { Plus, Filter, X } from 'lucide-react';
@@ -20,9 +19,11 @@ import {
 import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
 import DealWorkspace from './DealWorkspace';
 import { TENANT_ID } from '../lib/supabase';
+import { linkDealToLead } from '../utils/dealFactory';
+import { isTerminalDealStage, isWonPipelineStage } from '../utils/stageSla';
 
 export default function DealsPage() {
-  const { deals, setDeals, setLeads, clients, setClients, user, viewAsRole, pipelines, pipelineStages, products, invoices, setStageHistory } = useApp();
+  const { deals, setDeals, leads, setLeads, clients, setClients, user, viewAsRole, pipelines, pipelineStages, products, invoices, setStageHistory, vendors, users, quotationRequests } = useApp();
   const [createOpen, setCreateOpen] = useState(false);
   const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
   const [createPipelineId, setCreatePipelineId] = useState('');
@@ -33,6 +34,7 @@ export default function DealsPage() {
   const [exchangeRate, setExchangeRate] = useState('');
   const [createError, setCreateError] = useState('');
   const [dealClient, setDealClient] = useState('');
+  const [dealVendorId, setDealVendorId] = useState('');
   const [dealInsurer, setDealInsurer] = useState('');
   const [dealProbability, setDealProbability] = useState('');
   const [dealIntent, setDealIntent] = useState<Deal['intentTier']>('P3');
@@ -44,7 +46,18 @@ export default function DealsPage() {
   const [dealSource, setDealSource] = useState('');
   const [dealNotes, setDealNotes] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
+  const [legacyImportOpen, setLegacyImportOpen] = useState(false);
+  const [legacyRemark, setLegacyRemark] = useState('');
+  const [legacyError, setLegacyError] = useState('');
+  const [legacyPipelineId, setLegacyPipelineId] = useState('');
+  const [legacyClientId, setLegacyClientId] = useState('');
+  const [legacyVendorId, setLegacyVendorId] = useState('');
+  const [legacyOwnerId, setLegacyOwnerId] = useState(user.id);
   const [stageFilter, setStageFilter] = useState(() => hashParams().get('stage') ?? '');
+  const [pipelineFilter, setPipelineFilter] = useState('');
+  const [ownerFilter, setOwnerFilter] = useState('');
+  const [vendorFilter, setVendorFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [dealFilter, setDealFilter] = useState(() => hashParams().get('filter') ?? '');
   const [dealIdFilter, setDealIdFilter] = useState(() => hashParams().get('id') ?? '');
   useEffect(() => {
@@ -58,16 +71,28 @@ export default function DealsPage() {
     return () => window.removeEventListener('hashchange', applyHashFilters);
   }, []);
   const visibleDeals = deals.filter((deal) => {
+    if (pipelineFilter && deal.pipelineId !== pipelineFilter) return false;
     if (stageFilter && deal.stage !== stageFilter) return false;
+    if (ownerFilter && deal.ownerId !== ownerFilter) return false;
+    if (vendorFilter && deal.vendorId !== vendorFilter) return false;
+    const configuredStage = pipelineStages.find((stage) => stage.pipelineId === deal.pipelineId && stage.name === deal.stage);
+    if (statusFilter === 'open' && isTerminalDealStage(deal.stage, deal.disposition, configuredStage)) return false;
+    if (statusFilter === 'won' && !(deal.disposition === 'won' || configuredStage?.isClosedWon || (!configuredStage && isWonPipelineStage(deal.stage)))) return false;
+    if (statusFilter === 'lost' && !(deal.disposition === 'lost' || configuredStage?.isClosedLost)) return false;
     if (dealIdFilter && deal.id !== dealIdFilter) return false;
     if (dealFilter === 'won') {
       if (deal.disposition) return deal.disposition === 'won';
-      const stage = deal.stage.trim().toLowerCase();
-      return stage.includes('won') || stage.includes('bound') || stage.includes('renewed') || stage === 'policy issued';
+      return deal.disposition === 'won' || configuredStage?.isClosedWon || (!configuredStage && isWonPipelineStage(deal.stage));
     }
     return true;
   });
   const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
+  const insurerOptions = vendors.filter((vendor) => ['Insurer', 'Reinsurer'].includes(vendor.vendorType) && vendor.status === 'active');
+  useEffect(() => {
+    if (!legacyPipelineId && activePipelines[0]) setLegacyPipelineId(activePipelines[0].id);
+    if (!legacyClientId && clients[0]) setLegacyClientId(clients[0].id);
+    if (!legacyVendorId && insurerOptions[0]) setLegacyVendorId(insurerOptions[0].id);
+  }, [activePipelines, clients, insurerOptions, legacyClientId, legacyPipelineId, legacyVendorId]);
   const availableStages = pipelineStages
     .filter((stage) => stage.pipelineId === createPipelineId)
     .sort((a, b) => a.stageOrder - b.stageOrder);
@@ -80,25 +105,71 @@ export default function DealsPage() {
       setSelectedStageId(firstStage.id);
     }
   }, [availableStages, selectedStageId]);
-  const openCreate = () => {
-    setEditingDeal(null);
-    setCreatePipelineId('');
-    setSelectedProduct(undefined);
-    setSelectedStageId('');
-    setDealCurrency('');
-    setDealAmount('');
-    setExchangeRate('');
-    setCreateError('');
-    setDealClient('');
-    setDealInsurer('');
-    setDealProbability('');
-    setDealIntent('P3');
-    setDealCloseDate('');
-    setDealNextActivityAt('');
-    setDealNextActivityTitle('');
-    setDealSource('');
-    setDealNotes('');
-    setCreateOpen(true);
+  const openLegacyImport = () => {
+    if (!['admin', 'sales'].includes(viewAsRole ?? user.role)) return;
+    setLegacyPipelineId(activePipelines[0]?.id ?? '');
+    setLegacyClientId(clients[0]?.id ?? '');
+    setLegacyVendorId(insurerOptions[0]?.id ?? '');
+    setLegacyOwnerId(user.id);
+    setLegacyRemark('');
+    setLegacyError('');
+    setLegacyImportOpen(true);
+  };
+
+  const submitLegacyImport = () => {
+    if (!['admin', 'sales'].includes(viewAsRole ?? user.role)) return;
+    if (!legacyClientId || !legacyPipelineId || !legacyRemark.trim()) {
+      setLegacyError('Select a client and pipeline and enter a remark before importing.');
+      return;
+    }
+    const pipeline = pipelines.find((item) => item.id === legacyPipelineId) ?? activePipelines[0];
+    const stage = pipelineStages.filter((item) => item.pipelineId === pipeline?.id).sort((left, right) => left.stageOrder - right.stageOrder)[0];
+    const client = clients.find((item) => item.id === legacyClientId);
+    if (!pipeline || !stage || !client) {
+      setLegacyError('Choose a valid client and pipeline with at least one configured stage.');
+      return;
+    }
+    const now = new Date().toISOString();
+    const dealId = `deal-${crypto.randomUUID()}`;
+    const product = products.find((item) => item.code === client.productCode);
+    const linked = linkDealToLead({
+      id: dealId,
+      pipelineId: pipeline.id,
+      client: client.name,
+      clientId: client.id,
+      product: product?.name ?? client.productCode ?? 'Legacy import',
+      productCode: product?.code ?? client.productCode ?? 'MOTOR',
+      value: 0,
+      weighted: 0,
+      currency: 'MVR',
+      stage: stage.name,
+      probability: stage.winProbabilityPct,
+      ownerId: legacyOwnerId,
+      closeDate: client.expiry ?? now.slice(0, 10),
+      insurer: insurerOptions.find((vendor) => vendor.id === legacyVendorId)?.name ?? client.insurer ?? 'Not assigned',
+      vendorId: legacyVendorId || undefined,
+      source: 'Legacy import',
+      notes: legacyRemark.trim(),
+      proposalSummary: legacyRemark.trim(),
+      createdAt: now,
+      stageChangedAt: now,
+    }, undefined, { source: 'Legacy import', client });
+    setLeads((current) => [linked.lead, ...current]);
+    setDeals((current) => [linked.deal, ...current]);
+    setStageHistory((current) => [...current, {
+      id: `stage-${crypto.randomUUID()}`,
+      tenantId: TENANT_ID,
+      dealId: dealId,
+      fromStageId: null,
+      toStageId: stage.id,
+      enteredAt: now,
+      exitedAt: null,
+      durationSeconds: null,
+      details: `Legacy import comment: ${legacyRemark.trim()}`,
+    }]);
+    setLegacyImportOpen(false);
+    setLegacyRemark('');
+    setLegacyError('');
   };
 
   const openEditDeal = (deal: Deal) => {
@@ -110,6 +181,9 @@ export default function DealsPage() {
     setDealAmount(formatCurrencyInputForDisplay(String(deal.value)));
     setExchangeRate(deal.currency === 'USD' ? String(deal.exchangeRate ?? DEFAULT_USD_TO_MVR_RATE) : '');
     setDealClient(deal.client);
+    const matchedVendor = vendors.find((vendor) => vendor.id === deal.vendorId)
+      ?? vendors.find((vendor) => vendor.name.trim().toLowerCase() === deal.insurer.trim().toLowerCase());
+    setDealVendorId(matchedVendor?.id ?? '');
     setDealInsurer(deal.insurer);
     setDealProbability(String(deal.probability));
     setDealIntent(deal.intentTier ?? 'P3');
@@ -125,13 +199,26 @@ export default function DealsPage() {
   const requestDeleteDeal = (deal: Deal) => {
     if ((viewAsRole ?? user.role) !== 'admin') return;
     if (deal.linkedInvoiceId || invoices.some((invoice) => invoice.linkedDealId === deal.id)) return;
+    const hasLinkedRecord = leads.some((lead) => lead.id === deal.leadId || lead.dealId === deal.id)
+      || quotationRequests.some((request) => request.dealId === deal.id);
+    if (hasLinkedRecord) {
+      window.alert('This Deal cannot be deleted because it has a linked Lead or quotation request.');
+      return;
+    }
     setPendingDealDeletion(deal);
   };
 
   const requestDeleteLead = (lead: Lead) => {
     if ((viewAsRole ?? user.role) !== 'admin') return;
-    if (deals.some((deal) => deal.id === lead.dealId || deal.leadId === lead.id)) {
-      window.alert('This Lead cannot be deleted because it has an associated Deal. Reassign or delete the associated Deal first.');
+    const linkedDealIds = new Set(deals
+      .filter((deal) => deal.id === lead.dealId || deal.leadId === lead.id)
+      .map((deal) => deal.id));
+    if (lead.dealId) linkedDealIds.add(lead.dealId);
+    const linkedRequest = quotationRequests.some((request) => request.leadId === lead.id || linkedDealIds.has(request.dealId));
+    if (deals.some((deal) => deal.id === lead.dealId || deal.leadId === lead.id) || linkedRequest) {
+      window.alert(linkedRequest
+        ? 'This Lead cannot be deleted because it has a linked quotation request.'
+        : 'This Lead cannot be deleted because it has an associated Deal. Reassign or delete the associated Deal first.');
       return;
     }
     setPendingLeadDeletion(lead);
@@ -139,6 +226,15 @@ export default function DealsPage() {
 
   const confirmDeleteLead = () => {
     if (!pendingLeadDeletion || (viewAsRole ?? user.role) !== 'admin') return;
+    const linkedDealIds = new Set(deals
+      .filter((deal) => deal.id === pendingLeadDeletion.dealId || deal.leadId === pendingLeadDeletion.id)
+      .map((deal) => deal.id));
+    if (pendingLeadDeletion.dealId) linkedDealIds.add(pendingLeadDeletion.dealId);
+    if (quotationRequests.some((request) => request.leadId === pendingLeadDeletion.id || linkedDealIds.has(request.dealId))) {
+      window.alert('This Lead cannot be deleted while it is linked to a quotation request.');
+      setPendingLeadDeletion(null);
+      return;
+    }
     setClients((current) => current.map((client) => ({
       ...client,
       contacts: (client.contacts ?? []).map((contact) => ({
@@ -153,6 +249,12 @@ export default function DealsPage() {
   const confirmDeleteDeal = () => {
     if (!pendingDealDeletion || (viewAsRole ?? user.role) !== 'admin') return;
     const dealId = pendingDealDeletion.id;
+    if (leads.some((lead) => lead.id === pendingDealDeletion.leadId || lead.dealId === dealId)
+      || quotationRequests.some((request) => request.dealId === dealId)) {
+      window.alert('This Deal cannot be deleted while it has a linked Lead or quotation request.');
+      setPendingDealDeletion(null);
+      return;
+    }
     setDeals((current) => current.filter((deal) => deal.id !== dealId));
     setClients((current) => current.map((client) => ({
       ...client,
@@ -176,6 +278,10 @@ export default function DealsPage() {
 
   const createDeal = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!editingDeal) {
+      setCreateError('Deals must be created by converting a lead or importing a legacy deal.');
+      return;
+    }
     const data = new FormData(event.currentTarget);
     const value = parseCurrencyInput(dealAmount);
     const closeDate = dealCloseDate;
@@ -186,7 +292,10 @@ export default function DealsPage() {
     const dealTelegram = String(data.get('telegram') ?? '').trim();
     const selectedStage = availableStages.find((stage) => stage.id === selectedStageId);
     const probability = selectedStage?.winProbabilityPct ?? Number(dealProbability);
-    if (!dealClient.trim() || !dealInsurer.trim() || !selectedProduct || !createPipelineId || !selectedStageId || !dealCurrency || !dealCloseDate || !dealProbability) {
+    const selectedInsurer = insurerOptions.find((vendor) => vendor.id === dealVendorId)
+      ?? insurerOptions.find((vendor) => vendor.name.trim().toLowerCase() === dealInsurer.trim().toLowerCase());
+    const resolvedInsurerName = selectedInsurer?.name.trim() || dealInsurer.trim();
+    if (!dealClient.trim() || !resolvedInsurerName || !selectedProduct || !createPipelineId || !selectedStageId || !dealCurrency || !dealCloseDate || !dealProbability) {
       setCreateError('Complete Client, Insurer, Insurance Product, Pipeline, Stage, Currency, Insured Value, Probability, and Expected Close Date.');
       return;
     }
@@ -213,11 +322,6 @@ export default function DealsPage() {
       setCreateError('Move deal stages from the workspace stepper so compliance checks, audit history, and binding actions are applied.');
       return;
     }
-    if (!editingDeal && selectedStage
-      && /(lost|declined|bound|won|renewed|immediate cover|policy issued)/i.test(selectedStage.name)) {
-      setCreateError('New deals must start in an open placement stage. Use the workspace to close or bind a deal.');
-      return;
-    }
     const normalizedCloseDate = normalizeDateInput(closeDate);
     if (!normalizedCloseDate) {
       setCreateError('Enter a valid expected close date in DD-MMM-YYYY format.');
@@ -233,7 +337,7 @@ export default function DealsPage() {
     const nextActivityCreatedAt = hasNextActivity
       ? sameNextActivity ? editingDeal?.nextActivityCreatedAt ?? now : now
       : undefined;
-    const dealId = editingDeal?.id ?? `d-${Date.now()}`;
+    const dealId = editingDeal.id;
     const dealClientRecord = clients.find((client) => client.name === dealClient.trim());
     const contactName = String(data.get('contactName') ?? '').trim();
     const contactEmail = String(data.get('contactEmail') ?? '').trim();
@@ -257,8 +361,9 @@ export default function DealsPage() {
       linkedDealIds: matchingContact?.linkedDealIds ?? [],
     } : undefined;
     const deal: Deal = {
-      ...(editingDeal ?? {}),
+      ...editingDeal,
       id: dealId,
+      leadId: editingDeal.leadId,
       pipelineId: String(data.get('pipelineId')),
       createdAt: editingDeal?.createdAt ?? now,
       stageChangedAt: !editingDeal || (stage && editingDeal.stage !== stage.name)
@@ -278,7 +383,8 @@ export default function DealsPage() {
       probability,
       ownerId: user.id,
       closeDate: normalizedCloseDate,
-      insurer: dealInsurer.trim(),
+      insurer: resolvedInsurerName,
+      vendorId: selectedInsurer?.id ?? editingDeal?.vendorId ?? undefined,
       contactName,
       contactEmail,
       contactPhone: dealPhone,
@@ -294,7 +400,7 @@ export default function DealsPage() {
       nextActivityTitle,
       nextActivityCreatedAt,
     };
-    setDeals(editingDeal ? deals.map((item) => item.id === editingDeal.id ? deal : item) : [deal, ...deals]);
+    setDeals(deals.map((item) => item.id === editingDeal.id ? deal : item));
     setClients((current) => current.map((client) => {
       const contacts = (client.contacts ?? []).map((contact) => ({
         ...contact,
@@ -308,10 +414,8 @@ export default function DealsPage() {
           : contacts,
       };
     }));
-    if (stage && (!editingDeal || editingDeal.stage !== stage.name)) {
-      const previousStage = editingDeal
-        ? pipelineStages.find((item) => item.pipelineId === editingDeal.pipelineId && item.name === editingDeal.stage)
-        : undefined;
+    if (stage && editingDeal.stage !== stage.name) {
+      const previousStage = pipelineStages.find((item) => item.pipelineId === editingDeal.pipelineId && item.name === editingDeal.stage);
       setStageHistory((current) => [
         ...current.map((entry) => {
           if (entry.dealId !== deal.id || entry.exitedAt) return entry;
@@ -347,17 +451,25 @@ export default function DealsPage() {
         <div className="flex items-center gap-3">
           <div className="hidden text-right sm:block"><div className="text-[10px] text-muted">Open deals</div><div className="text-sm font-semibold text-white">{deals.length}</div></div>
           <button type="button" className="btn-ghost !py-1.5" onClick={() => setFilterOpen(true)}><Filter size={14} /> Filter</button>
-          <button type="button" className="btn-primary !py-1.5 !text-xs" onClick={openCreate} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding deals' : undefined}>+ Deal</button>
+          {['admin', 'sales'].includes(viewAsRole ?? user.role) && <button type="button" className="btn-primary !py-1.5 !text-xs" onClick={openLegacyImport} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before importing legacy deals' : undefined}>+ Legacy deal</button>}
         </div>
       </div>
-      <DealWorkspace deals={visibleDeals} onCreateDeal={openCreate} onEditDeal={openEditDeal} onDeleteLead={requestDeleteLead} onDeleteDeal={requestDeleteDeal} />
+      <DealWorkspace
+        deals={visibleDeals}
+        onEditDeal={openEditDeal}
+        onDeleteLead={requestDeleteLead}
+        onDeleteDeal={requestDeleteDeal}
+        onOpenFilters={() => setFilterOpen(true)}
+        pipelineFilter={pipelineFilter}
+        onPipelineFilterChange={setPipelineFilter}
+      />
 
       <Modal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        title={editingDeal ? 'Edit Deal' : 'Create Deal'}
-        subtitle={editingDeal ? 'Update the opportunity, financials, pipeline, and client context.' : 'Add a sales opportunity to the pipeline.'}
-        footer={<><button type="button" className="btn-ghost" onClick={() => { setCreateOpen(false); setEditingDeal(null); }}><X size={14} /> Cancel</button><button type="submit" form="new-deal-form" className="btn-primary">{editingDeal ? <><Plus size={14} /> Update Deal</> : '+ Deal'}</button></>}
+        title="Edit Deal"
+        subtitle="Update the opportunity, financials, pipeline, and client context."
+        footer={<><button type="button" className="btn-ghost" onClick={() => { setCreateOpen(false); setEditingDeal(null); }}><X size={14} /> Cancel</button><button type="submit" form="new-deal-form" className="btn-primary"><><Plus size={14} /> Update Deal</></button></>}
       >
         <form id="new-deal-form" onSubmit={createDeal} noValidate className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Type of Insurance Product *"><ProductSelect pipelines={pipelines} name="productCode" required value={selectedProduct?.code ?? ''} onChange={setSelectedProduct} /></Field>
@@ -367,7 +479,11 @@ export default function DealsPage() {
           </div>}
           <Field label="Pipeline"><select className="input" name="pipelineId" required value={createPipelineId} onChange={(event) => setCreatePipelineId(event.target.value)}><option value="">Select pipeline</option>{activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}</select></Field>
           <Field label="Client *"><select className="input" name="client" required value={dealClient} onChange={(event) => setDealClient(event.target.value)}><option value="">Select client</option>{clients.map((client) => <option key={client.id}>{client.name}</option>)}</select></Field>
-          <Field label="Insurer *"><select className="input" name="insurer" required value={dealInsurer} onChange={(event) => setDealInsurer(event.target.value)}><option value="">Select insurer</option>{INSURERS.map((insurer) => <option key={insurer.id}>{insurer.name}</option>)}</select></Field>
+          <Field label="Insurer *"><select className="input" name="insurer" required value={dealVendorId} onChange={(event) => {
+            const selected = insurerOptions.find((vendor) => vendor.id === event.target.value);
+            setDealVendorId(event.target.value);
+            setDealInsurer(selected?.name ?? '');
+          }}><option value="">Select insurer</option>{insurerOptions.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select></Field>
           <Field label="Primary contact"><input className="input" name="contactName" defaultValue={editingDeal?.contactName ?? ''} /></Field>
           <Field label="Contact email"><input className="input" name="contactEmail" type="email" defaultValue={editingDeal?.contactEmail ?? ''} /></Field>
           <Field label="Phone"><input className="input" name="contactPhone" type="tel" defaultValue={editingDeal?.contactPhone ?? ''} /></Field>
@@ -395,8 +511,30 @@ export default function DealsPage() {
           <Field label="Next activity"><input className="input" name="nextActivityTitle" value={dealNextActivityTitle} onChange={(event) => setDealNextActivityTitle(event.target.value)} placeholder="e.g. Call client for documents" maxLength={120} /></Field>
         </form>
       </Modal>
-      <Modal open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Deals" size="sm" footer={<><button className="btn-ghost" onClick={() => setStageFilter('')}>Clear</button><button className="btn-primary" onClick={() => setFilterOpen(false)}>Apply Filter</button></>}>
-        <Field label="Stage"><select className="input" value={stageFilter} onChange={(event) => setStageFilter(event.target.value)}><option value="">All stages</option>{[...new Set(deals.map((deal) => deal.stage))].map((stage) => <option key={stage}>{stage}</option>)}</select></Field>
+      <Modal open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Deals" size="sm" footer={<><button type="button" className="btn-ghost" onClick={() => { setPipelineFilter(''); setStageFilter(''); setOwnerFilter(''); setVendorFilter(''); setStatusFilter(''); }}>Clear</button><button type="button" className="btn-primary" onClick={() => setFilterOpen(false)}>Apply Filter</button></>}>
+        <div className="space-y-3">
+          <Field label="Pipeline"><select className="input" value={pipelineFilter} onChange={(event) => { setPipelineFilter(event.target.value); setStageFilter(''); }}><option value="">All pipelines</option>{activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}</select></Field>
+          <Field label="Stage"><select className="input" value={stageFilter} onChange={(event) => setStageFilter(event.target.value)}><option value="">All stages</option>{[...new Set(deals.filter((deal) => !pipelineFilter || deal.pipelineId === pipelineFilter).map((deal) => deal.stage))].map((stage) => <option key={stage}>{stage}</option>)}</select></Field>
+          <Field label="Owner"><select className="input" value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)}><option value="">All owners</option>{users.filter((member) => member.role === 'admin' || member.role === 'sales').map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></Field>
+          <Field label="Vendor"><select className="input" value={vendorFilter} onChange={(event) => setVendorFilter(event.target.value)}><option value="">All vendors</option>{vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select></Field>
+          <Field label="Status"><select className="input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option><option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option></select></Field>
+        </div>
+      </Modal>
+      <Modal
+        open={legacyImportOpen}
+        onClose={() => setLegacyImportOpen(false)}
+        title="Import legacy deal"
+        subtitle="Create a deal linked to a converted lead so the historical record remains on the lead/deal lifecycle."
+        footer={<><button type="button" className="btn-ghost" onClick={() => setLegacyImportOpen(false)}>Cancel</button><button type="button" className="btn-primary" onClick={submitLegacyImport} disabled={!legacyRemark.trim()}>Create legacy deal</button></>}
+      >
+        <div className="space-y-3">
+          <Field label="Client *"><select className="input" value={legacyClientId} onChange={(event) => setLegacyClientId(event.target.value)}><option value="">Select client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></Field>
+          <Field label="Pipeline *"><select className="input" value={legacyPipelineId} onChange={(event) => setLegacyPipelineId(event.target.value)}><option value="">Select pipeline</option>{activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}</select></Field>
+          <Field label="Insurer / vendor"><select className="input" value={legacyVendorId} onChange={(event) => setLegacyVendorId(event.target.value)}><option value="">Select insurer</option>{insurerOptions.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select></Field>
+          <Field label="Owner"><select className="input" value={legacyOwnerId} onChange={(event) => setLegacyOwnerId(event.target.value)}>{users.filter((member) => member.role === 'admin' || member.role === 'sales').map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></Field>
+          <Field label="Remark *"><textarea className="input min-h-20" required aria-required="true" value={legacyRemark} onChange={(event) => { setLegacyRemark(event.target.value); setLegacyError(''); }} placeholder="Why this legacy deal is being imported" /></Field>
+          {legacyError && <p role="alert" className="text-sm text-hot">{legacyError}</p>}
+        </div>
       </Modal>
       <Modal
         open={Boolean(pendingLeadDeletion)}

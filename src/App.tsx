@@ -5,6 +5,7 @@ import Topbar from './components/Topbar';
 import DashboardPage from './pages/DashboardPage';
 import LeadsPage from './pages/LeadsPage';
 import ClientsPage from './pages/ClientsPage';
+import VendorsPage from './pages/VendorsPage';
 import DealsPage from './pages/DealsPage';
 import InvoicesPage from './pages/InvoicesPage';
 import PaymentsPage from './pages/PaymentsPage';
@@ -25,6 +26,7 @@ const accessMap: Record<NavKey, Role[]> = {
   leads: ['admin', 'sales'],
   deals: ['admin', 'sales'],
   clients: ['admin', 'sales', 'finance', 'client'],
+  vendors: ['admin', 'sales', 'finance'],
   calendar: ['admin', 'sales'],
   reports: ['admin', 'finance'],
   documents: ['admin', 'sales', 'finance', 'client'],
@@ -137,6 +139,7 @@ function Shell() {
       case 'dashboard': return <DashboardPage />;
       case 'leads': return <LeadsPage />;
       case 'clients': return <ClientsPage />;
+      case 'vendors': return <VendorsPage />;
       case 'deals': return <DealsPage />;
       case 'invoices': return <InvoicesPage />;
       case 'payments': return <PaymentsPage />;

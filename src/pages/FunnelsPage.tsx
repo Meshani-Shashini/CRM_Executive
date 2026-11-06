@@ -2,15 +2,20 @@ import { useEffect, useMemo, useState } from 'react';
 import { BarChart3, TrendingDown } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import { useApp } from '../store/AppContext';
+import { isLostPipelineStage } from '../utils/stageSla';
 
-function isLostStage(name: string) {
-  const normalized = name.toLowerCase();
-  return (normalized.includes('lost') || normalized.includes('declined'))
-    && !(normalized.includes('policy bound') && normalized.includes('lost'));
+function isLostStage(stage: Parameters<typeof isLostPipelineStage>[0]) {
+  const isLost = isLostPipelineStage(stage);
+  const normalized = (typeof stage === 'string' ? stage : stage.name).toLowerCase();
+  return isLost && !(normalized.includes('policy bound') && normalized.includes('lost'));
 }
 
-function isCombinedDispositionStage(name: string) {
-  const normalized = name.toLowerCase();
+function isCombinedDispositionStage(stage: Parameters<typeof isLostPipelineStage>[0]) {
+  if (typeof stage !== 'string'
+    && (stage.isClosedWon !== undefined || stage.isClosedLost !== undefined)) {
+    return stage.isClosedWon === true && stage.isClosedLost === true;
+  }
+  const normalized = (typeof stage === 'string' ? stage : stage.name).toLowerCase();
   return normalized.includes('policy bound') && normalized.includes('lost');
 }
 
@@ -24,7 +29,7 @@ export default function FunnelsPage() {
   }, [pipelines, pipelineId]);
   const stages = useMemo(
     () => pipelineStages
-      .filter((stage) => stage.pipelineId === pipelineId && !isLostStage(stage.name) && stage.winProbabilityPct > 0)
+      .filter((stage) => stage.pipelineId === pipelineId && !isLostStage(stage) && stage.winProbabilityPct > 0)
       .sort((a, b) => a.stageOrder - b.stageOrder),
     [pipelineStages, pipelineId],
   );
@@ -51,8 +56,8 @@ export default function FunnelsPage() {
     };
   });
   const maxCount = Math.max(1, ...stageStats.map((item) => item.entered));
-  const lostStages = pipelineStages.filter((stage) => stage.pipelineId === pipelineId && isLostStage(stage.name));
-  const combinedStage = pipelineStages.find((stage) => stage.pipelineId === pipelineId && isCombinedDispositionStage(stage.name));
+  const lostStages = pipelineStages.filter((stage) => stage.pipelineId === pipelineId && isLostStage(stage));
+  const combinedStage = pipelineStages.find((stage) => stage.pipelineId === pipelineId && isCombinedDispositionStage(stage));
   const lostCount = new Set([
     ...stageHistory
       .filter((entry) => lostStages.some((stage) => stage.id === entry.toStageId))

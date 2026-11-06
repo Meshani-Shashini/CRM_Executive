@@ -18,6 +18,7 @@ const titles: Record<string, string> = {
   leads: 'Leads',
   deals: 'Deals',
   clients: 'Clients',
+  vendors: 'Vendors',
   calendar: 'Calendar',
   reports: 'Reports',
   documents: 'Documents',

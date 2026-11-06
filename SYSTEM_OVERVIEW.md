@@ -1,130 +1,416 @@
-# System overview
+# CRM Executive — System Overview
 
-## What this system does
+## 1. Purpose of the system
 
-The Insurance Brokers Management System (IBMS) is a browser-based CRM for an insurance brokerage. It provides interfaces for managing leads, clients, sales deals and pipelines, policy and finance records, and administration. The frontend is a React single-page application written in TypeScript and built with Vite. Supabase provides authentication, user profiles, database storage, and an Edge Function for administrator-created accounts.
+This project is a browser-based insurance brokerage CRM and sales operations platform. It manages lead intake, client records, lead-to-deal conversion, pipeline progression, financial records, user access, and operational activity tracking. The app is a React + TypeScript single-page application built with Vite and backed by Supabase for authentication and persistent tenant data.
 
-## How a session works
+From the code, the business domain is clearly insurance-focused and operationally sales-heavy. It supports multiple user roles, product and premium workflows, lead staging, communication validation, client onboarding, and downstream invoice/payment flows.
 
-1. `src/main.tsx` mounts the React app, and `src/App.tsx` wraps the application shell in `AppProvider`.
-2. With normal authentication, the provider restores any saved Supabase session and loads the associated user profile. The application shows a brief session-check screen while this runs. Without a signed-in user, it displays the login and client-registration screen.
-3. After login, the provider loads tenant records from Supabase. Pages use the shared state exposed by `useApp()`. With the local development demo bypass enabled, login uses the configured demo credentials, records remain empty and in memory, and remote persistence is skipped.
-4. The sidebar and dashboard drill-down links navigate using URL hashes such as `#/leads` or `#/leads?status=active`. The destination list view reads those query parameters and applies the requested filter. The shell checks the current user's role before showing a module; disallowed routes display an access-restricted message.
-5. In a normal Supabase session, changes to writable shared collections are debounced briefly, then synchronized through the `sync_tenant_records` RPC. Read or save errors are surfaced in the application shell.
+---
 
-## Main modules
+## 2. High-level architecture
 
-| Module | Current behavior |
-| --- | --- |
-| Dashboard | Summarizes current leads, deals, clients, activities, and team records; empty collections show empty-state messages. |
-| Leads | Admins and Sales can create and fully edit individual leads with sales representative and owner defaults, organization, primary contact details, WhatsApp and Telegram, title, source, notes, USD/MVR value, insurance product, expected close date, deal pipeline, and funnel stage. The dark Funnel view has six fixed sales stages, search, filters, and List/Forecast views; Contact Made and Intro Email Sent include MVR aggregates. Product selection fills Item Master risk and underwriting-intake details without creating product-specific pipelines. Lead conversion and qualification require complete company profiles and valid phone, WhatsApp, and Telegram details. Quick-created companies are tagged “New company additional information to be filled” until their required profile fields are completed. Lead deletion is blocked when an associated Deal exists and uses a confirmation dialog otherwise. |
-| Clients | Searches and creates insured-entity customer accounts with classification, MIRA/compliance, Maldives location, stakeholder, target portfolio, and next-action details; logs client activities and quote details. Administrators can edit client records; deletion is blocked by active linked Leads or Deals and linked Invoices, and valid deletions require confirmation. Client Portal users see and update contact details only for the client record linked to their profile. Custom dropdown values are persisted in the tenant-scoped `customer-lookups` collection. |
-| Deals | Provides a three-panel single-screen workspace for searching/filtering leads and deals, viewing placement/contact details and rich activity/stage history, progressing through a stage stepper, seeing compliance alerts and product intake requirements, comparing insurer quotes, logging meetings/notes, and binding policies. Quotation/tender progression validates phone, WhatsApp, and Telegram; lost outcomes require a reason. Binding creates a premium invoice and, when an expiry date is known, a renewal deal. |
-| Pipelines | Uses a shared product-filtered Primary Commercial Lines Placement Pipeline with 20/40/60/80/100/0% probabilities and 10/14/7/5-day open-stage SLAs. Separate Retail, SME & Velocity Packages and Annual Policy Renewals workflows support short-cycle placement and T-90/T-60/T-30/T-15 renewal stages. Stage history, SLA health, win/loss outcomes, and mandatory loss reasons are retained. |
-| Funnels | Calculates stage-entry and conversion metrics from deal stage history. |
-| Invoices and Payments | Creates invoices, records payments, calculates invoice totals, and updates invoice payment status. |
-| Settings | Provides administrator controls for company settings, tax rates, email templates, and user provisioning. Admins can edit user display names, job titles, and roles; raw account email addresses are hidden in the user list and auth email is not editable here. |
-| Calendar | Renders a calendar and upcoming-events area; no event collection is currently connected, so it starts empty. Calendar event dates use the shared date display formatter. |
-| MIRA Form 1 | Provides a report layout, date filters, print, and CSV export; its row collection is currently empty and not connected to CRM records. |
-| Quotation Request Slips | Shows an empty list and a request form; submitting the form currently closes it without persisting a slip. |
+### Frontend application layers
+- `src/App.tsx` creates the shell, routes between modules, and determines page access by role.
+- `src/store/AppContext.tsx` is the central application state provider that owns loading, persistence, authentication, and synchronization.
+- `src/pages/*.tsx` contains each area of the business system (dashboard, leads, clients, deals, invoices, payments, settings, calendar, pipelines, funnels, etc.).
+- `src/types.ts` defines the core business entities.
+- `src/utils/*.ts` contains reusable business logic related to insurance pricing, communication validation, date handling, lead lifecycle, staff formatting, and customer contact matching.
 
-## Current processes in the system
+### Data and persistence model
+The app stores most operational data in Supabase with a tenant-style record model. Records are synchronized through a generic `sync_tenant_records` RPC and are loaded into the application state. The system also has a local development demo mode with no remote persistence.
 
-The system is currently operating as an end-to-end insurance brokerage CRM with the following live business processes:
+Key persisted collections include:
+- leads
+- clients
+- activities
+- deals
+- invoices
+- payments
+- pipelines
+- pipeline stages
+- stage history
+- tax rates
+- company settings
+- email templates
+- customer lookup values
+- products
 
-1. Lead intake and qualification
-   - Sales staff create or import leads with company details, contact profiles, insurance class, product selection, expected close date, and sales owner.
-   - The system validates communication channels (phone, WhatsApp, Telegram) and checks whether the company profile is complete before a lead can be converted or progressed to a deal.
-   - Lead stage history, funnel stage, and temperature are tracked as the opportunity matures, and SLA health is calculated against configured pipeline targets.
+---
 
-2. Client onboarding and account management
-   - New customer accounts are created from leads or directly from the Clients module with entity details, stakeholder information, compliance checks, target portfolio, and next action.
-   - Client records can be linked to a portal user, allowing the client to update only their own contact details while staff manage the broader account records.
-   - Client profiles feed later deal work, renewals, and finance processes.
+## 3. User roles and permissions
 
-3. Deal creation and placement workflow
-   - Qualified leads are converted into deals in a dedicated deal workspace where the user can view lead details, placement notes, compliance alerts, insurer quotes, and stage history.
-   - Sales staff compare quotes, record meetings and notes, update the deal stage, and bind policies once the deal is ready.
-   - When the deal is won or bound, the system stores the outcome, updates stage history, and can generate the downstream finance and renewal records.
+The app defines four main roles:
+- `admin`
+- `sales`
+- `finance`
+- `client`
 
-4. Pipeline and SLA management
-   - Deals move through the canonical brokerage pipelines for commercial placements, SME/velocity packages, and annual renewals.
-   - Each stage records entry timestamps and current stage status, enabling SLA monitoring, overdue warnings, and win/loss tracking across the pipeline.
-   - Lost deals require a reason, while won or bound deals maintain a recorded disposition for reporting and follow-up.
+The shell uses an access map to decide which routes/modules are available to each user. Examples:
+- admin: all workspaces
+- sales: sales and lead/deal modules
+- finance: finance and reporting surfaces
+- client: narrower, client-facing data only
 
-5. Renewal and policy lifecycle tracking
-   - Policies with upcoming expiry dates are surfaced into renewal workflows.
-   - When a policy is renewed or a renewal deal is created, the system keeps the active renewal stage and records the progress through renewal checkpoints.
-   - Renewal tracking is coupled to the broader deal lifecycle so sales and operations can follow policy expiries and renewal opportunities.
+Role checks are enforced when rendering pages and when performing certain protected actions such as deleting leads or editing admin settings.
 
-6. Finance, invoice, and payment processing
-   - Once a policy is bound, the system can create premium invoices and record payments against them.
-   - Invoice status, outstanding totals, collected amounts, and overdue balances are tracked from the finance modules and summarized on the dashboard.
-   - The accounting process is tied back to the client and deal records so invoices remain linked to the commercial activity they support.
+---
 
-7. Administration and product configuration
-   - System Admins manage company settings, tax rates, user roles, and the shared product catalog.
-   - Product codes, brokerage percentages, and underwriting-intake metadata are maintained centrally and applied to leads and deals when a product is selected.
-   - The app also exposes funnel, pipeline, MIRA, and settings reporting views for operational monitoring and admin control.
+## 4. Authentication and session flow
 
-These processes are the current operational backbone of the product: lead capture, client/profile management, deal progression, renewal tracking, finance collection, and administrator configuration.
+### Normal mode
+When `AUTH_BYPASS` is false, the app:
+1. Checks the Supabase session using `supabase.auth.getSession()`.
+2. Subscribes to `supabase.auth.onAuthStateChange()` for sign-in, sign-out, token refresh, and user update events.
+3. Loads the user profile from `user_profiles` using the authenticated user ID.
+4. Builds a `User` object containing role and metadata.
+5. Allows the main shell to render the appropriate module.
 
-## Insurance product catalog and routing
+If there is no authenticated user, the app shows the login flow. If the user profile cannot be loaded, an auth error is surfaced to the user.
 
-The system includes all 49 products classified from `NM CODES.xlsx`. The shared product catalog in `src/data/catalogs.ts` and the tenant-scoped `public.policy_types` table contain product code, description, core industry class, standard brokerage percentage, statutory mandatory flag, sales-cycle velocity, risk level, and underwriting-intake artifacts. Product metadata is loaded into Lead and Deal selectors and displayed when a product is selected; product code filters the shared pipeline instead of routing products to separate pipelines. Administrators manage the matrix from Settings **Item / Product Management**; product codes are stored uppercase, product names are unique case-insensitively, brokerage percentages support up to two decimal places, and deletion is blocked for products linked to active Leads or Deals with a confirmation dialog for valid deletions.
+### Demo mode
+The code supports a development bypass (`AUTH_BYPASS`) when `VITE_AUTH_BYPASS=true` is set. In that mode:
+- a demo admin session is created locally
+- data stays in memory
+- no remote Supabase persistence occurs
+- authentication is effectively bypassed for UI testing
 
-The three canonical workflows are:
+---
 
-- `COMMERCIAL` — Primary Commercial Lines Placement Pipeline
-- `SME_VELOCITY` — Retail, SME & Velocity Packages
-- `RENEWALS` — Annual Policy Renewals Pipeline
+## 5. Application state and persistence
 
-Migration `20261023100000_bms_deal_lifecycle_pipelines.sql` consolidates prior product-specific pipelines and seeds the three canonical workflows. The catalog's standard brokerage percentage is applied to the Total Insured Value to calculate a tentative commission budget. The Deals workspace displays Item Master risk and intake artifacts alongside the selected lead or deal.
+`AppProvider` owns all major application state. It initializes arrays including:
+- `user`
+- `leads`
+- `clients`
+- `activities`
+- `vendors`
+- `quotationRequests`
+- `deals`
+- `invoices`
+- `payments`
+- `users`
+- `products`
+- `pipelines`
+- `pipelineStages`
+- `stageHistory`
+- `taxRates`
+- `company`
+- `emailTemplates`
+- `customerLookups`
 
-## Date handling and form conventions
+The app loads persisted tenant records using a generic record-loading workflow based on `resource` names, then pushes them into state.
 
-All rendered dates use the shared `formatDate` helper in `src/utils/date.ts` and display as `DD-MMM-YYYY`, for example `22-Oct-2026`. All editable date fields use the shared `DateInput` component, which displays `DD-MMM-YYYY`, provides a clickable calendar icon and browser calendar popup, validates real calendar dates, and submits ISO `YYYY-MM-DD` values to existing form and persistence logic. This applies to Lead and Deal close dates, client policy expiry and next-action dates, invoice dates, payment dates, and MIRA report filters. Native HTML pattern validation is intentionally not used on the custom text field; form handlers validate the canonical ISO value instead.
+### Save cycle
+After data is ready and the user is authenticated, a debounced effect writes record sets back to Supabase. Role-based permissions determine which collections each user may write.
 
-Lead and Deal records retain both the Total Insured Value and the selected product's brokerage rate and calculated commission budget. The forms show the tentative budget while the amount is entered, and list/table views show it alongside the insured value. Calculations use the same currency as the entered value; legacy records fall back to the current catalog rate when available.
+The save strategy is:
+- collect all state data into `allResources`
+- determine `writableByRole[user.role]`
+- save only allowed resources
+- queue writes with `saveQueue.current` to avoid race conditions
+- display a `persistenceError` banner if a save fails
 
-Other navigation entries—such as plans, reports, documents, quotations, internal slips, payment requests, renewals, information requests, rate cards, targets, and audit log—currently render “Coming soon” placeholder pages. The top-bar search and notification controls are visual UI only.
+This makes the app behave like a centralized transactional CRM where the UI state is synchronized to the database without a separate backend service layer.
 
-## Currency handling
+---
 
-Quote premiums and deal values support MVR and USD. Choosing USD prefills an editable conversion rate of **15.42 MVR per USD**; this is a configurable form default, not a live exchange-rate feed. The entered amount and rate are saved with the quote or deal, and the form shows the MVR equivalent. MVR amounts are not converted. Deal totals and weighted summaries normalize each deal to MVR using its stored rate.
+## 6. Core domain entities
 
-## Roles and access
+### User
+The `User` type includes:
+- `id`
+- `name`
+- `email`
+- `role`
+- `title`
+- optional `clientId`
 
-Application role keys map to Supabase profile roles:
+### Lead
+The `Lead` model represents a sales prospect or opportunity. It includes:
+- person and contact information (`contact`, `contactEmail`, `contactPhone`, `whatsapp`, `telegram`)
+- organization association (`client`, `clientId`)
+- product and insurance metadata (`productCode`, `insuranceClass`, `country`)
+- sales status (`temperature`, `status`, `funnelStage`)
+- operational tracking (`ownerId`, `closeDate`, `renewalDate`, `dealId`, `pipelineId`)
+- monetization fields (`value`, `valueMvr`, `currency`, `exchangeRate`, `premium`, `sumInsured`)
+- notes and loss disposition (`notes`, `lossReason`, `disposition`)
+- linked contacts and stage history
 
-| Application role | Supabase role | Typical access |
-| --- | --- | --- |
-| `admin` | System Admin | All implemented modules, settings, user administration, and supported record collections. |
-| `sales` | Sales | Leads, deals, clients, pipelines, calendar, and sales workflows. |
-| `finance` | Accountant | Dashboard, clients, invoices, payments, reports, funnels, and MIRA. |
-| `client` | Client | Matched client details, documents, invoices, and payments. |
+### Client
+Client records capture the organization-level account. Fields include:
+- name, country, phone, email, address, TIN
+- contact person and contacts list
+- product class and insurer metadata
+- policy details (`sumInsured`, `premium`, `expiry`)
+- tags and account status
+- optional insured entity details for broader underwriting or compliance workflows
 
-The frontend hides or blocks modules according to role, while PostgreSQL row-level security and the write RPC enforce data permissions independently. New sign-ups receive the Client role and cannot choose their own staff role. Administrator account creation uses the `admin-create-user` Edge Function, which verifies the caller and uses the Supabase service-role key only within the function runtime.
+### CompanyContactProfile
+This is a reusable contact structure. It tracks:
+- `id`, `name`, `role`, `email`, `phone`, `whatsapp`, `telegram`
+- `linkedLeadIds`, `linkedDealIds`
 
-The Admin profile menu and sidebar provide Admin, Sales, Finance, and Client view-preview buttons. Previewing another role changes the visible navigation and routes but does not change the authenticated user, Supabase role, or database permissions. This is an admin-only UI preview, not user impersonation. Lead list visibility is derived from the authenticated app role and `ownerId`: System Admins see all leads, while Sales users see only their own. Legacy visibility metadata is retained only for backwards-compatible reads and is no longer shown or selectable.
+This allows the same contact to be associated with multiple leads or deals without duplicating the record everywhere.
 
-## Authentication modes
+### Activity
+Activities are timeline entries created for operational events. Allowed types include:
+- `call`
+- `meeting`
+- `email`
+- `upload`
+- `note`
+- `quote`
+- `task`
 
-- **Normal mode:** Supabase Auth verifies the account credentials. `VITE_ADMIN_LOGIN_EMAIL` optionally maps the login name `admin` to a real Supabase email; it does not bypass password verification. User profiles supply the role used by the app.
-- **Local demo mode:** `VITE_AUTH_BYPASS=true` enables a development-only login when running Vite in development mode. `VITE_DEMO_ADMIN_USERNAME` and `VITE_DEMO_ADMIN_PASSWORD` configure its credentials. This mode skips Supabase sign-in and data persistence and disables registration. Vite `VITE_*` settings are exposed to browser code, so demo credentials must be disposable and the bypass must not be used as production authentication.
+Each activity includes a date, associated client/lead/deal, actor info, and often a title/description. Activities are used for both user actions and audit records.
 
-## Data and persistence
+### Deal
+Deals represent already-qualified sales opportunities or bound placements. Every deal has a required lead link; conversion, legacy imports, and renewal automation share the deal/lead linking helper. An idempotent migration and the AppContext load normalizer backfill legacy deals without a linked lead.
 
-The app's shared state covers leads, clients, activities, deals, invoices, payments, tax rates, pipelines, pipeline stages, deal stage history, company settings, email templates, customer lookup values, and the administrator-managed product catalog. CRM transaction collections begin empty. Pipeline and policy catalog bootstrap is handled by `20261022100000_insurance_brokerage_workflow.sql`, which preserves existing records, seeds the six product pipelines, creates the tenant-scoped `policy_types` table with all 49 mapped products, and creates policy-bound invoice and renewal side effects. Before any tenant-record write, the shared synchronizer normalizes valid string IDs from record IDs, product codes, policy codes, or stored record IDs and filters malformed items, preventing invalid collection payloads. Bundled product codes and insurer options are reference catalogs, not example customer records.
+### QuotationRequest
+Quotation requests are persisted as `quotation-requests` tenant records and link an open deal, its lead and client, and one or more active insurers or reinsurers. Each request records its required-by date, insured amount and currency, status, creator, and timestamps. Creation and status changes are added to the linked activity timeline.
 
-In a connected session, records are represented in the tenant-scoped `tenant_records` table as JSON data keyed by tenant, resource, and record ID. Reads are filtered by PostgreSQL row-level security. Staff writes go through the `sync_tenant_records` RPC, which validates record IDs and checks the caller's role before synchronizing a collection. Client Portal users are linked to one client by `user_profiles.client_record_id`; the dedicated `update_own_client_contact` RPC permits only that user's phone, contact email, address, and contact-person fields to change. Supabase Auth sessions are persisted in the browser.
+### ProductCode
+The product catalog includes fields like:
+- `code`, `name`, `description`
+- `category`, `classType`, `defaultPipelineCode`
+- `standardBrokerageRatePct`
+- `salesCycleVelocity`, `riskLevel`
+- `keyUnderwritingIntakeArtifacts`
 
-The deployment currently uses a fixed tenant ID (`00000000-0000-4000-8000-000000000001`); it is not a tenant-selection or tenant-provisioning system. Migration `20261019020000_clear_demo_tenant_records.sql` deletes all CRM rows for that tenant if applied, but preserves Auth accounts and user profiles. Review the target database before applying it.
+---
 
-The New Customer Account form stores insured-entity details, stakeholder screening status, target lines/premium, and the required next action in the client record. Its searchable lookup options are tenant-level state; new options are synced through `sync_tenant_records` and require migration `20261020070000_customer_account_lookups.sql`. MIRA/NID checks and PEP/sanctions screening are not connected to external verification providers; the form records user-entered statuses only.
+## 7. The lead management process
 
-## Local setup
+`LeadsPage.tsx` is the most central operational page in the system. It supports list, funnel, and forecast modes.
 
-Install packages with `npm install`. Configure `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the ignored `.env` file for normal Supabase usage. Configure `VITE_ADMIN_LOGIN_EMAIL` if using the `admin` email alias. Start the frontend with `npm run dev`. The project also provides `npm run typecheck`, `npm run lint`, and `npm run build`.
+### Lead creation form
+Creating a lead collects:
+- organization or company selection
+- person ownership and primary contact details
+- additional contact profiles
+- lead title, source, and notes
+- product code
+- expected close date
+- lead owner
+- currency and value
+- lead temperature and lifecycle stage
+- loss reason if needed
 
-Database migration, administrator promotion, Edge Function deployment, and environment setup instructions are in [SUPABASE.md](./SUPABASE.md).
+The system validates the data before saving:
+- organization must exist or be created first
+- primary contact name is required
+- email format must be valid
+- phone numbers must pass validation
+- WhatsApp and Telegram values are validated if present
+- duplicate contact emails are rejected
+- the lead title and product details must be complete enough for the workflow
+
+The lead creation flow merges contact profiles, updates client metadata, and creates a new lead record in state.
+
+### Lead editing
+Existing leads are reopened into the lead form with their current client/contact details restored. The system reconstructs the correct organization and profiles from:
+- the lead itself
+- the linked client record
+- the company contact list
+- linked profile metadata
+
+This ensures that contact information is not lost during edits.
+
+### Lead deletion rules
+Delete protection is important in this system. The app prevents deletion when:
+- the lead is linked to a deal
+- it has an associated commercial relationship that must be resolved first
+
+Admin-only deletion is enforced, and a confirmation step is used to avoid accidental removal.
+
+### Board-stage lifecycle
+The app uses a lead board lifecycle that includes stages such as:
+- `Lead Identified`
+- `Contact Made`
+- `Key Person Identified`
+- `Intro Email Sent`
+- `Meetings Ongoing`
+- `Lost`
+- terminal outcomes tied to deal linkage or progression
+
+There is also a linkage and lifecycle function that decides whether a lead is still active or terminal based on whether it is attached to a deal.
+
+### Drag-and-drop pipeline movement
+The funnel view supports drag-and-drop between lifecycle columns. When a lead is dropped onto a stage:
+- the lead’s stage is updated
+- transition metadata is persisted
+- stage-change remarks may be saved as an activity note
+- the lead moves visually through the board
+
+---
+
+## 8. Search, filtering, and operational analytics
+
+The lead page provides search and filter capabilities:
+- text search
+- filter by temperature
+- filter by stage
+- filter by owner
+- filter by lead ID
+- filter by status
+- filter by insurance class
+
+Hash-based URL params are also supported, so filters can be persisted in the application URL. The UI also calculates key summary metrics such as:
+- lead count
+- hot lead count
+- aggregate MVR value in selected board stages
+
+This helps sales managers review pipeline volume and lead quality from a single screen.
+
+---
+
+## 9. Client and organization process
+
+Clients are managed as the account-level record that groups business information and linked relationships. The app supports both selecting an existing organization and creating a new one. When a new organization is created:
+- a generated client ID is assigned
+- the organization record is inserted at the front of the client list
+- it is tagged as incomplete until more information is filled in
+- the creator becomes the owner
+
+The system also tracks contact association between client records and lead/deal records so the same person can be connected to multiple business objects without duplication.
+
+---
+
+## 10. Contact profile synchronization and duplicate prevention
+
+One of the app’s more advanced workflows is the contact matching system. It uses helpers such as:
+- `findMatchingContactProfile`
+- `linkContactProfile`
+- `mergeContactProfiles`
+- `normalizeContactNumber`
+- `reconcileContactAssociations`
+
+These utilities:
+- normalize phone numbers
+- normalize emails to predictable comparison forms
+- match contacts by email, phone, or ID
+- merge duplicate profile entries
+- reconnect profiles to leads and deals
+- preserve consistent client contact lists when data updates happen
+
+This reduces duplicate customer records and keeps contact continuity across the sales pipeline.
+
+---
+
+## 11. Activity and audit tracking
+
+The app records both normal user activity and structural change audits.
+
+### Activity timeline
+`activities` store timeline events such as meetings, calls, notes, emails, quotes, tasks, and uploads.
+
+### Audit trail
+The AppContext uses an effect to compare the previous and current state of leads, deals, and clients. When differences are detected, it creates audit-style activities such as:
+- `Lead created`
+- `Lead deleted`
+- `Lead stage changed`
+- `Lead temperature changed`
+- `Deal updated`
+- `Client contact updated`
+
+These are prepended to the activity stream, creating a precise operational history that can be reviewed by admins and managers.
+
+---
+
+## 12. Deals and workspace process
+
+When a lead is inspected, the app opens the `DealWorkspace` component. This acts as the deeper sales workspace where the user can:
+- inspect lead details and contact association
+- review deal linkage and conversion status
+- edit or delete the lead
+- move through related sales actions and activity
+
+This link between lead and deal ensures the system keeps commercial opportunity data separate from the original prospect record, while still preserving traceability.
+
+---
+
+## 13. Pipelines, stages, and forecast logic
+
+The app includes pipeline abstractions for multiple operational workflows. The system tracks:
+- `pipelines`
+- `pipelineStages`
+- `stageHistory`
+- `lead-stage-history`
+
+The board logic is integrated with lead lifecycle stages and conversion value totals. Forecast-like summaries are used to show opportunity value and progression across board stages.
+Moving a commercial deal into stage 2 prompts the user to create a quotation request when none is linked.
+Commercial, SME Velocity, and Renewals stage templates store explicit won/lost and approval flags. Existing stages are normalized by pipeline code and stage order, while label-based terminal detection remains a compatibility fallback for older custom stages.
+
+This makes the CRM useful both as a lead tracker and as a commercial pipeline performance tool.
+
+---
+
+## 14. Financial modules
+
+The broader system includes finance-related modules:
+- invoices
+- payments
+- quotation / slip-related operations
+- MIRA-style reporting surfaces
+
+These modules support a complete insurance brokerage process where:
+- quotes can be generated
+- invoices can be issued
+- payments can be tracked
+- outstanding balances matter
+- commission and premium logic must remain aligned with currency rules
+
+The app also includes utility functions for:
+- currency parsing and formatting
+- USD-to-MVR conversion
+- brokerage calculations
+- invoice-related operations
+
+---
+
+## 15. Currency and insurance valuation logic
+
+The code explicitly handles multi-currency insurance transactions. It uses default conversion logic and supports display and storage of values in both:
+- `MVR`
+- `USD`
+
+This is critical because the lead and deal records contain value, premium, and exchange-rate information. The currency utilities compute and display values while preserving the underlying insurance business logic.
+
+---
+
+## 16. End-to-end business flow
+
+A normal operational flow in this system looks like this:
+
+1. A user signs in and the app loads their role and tenant records.
+2. The sales team opens the Leads module.
+3. They choose or create an organization and add a lead with contact details and insurance information.
+4. The app validates the communication profile and contact records.
+5. The lead appears in the pipeline or board with a lifecycle stage, owner, product, and value.
+6. Sales moves the lead through stages and adds notes/activity.
+7. Once qualified, the lead is associated with a deal workspace.
+8. The deal progresses through pricing, quote, and policy binding steps.
+9. Finance records invoices and payments based on the bound policy.
+10. Runtime audit history and activity notes track all major changes.
+
+---
+
+## 17. Operational assumptions in the current codebase
+
+The current implementation assumes:
+- role-based access is required
+- sales teams drive the lead pipeline
+- client onboarding is a first-class process
+- lead and deal records remain linked across the system
+- communication validation is mandatory for quality control
+- insurance broker operations are multi-currency and product-centric
+- activity and audit trails are essential for accountability
+- Supabase is the persistence layer for the business system
+
+---
+
+## 18. Summary
+
+This is a full CRM for an insurance brokerage operation, with the lead workflow at its center. The application connects user authentication, pipeline progression, client contact management, financial tracking, and operational auditing into a single React-based system. The `LeadsPage` is the primary process surface, but the wider architecture supports a complete lead-to-deal-to-finance lifecycle in a single tenant-aware platform.
