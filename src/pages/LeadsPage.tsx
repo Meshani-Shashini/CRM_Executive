@@ -28,6 +28,19 @@ import { formatStaffIdentifier } from '../utils/staff';
 
 const tableBadgeClass = 'inline-flex h-6 items-center gap-1 whitespace-nowrap rounded-full border px-1.5 text-[9px] font-bold leading-none tracking-wide uppercase';
 
+const leadTableColumns = [
+  { key: 'lead', label: 'Lead Name' },
+  { key: 'client', label: 'Client Name' },
+  { key: 'stage', label: 'Funnel Stage' },
+  { key: 'insurance', label: 'Insurance Type' },
+  { key: 'temperature', label: 'Lead Tag' },
+  { key: 'status', label: 'Activity Status' },
+  { key: 'owner', label: 'Owner' },
+  { key: 'renewal', label: 'Renewal', title: 'Expiry / Renewal' },
+  { key: 'closing', label: 'Closing', title: 'Expected Closing' },
+  { key: 'actions', label: 'Actions' },
+] as const;
+
 interface ContactDraft {
   id: string;
   name: string;
@@ -647,7 +660,7 @@ export default function LeadsPage() {
         <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
           <Badge variant="brand"><span className="font-semibold">{searchedLeads.length}</span> {searchedLeads.length === 1 ? 'lead' : 'leads'}</Badge>
           <Badge variant="hot"><Flame size={11} /> {searchedLeads.filter((lead) => lead.temperature === 'HOT').length} hot</Badge>
-          <label className="relative min-w-36 max-w-64 flex-1">
+          <label className="relative w-full md:min-w-36 md:max-w-64 md:flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <input className="input !py-1.5 pl-9 !text-xs" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search leads" aria-label="Search leads" />
           </label>
@@ -764,32 +777,16 @@ export default function LeadsPage() {
           </div>
         </div>
       ) : (
-        <div className="w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain rounded-lg border border-[#1B1E22] bg-ink-950">
-          <table className="w-full min-w-[1120px] table-fixed text-[11px] leading-tight" aria-label="Leads">
-            <colgroup>
-              <col className="w-[12%]" />
-              <col className="w-[14%]" />
-              <col className="w-[19%]" />
-              <col className="w-[10%]" />
-              <col className="w-[7%]" />
-              <col className="w-[12%]" />
-              <col className="w-[10%]" />
-              <col className="w-[6%]" />
-              <col className="w-[6%]" />
-              <col className="w-[4%]" />
-            </colgroup>
-            <thead className="bg-[#111214] text-[10px] font-semibold text-[#D0D3D9]">
+        <div className="fit-wrap w-full max-w-full min-w-0 rounded-lg border border-[#1B1E22] bg-ink-950">
+          <table className="w-full table-fixed leading-tight" aria-label="Leads">
+            <colgroup>{leadTableColumns.map((column) => <col key={column.key} />)}</colgroup>
+            <thead className="bg-[#111214] font-semibold text-[#D0D3D9]">
               <tr>
-                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left">Lead Name</th>
-                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left">Client Name</th>
-                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left">Funnel Stage</th>
-                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left">Insurance Type</th>
-                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left">Lead Tag</th>
-                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left">Activity Status</th>
-                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left">Owner</th>
-                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left" title="Expiry / Renewal">Renewal</th>
-                <th className="whitespace-nowrap border-b border-[#1B1E22] px-1 py-2 text-left" title="Expected Closing">Closing</th>
-                <th className="border-b border-[#1B1E22] px-1 py-2 text-right"><span className="sr-only">Actions</span></th>
+                {leadTableColumns.map((column) => (
+                  <th key={column.key} className="border-b border-[#1B1E22] px-1 py-2 text-left" title={'title' in column ? column.title : undefined}>
+                    {column.key === 'actions' ? <span className="sr-only">{column.label}</span> : column.label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -797,7 +794,7 @@ export default function LeadsPage() {
                 const stage = boardStageForLead(lead, linkedDealIds, linkedLeadIds);
                 const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? formatStaffIdentifier(lead.ownerId);
                 const statusVariant = lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win';
-                return <tr key={lead.id} role="link" tabIndex={0} aria-label={`Open lead details for ${lead.title ?? lead.client}`} draggable={!isTerminalLeadStage(stage) && !((lead.dealId && linkedDealIds.has(lead.dealId)) || linkedLeadIds.has(lead.id))} className="cursor-pointer border-b border-[#1B1E22] last:border-0 text-xs transition-colors hover:bg-[#111214] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-400"
+                return <tr key={lead.id} role="link" tabIndex={0} aria-label={`Open lead details for ${lead.title ?? lead.client}`} draggable={!isTerminalLeadStage(stage) && !((lead.dealId && linkedDealIds.has(lead.dealId)) || linkedLeadIds.has(lead.id))} className="cursor-pointer border-b border-[#1B1E22] last:border-0 transition-colors hover:bg-[#111214] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-400"
                   onClick={() => setInspectedLeadId(lead.id)}
                   onKeyDown={(event) => {
                     if (event.target !== event.currentTarget) return;
@@ -816,9 +813,9 @@ export default function LeadsPage() {
                     const draggedLead = searchedLeads.find((item) => item.id === event.dataTransfer.getData('text/lead-id'));
                     if (draggedLead) moveLeadToStage(draggedLead, stage);
                   }}>
-                  <td className="px-2 py-2 font-semibold text-white"><span className="block truncate" title={lead.title ?? `${lead.client} lead`}>{lead.title ?? `${lead.client} lead`}</span></td>
-                  <td className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={lead.client}>{lead.client}</span></td>
-                  <td className="min-w-0 overflow-hidden px-2 py-2 font-normal text-[#E1E2E5]">
+                  <td data-label={leadTableColumns[0].label} className="px-2 py-2 font-semibold text-white"><span className="block truncate" title={lead.title ?? `${lead.client} lead`}>{lead.title ?? `${lead.client} lead`}</span></td>
+                  <td data-label={leadTableColumns[1].label} className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={lead.client}>{lead.client}</span></td>
+                  <td data-label={leadTableColumns[2].label} className="min-w-0 overflow-hidden px-2 py-2 font-normal text-[#E1E2E5]">
                     <span className="flex min-w-0 flex-nowrap items-center gap-1" title={stage} aria-label={`Stage: ${stage}`}>
                       {isTerminalLeadStage(stage)
                         ? <span className={`pill inline-flex w-fit max-w-full shrink-0 whitespace-nowrap border !px-2 !py-0.5 text-[10px] leading-none uppercase ${stage === 'Lost' ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]' : 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]'}`} title={stage}>
@@ -827,8 +824,8 @@ export default function LeadsPage() {
                         : <span className="min-w-0 flex-1 truncate">{stage}</span>}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-2 py-2 font-normal"><InsuranceBadge code={lead.productCode} />                  </td>
-                  <td className="whitespace-nowrap px-1 py-2 font-normal" onClick={(event) => event.stopPropagation()}>
+                  <td data-label={leadTableColumns[3].label} className="whitespace-nowrap px-2 py-2 font-normal"><InsuranceBadge code={lead.productCode} /></td>
+                  <td data-label={leadTableColumns[4].label} className="whitespace-nowrap px-1 py-2 font-normal" onClick={(event) => event.stopPropagation()}>
                     <LeadTemperatureControl
                       leadName={lead.title ?? lead.client}
                       temperature={lead.temperature ?? 'WARM'}
@@ -836,20 +833,20 @@ export default function LeadsPage() {
                       onChange={(temperature) => updateLeadTemperature(lead, temperature)}
                     />
                   </td>
-                  <td className="whitespace-nowrap px-2 py-2 pr-3 font-normal">
-                    <span className={`${tableBadgeClass} ${statusVariant === 'todo' ? 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]' : statusVariant === 'backlog' ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]' : statusVariant === 'in-progress' ? 'border-[#25375B] bg-[#101C39] text-[#5B8DEF]' : 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]'}`}>
+                  <td data-label={leadTableColumns[5].label} className="whitespace-nowrap px-2 py-2 pr-3 font-normal">
+                    <span className={`lead-table-status ${tableBadgeClass} ${statusVariant === 'todo' ? 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]' : statusVariant === 'backlog' ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]' : statusVariant === 'in-progress' ? 'border-[#25375B] bg-[#101C39] text-[#5B8DEF]' : 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]'}`}>
                       <CheckCircle2 size={11} className="shrink-0" /> {lead.status}
                     </span>
                   </td>
-                  <td className="px-2 py-2 font-normal">
+                  <td data-label={leadTableColumns[6].label} className="px-2 py-2 font-normal">
                     <span className="flex min-w-0 items-center gap-1.5" title={ownerName}>
                       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#292B30] text-[9px] font-semibold text-[#A4A6AE]">{avatarCode(ownerName)}</span>
-                      <span className="truncate text-[10px] text-[#E1E2E5]">{ownerName}</span>
+                      <span className="owner-name truncate text-[10px] text-[#E1E2E5]">{ownerName}</span>
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={tableDate(lead.renewalDate)}>{tableDate(lead.renewalDate)}</span></td>
-                  <td className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={tableDate(lead.closeDate ?? lead.renewalDate)}>{tableDate(lead.closeDate ?? lead.renewalDate)}</span></td>
-                  <td className="relative px-1 py-2 text-right" onClick={(event) => event.stopPropagation()}>
+                  <td data-label={leadTableColumns[7].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={tableDate(lead.renewalDate)}>{tableDate(lead.renewalDate)}</span></td>
+                  <td data-label={leadTableColumns[8].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={tableDate(lead.closeDate ?? lead.renewalDate)}>{tableDate(lead.closeDate ?? lead.renewalDate)}</span></td>
+                  <td data-label={leadTableColumns[9].label} className="relative px-1 py-2 text-right" onClick={(event) => event.stopPropagation()}>
                     <button type="button" className="rounded-md p-1.5 text-muted transition hover:bg-ink-700 hover:text-white" aria-label={`Actions for ${lead.title ?? lead.client}`} aria-haspopup="menu" aria-expanded={openLeadActionsId === lead.id}
                       onClick={() => setOpenLeadActionsId((current) => current === lead.id ? '' : lead.id)}>
                       <MoreHorizontal size={15} />
@@ -863,7 +860,7 @@ export default function LeadsPage() {
                   </td>
                 </tr>;
               })}
-              {searchedLeads.length === 0 && <tr><td colSpan={10} className="px-4 py-8 text-center text-muted">No leads found.</td></tr>}
+              {searchedLeads.length === 0 && <tr className="lead-table-empty"><td data-label={leadTableColumns[0].label} colSpan={leadTableColumns.length} className="px-4 py-8 text-center text-muted">No leads found.</td></tr>}
             </tbody>
           </table>
         </div>

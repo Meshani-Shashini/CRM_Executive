@@ -91,6 +91,34 @@ function Shell() {
     return () => window.removeEventListener('hashchange', syncPageFromHash);
   }, []);
 
+  useEffect(() => {
+    let frameId = 0;
+    const updateScreenInfo = () => {
+      frameId = 0;
+      const { innerWidth: width, innerHeight: height } = window;
+      const device = width < 640 ? 'phone' : width < 1100 ? 'tablet' : width < 1700 ? 'desktop' : 'tv';
+      const orientation = width >= height ? 'landscape' : 'portrait';
+      document.documentElement.dataset.device = device;
+      document.documentElement.dataset.orient = orientation;
+      document.documentElement.dataset.ratio = (width / Math.max(height, 1)).toFixed(2);
+    };
+    const scheduleUpdate = () => {
+      if (!frameId) frameId = window.requestAnimationFrame(updateScreenInfo);
+    };
+    const visualViewport = window.visualViewport;
+
+    scheduleUpdate();
+    window.addEventListener('resize', scheduleUpdate);
+    window.addEventListener('orientationchange', scheduleUpdate);
+    visualViewport?.addEventListener('resize', scheduleUpdate);
+    return () => {
+      window.removeEventListener('resize', scheduleUpdate);
+      window.removeEventListener('orientationchange', scheduleUpdate);
+      visualViewport?.removeEventListener('resize', scheduleUpdate);
+      if (frameId) window.cancelAnimationFrame(frameId);
+    };
+  }, []);
+
   if (authLoading) {
     return <div className="flex h-screen items-center justify-center bg-ink-950 text-sm text-muted">Checking your session…</div>;
   }
