@@ -4,7 +4,7 @@ import {
 import { formatDate } from '../utils/date';
 import type { Activity as ActivityRecord } from '../types';
 
-type ActivityCategory = 'stage' | 'activity' | 'appointment' | 'proposal' | 'note' | 'task' | 'temperature';
+type ActivityCategory = 'stage' | 'activity' | 'appointment' | 'proposal' | 'note' | 'task' | 'temperature' | 'call' | 'email' | 'upload';
 
 const temperatureStyles = {
   HOT: { Icon: Flame, className: 'border-hot/40 bg-hot/10 text-hot' },
@@ -16,6 +16,9 @@ const categoryIcons: Record<ActivityCategory, typeof Activity> = {
   stage: ArrowRight,
   temperature: Flame,
   activity: Phone,
+  call: Phone,
+  email: MessageSquare,
+  upload: FileText,
   appointment: CalendarDays,
   proposal: FileText,
   note: MessageSquare,
@@ -40,12 +43,18 @@ export default function ActivityTimelineItem({
   date,
   category,
   durationMinutes,
+  origin,
+  actor,
+  onMarkDone,
 }: {
   title: string;
   description?: string;
   date: string;
   category: ActivityCategory | ActivityRecord['type'];
   durationMinutes?: number;
+  origin?: 'Lead' | 'Deal' | 'Quotation';
+  actor?: string;
+  onMarkDone?: () => void;
 }) {
   const transition = temperatureTransition(title, description ?? '');
   const CategoryIcon = categoryIcons[transition ? 'temperature' : category === 'meeting' ? 'appointment'
@@ -66,17 +75,24 @@ export default function ActivityTimelineItem({
     <article className="grid w-full min-w-0 grid-cols-[max-content_14px_minmax(0,1fr)] items-center gap-1.5 border-b border-ink-700/70 px-1.5 py-1 last:border-b-0">
       <time className="whitespace-nowrap font-mono text-[9px] tabular-nums text-[#8B949E]">{formattedDate}</time>
       <CategoryIcon size={12} className="text-muted" aria-hidden="true" />
-      <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[10px] leading-4">
-        {transition ? (
-          <div className="flex shrink-0 items-center gap-1" aria-label={`Lead temperature: ${transition.from} to ${transition.to}`}>
-            <TemperatureTag value={transition.from} />
-            <ArrowRight size={10} className="text-muted" aria-hidden="true" />
-            <TemperatureTag value={transition.to} />
+      <div className="flex min-w-0 items-center gap-2 overflow-hidden text-[10px] leading-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {transition ? (
+              <div className="flex shrink-0 items-center gap-1" aria-label={`Lead temperature: ${transition.from} to ${transition.to}`}>
+                <TemperatureTag value={transition.from} />
+                <ArrowRight size={10} className="text-muted" aria-hidden="true" />
+                <TemperatureTag value={transition.to} />
+              </div>
+            ) : (
+              <span className="truncate font-medium text-white" title={title}>{title}</span>
+            )}
+            {origin && <span className="shrink-0 rounded-full border border-ink-600 bg-ink-800 px-1.5 py-0.5 text-[8px] font-semibold text-brand-200">{origin}</span>}
+            {actor && <span className="truncate text-[9px] text-muted" title={actor}>By {actor}</span>}
+            {onMarkDone && <button type="button" className="shrink-0 rounded border border-ink-600 px-1.5 text-[9px] text-muted hover:text-white" onClick={onMarkDone}>Mark done</button>}
           </div>
-        ) : (
-          <span className="shrink-0 truncate font-medium text-white" title={title}>{title}</span>
-        )}
-        {details && <span className="min-w-0 truncate text-muted" title={details}>{details}</span>}
+          {details && <div className="truncate text-muted" title={details}>{details}</div>}
+        </div>
       </div>
     </article>
   );

@@ -35,6 +35,7 @@ import {
 import { formatStaffIdentifier } from '../utils/staff';
 import { calculateLeadContactSla, getContactMadeSlaTargetDays, getLeadContactedAt } from '../utils/leadSla';
 import { buildLeadConversion } from '../utils/leadConversion';
+import { getNextActivity } from '../utils/nextActivity';
 import { dashboardHref, hashParams, promptQuotationRequestForDeal } from '../utils/navigation';
 
 interface TimelineEntry {
@@ -43,7 +44,12 @@ interface TimelineEntry {
   description: string;
   date: string;
   durationMinutes?: number;
-  category: 'stage' | 'activity' | 'appointment' | 'proposal' | 'note' | 'task' | 'temperature';
+  category: 'stage' | 'activity' | 'appointment' | 'proposal' | 'note' | 'task' | 'temperature' | 'call' | 'email' | 'upload';
+  origin: 'Lead' | 'Deal' | 'Quotation';
+  actor: string;
+  activityId?: string;
+  done?: boolean;
+  scheduled?: boolean;
 }
 
 interface ContactEditorDraft {
@@ -326,7 +332,7 @@ export default function DealWorkspace({
   const {
     activities, setActivities, clients, setClients, deals: allDeals, setDeals, leads, setLeads,
     products, pipelines, pipelineStages, stageHistory, setStageHistory, invoices, setInvoices, user, users, vendors, viewAsRole,
-    quotationRequests,
+    quotationRequests, company,
   } = useApp();
   const [selectedKey, setSelectedKey] = useState(() => {
     const dealId = dealsPageMode ? hashParams().get('id') : null;
@@ -362,7 +368,7 @@ export default function DealWorkspace({
   const [dealActionsAnchor, setDealActionsAnchor] = useState<HTMLButtonElement | null>(null);
   const [openStageMenuId, setOpenStageMenuId] = useState('');
   const [stageMenuAnchor, setStageMenuAnchor] = useState<HTMLButtonElement | null>(null);
-  const [activityModal, setActivityModal] = useState<'meeting' | 'note' | 'quote' | 'task' | null>(null);
+  const [activityModal, setActivityModal] = useState<'meeting' | 'note' | 'quote' | 'task' | 'schedule' | null>(null);
   const [moveStage, setMoveStage] = useState<PipelineStage | null>(null);
   const [lossReason, setLossReason] = useState('');
   const [winReason, setWinReason] = useState('');
@@ -402,6 +408,7 @@ export default function DealWorkspace({
   const linkedLead = selectedLead ?? (selectedDeal
     ? leads.find((lead) => lead.id === selectedDeal.leadId || lead.dealId === selectedDeal.id)
     : undefined);
+  const timelineLead = selectedLead ?? linkedLead;
   const linkedQuotationRequests = quotationRequests.filter((request) =>
     (Boolean(selectedDeal) && request.dealId === selectedDeal?.id)
     || (Boolean(linkedLead) && request.leadId === linkedLead?.id)
@@ -468,35 +475,23 @@ export default function DealWorkspace({
   const relatedDealId = selectedDeal?.id ?? selectedLead?.dealId ?? progressDeal?.id;
   const selectedActivities = activities
     .filter((activity) => (Boolean(relatedDealId) && activity.dealId === relatedDealId)
-      || (Boolean(relatedLeadId) && activity.leadId === relatedLeadId)
-      || (!activity.dealId && !activity.leadId && Boolean(selectedClient) && activity.clientId === selectedClient?.id))
+      || (Boolean(relatedLeadId) && activity.leadId === relatedLeadId))
     .filter(isBusinessActivity)
     .sort((left, right) => Date.parse(right.date) - Date.parse(left.date));
-  const leadAuditActivities = selectedLead
+  const leadAuditActivities = timelineLead
     ? activities.filter((activity) => activity.id.startsWith('audit-')
-      && activity.leadId === selectedLead.id
+      && activity.leadId === timelineLead.id
       && /^Lead (?:created|updated|stage changed|temperature changed):?/.test(activity.title))
     : [];
-  const leadCreatedAt = selectedLead
+  const leadCreatedAt = timelineLead
     ? [
-      selectedLead.createdAt,
-      selectedLead.created_at,
-      selectedLead.startDate,
-      selectedLead.start_date,
+      timelineLead.createdAt,
+      timelineLead.created_at,
+      timelineLead.startDate,
+      timelineLead.start_date,
       leadAuditActivities.find((activity) => activity.title === 'Lead created')?.date,
     ]
       .find((timestamp): timestamp is string => Boolean(timestamp && Number.isFinite(Date.parse(timestamp))))
-    : undefined;
-  const leadLastModifiedAt = selectedLead
-    ? [
-      selectedLead.updatedAt,
-      leadCreatedAt,
-      selectedLead.stageChangedAt,
-      selectedLead.routedAt,
-      ...leadAuditActivities.map((activity) => activity.date),
-    ].filter((timestamp): timestamp is string => Boolean(timestamp && Number.isFinite(Date.parse(timestamp))))
-      .reduce<string | undefined>((latest, timestamp) =>
-        !latest || Date.parse(timestamp) > Date.parse(latest) ? timestamp : latest, undefined)
     : undefined;
   const quotes = selectedActivities.filter((activity) => activity.type === 'quote' && activity.quoteAmount !== undefined);
   const selectedHistory = progressDeal
@@ -536,7 +531,7 @@ export default function DealWorkspace({
     .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
   const leadStageHistoryByTimestamp = new Map<string, { from: LeadLifecycleStage; to: LeadLifecycleStage; date: string }>();
   for (const transition of [
-    ...(selectedLead?.stageHistory ?? []).flatMap((entry) => {
+    ...(timelineLead?.stageHistory ?? []).flatMap((entry) => {
       const date = stageDateFromFields(entry);
       return isLeadLifecycleStage(entry.fromStage) && isLeadLifecycleStage(entry.toStage) && date
         ? [{ from: entry.fromStage, to: entry.toStage, date }]
@@ -548,6 +543,27 @@ export default function DealWorkspace({
   }
   const leadStageHistory = [...leadStageHistoryByTimestamp.values()]
     .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
+  const leadStageTimelineEntries: TimelineEntry[] = leadStageHistory.map((transition) => {
+    const audit = selectedActivities.find((activity) => {
+      const parsed = parseLeadStageTransition(activity.title);
+      return parsed?.from === transition.from && parsed.to === transition.to
+        && Date.parse(activity.date) === Date.parse(transition.date);
+    });
+    const actor = audit?.actorName
+      ?? users.find((person) => person.id === audit?.userId)?.name
+      ?? (audit?.userId ? formatStaffIdentifier(audit.userId) : timelineLead?.ownerId
+        ? users.find((person) => person.id === timelineLead.ownerId)?.name ?? formatStaffIdentifier(timelineLead.ownerId)
+        : 'System');
+    return {
+      key: `lead-stage-${timelineLead?.id}-${transition.from}-${transition.to}-${Date.parse(transition.date)}`,
+      title: `Stage changed: ${transition.from} → ${transition.to}`,
+      description: audit?.description ?? '',
+      date: transition.date,
+      category: 'stage',
+      origin: 'Lead',
+      actor,
+    };
+  });
   const structuredLeadTelemetry = selectedLead
     ? buildLeadTelemetryStages(selectedLead, new Date(clockNow))
     : [];
@@ -705,25 +721,12 @@ export default function DealWorkspace({
     ?? formatStaffIdentifier(deal.ownerId);
   const activityForDeal = (deal: Deal): DealActivityState => {
     const linkedLeadId = leads.find((lead) => lead.id === deal.leadId || lead.dealId === deal.id)?.id;
-    const scheduledActivities = activities
-      .filter((activity) => !activity.done
-        && (activity.dealId === deal.id || (Boolean(linkedLeadId) && activity.leadId === linkedLeadId)))
-      .map((activity) => ({
-        date: activity.dueDate ?? activity.date,
-        title: activity.title,
-      }))
-      .filter((activity) => Number.isFinite(Date.parse(activity.date)));
-    if (deal.nextActivityAt && Number.isFinite(Date.parse(deal.nextActivityAt))) {
-      scheduledActivities.push({ date: deal.nextActivityAt, title: deal.nextActivityTitle ?? 'Scheduled follow-up' });
-    }
-    const next = scheduledActivities.sort((left, right) => Date.parse(left.date) - Date.parse(right.date))[0];
-    if (!next) return { state: 'none' as const };
-    const dueDay = localDate(next.date);
-    const today = localDate(new Date().toISOString());
-    return {
-      ...next,
-      state: dueDay < today ? 'overdue' as const : dueDay === today ? 'today' as const : 'future' as const,
-    };
+    return getNextActivity(activities, {
+      dealId: deal.id,
+      leadId: linkedLeadId ?? deal.leadId,
+      legacyDueDate: deal.nextActivityAt,
+      legacyTitle: deal.nextActivityTitle,
+    });
   };
   const productForDeal = (deal: Deal) => products.find((product) => product.code === deal.productCode)
     ?? products.find((product) => product.name.trim().toLowerCase() === deal.product.trim().toLowerCase());
@@ -840,19 +843,14 @@ export default function DealWorkspace({
       : workspaceView === 'forecast' ? forecastDeals.length
         : listDeals.length;
   const timelineEntries: TimelineEntry[] = [
-    ...(selectedLead && leadCreatedAt ? [{
-      key: `lead-created-${selectedLead.id}`,
+    ...(timelineLead && leadCreatedAt ? [{
+      key: `lead-created-${timelineLead.id}`,
       title: 'Lead created',
-      description: selectedLead.title ?? selectedLead.client,
+      description: timelineLead.title ?? timelineLead.client,
       date: leadCreatedAt,
       category: 'stage' as const,
-    }] : []),
-    ...(selectedLead && leadLastModifiedAt ? [{
-      key: `lead-last-modified-${selectedLead.id}`,
-      title: 'Lead last modified',
-      description: 'Latest recorded lead update',
-      date: leadLastModifiedAt,
-      category: 'activity' as const,
+      origin: 'Lead' as const,
+      actor: users.find((person) => person.id === timelineLead.ownerId)?.name ?? formatStaffIdentifier(timelineLead.ownerId),
     }] : []),
     ...(selectedDeal?.createdAt ? [{
       key: `deal-created-${selectedDeal.id}`,
@@ -860,6 +858,8 @@ export default function DealWorkspace({
       description: `${selectedDeal.product} · ${selectedDeal.stage}`,
       date: selectedDeal.createdAt,
       category: 'stage' as const,
+      origin: 'Deal' as const,
+      actor: users.find((person) => person.id === selectedDeal.ownerId)?.name ?? formatStaffIdentifier(selectedDeal.ownerId),
     }] : []),
     ...(selectedDeal?.nextActivityAt ? [{
       key: `deal-follow-up-${selectedDeal.id}`,
@@ -867,13 +867,16 @@ export default function DealWorkspace({
       description: 'Scheduled task',
       date: selectedDeal.nextActivityAt,
       category: 'task' as const,
+      origin: 'Deal' as const,
+      actor: users.find((person) => person.id === selectedDeal.ownerId)?.name ?? formatStaffIdentifier(selectedDeal.ownerId),
     }] : []),
+    ...leadStageTimelineEntries,
     ...selectedHistory.map((entry) => {
       const fromStage = pipelineStages.find((stage) => stage.id === entry.fromStageId)?.name ?? 'Start';
       const target = pipelineStages.find((stage) => stage.id === entry.toStageId)?.name ?? 'Pipeline stage';
       const actor = entry.userName
         ?? users.find((person) => person.id === entry.userId)?.name
-        ?? (entry.userId === user.id ? user.name : entry.userId ? formatStaffIdentifier(entry.userId) : '');
+        ?? (entry.userId === user.id ? user.name : entry.userId ? formatStaffIdentifier(entry.userId) : 'System');
       const expectedCloseChange = entry.details?.startsWith('Expected close changed');
       return {
         key: entry.id,
@@ -882,10 +885,11 @@ export default function DealWorkspace({
           expectedCloseChange ? entry.details ?? '' : '',
           entry.lossReason ? `Loss reason: ${entry.lossReason}` : '',
           !expectedCloseChange ? entry.details ?? '' : '',
-          !expectedCloseChange && actor ? `By ${actor}` : '',
         ].filter(Boolean).join(' · '),
         date: entry.enteredAt,
         category: expectedCloseChange ? 'activity' as const : 'stage' as const,
+        origin: 'Deal' as const,
+        actor,
       };
     }),
     ...linkedQuotationRequests.flatMap((request) => {
@@ -894,31 +898,44 @@ export default function DealWorkspace({
       const created = [{
         key: `quotation-created-${request.id}`,
         title: `Quotation request created: ${request.ref}`,
-        description: `Status: ${request.status} · By ${creator}`,
+        description: `Status: ${request.status}`,
         date: request.createdAt,
         category: 'proposal' as const,
+        origin: 'Quotation' as const,
+        actor: creator,
       }];
       const updatedAt = Date.parse(request.updatedAt);
       const createdAt = Date.parse(request.createdAt);
       if (!Number.isFinite(updatedAt) || !Number.isFinite(createdAt) || updatedAt <= createdAt) return created;
+      const updater = request.updatedBy
+        ? users.find((person) => person.id === request.updatedBy)?.name ?? formatStaffIdentifier(request.updatedBy)
+        : creator;
       return [...created, {
         key: `quotation-status-${request.id}-${request.updatedAt}`,
         title: `Quotation request status changed: ${request.ref}`,
         description: `Current status: ${request.status}`,
         date: request.updatedAt,
         category: 'proposal' as const,
+        origin: 'Quotation' as const,
+        actor: updater,
       }];
     }),
     ...selectedActivities
-      .filter((activity) => !(selectedLead && activity.id.startsWith('audit-') && activity.title === 'Lead created'))
+      .filter((activity) => !((selectedLead || linkedLead) && activity.id.startsWith('audit-') && activity.title === 'Lead created'))
+      .filter((activity) => !(selectedDeal && activity.id.startsWith('audit-') && activity.title === 'Deal created'))
       .filter((activity) => !(activity.title === 'Deal expected close changed'
         && selectedHistory.some((entry) => entry.details?.startsWith('Expected close changed')
           && Date.parse(entry.enteredAt) === Date.parse(activity.date))))
       .filter((activity) => {
-        if (!selectedLead) return true;
-        if (activity.title.startsWith('Deal stage changed:')) return false;
-        if (!activity.title.startsWith('Lead stage changed:')) return true;
-        return Boolean(parseLeadStageTransition(activity.title));
+        if (activity.title.startsWith('Lead stage changed:')) {
+          const transition = parseLeadStageTransition(activity.title);
+          return !transition || !leadStageHistory.some((entry) => entry.from === transition.from
+            && entry.to === transition.to && Date.parse(entry.date) === Date.parse(activity.date));
+        }
+        if (activity.title.startsWith('Deal stage changed:')) {
+          return !selectedHistory.some((entry) => Date.parse(entry.enteredAt) === Date.parse(activity.date));
+        }
+        return true;
       })
       .map((activity) => {
         const actor = users.find((person) => person.id === activity.userId);
@@ -929,19 +946,26 @@ export default function DealWorkspace({
           activity.venue ? `Venue: ${activity.venue}` : '',
           activity.outcome ? `Outcome: ${activity.outcome}` : '',
           activity.followUpAction ? `Follow-up: ${activity.followUpAction}` : '',
-          activity.userId ? `By ${activity.actorName ?? actor?.name ?? (activity.userId === user.id ? user.name : formatStaffIdentifier(activity.userId))}` : '',
+          activity.done ? 'Done' : '',
         ].filter(Boolean).join(' · ');
+        const activityActor = activity.actorName ?? actor?.name
+          ?? (activity.userId === user.id ? user.name : activity.userId ? formatStaffIdentifier(activity.userId) : 'System');
         return {
           key: activity.id,
           title: activity.title,
           description: details,
           date: activity.date,
+          origin: activity.dealId === relatedDealId ? 'Deal' as const : 'Lead' as const,
+          actor: activityActor,
+          activityId: activity.id,
+          done: activity.done,
+          scheduled: Boolean(activity.dueDate || activity.type === 'task' || activity.type === 'meeting'),
           category: activity.title.startsWith('Lead temperature changed:') ? 'temperature' as const
             : activity.type === 'meeting' ? 'appointment' as const
               : activity.type === 'quote' ? 'proposal' as const
                 : activity.type === 'task' ? 'task' as const
                   : (activity.title.startsWith('Lead stage changed:') || activity.title.startsWith('Deal stage changed:')) ? 'stage' as const
-                    : activity.type === 'note' ? 'note' as const : 'activity' as const,
+                    : activity.type === 'note' ? 'note' as const : activity.type,
           ...(activity.durationMinutes !== undefined ? { durationMinutes: activity.durationMinutes } : {}),
         };
       }),
@@ -1064,9 +1088,14 @@ export default function DealWorkspace({
     event.preventDefault();
     if (!selectedItem) return;
     const data = new FormData(event.currentTarget);
-    const type = activityModal === 'meeting' ? 'meeting'
+    const type = activityModal === 'schedule'
+      ? String(data.get('activityType')) as Activity['type']
+      : activityModal === 'meeting' ? 'meeting'
       : activityModal === 'quote' ? 'quote'
         : activityModal === 'task' ? 'task' : 'note';
+    const scheduledDueDate = activityModal === 'schedule'
+      ? String(data.get('dueDate') ?? '')
+      : type === 'task' || type === 'meeting' ? String(data.get('activityDate') ?? '') : '';
     const amount = type === 'quote' ? Number(data.get('quoteAmount')) : undefined;
     const currency = type === 'quote' ? String(data.get('quoteCurrency')) as 'MVR' | 'USD' : undefined;
     const insurer = String(data.get('insurer') ?? '').trim();
@@ -1083,10 +1112,14 @@ export default function DealWorkspace({
       type,
       title: String(data.get('title') ?? '').trim(),
       description: String(data.get('description') ?? '').trim(),
-      date: activityDate ? new Date(activityDate).toISOString() : createdAt,
+      date: scheduledDueDate ? new Date(scheduledDueDate).toISOString()
+        : activityDate ? new Date(activityDate).toISOString() : createdAt,
       createdAt,
       userId: user.id,
       actorName: user.name,
+      ...(scheduledDueDate ? { dueDate: new Date(scheduledDueDate).toISOString(), done: false } : {}),
+      ...(activityModal === 'schedule' && String(data.get('assigneeId') ?? '')
+        ? { assigneeId: String(data.get('assigneeId')) } : {}),
       ...(type === 'meeting' ? {
         meetingMode,
         venue: String(data.get('venue') ?? '').trim(),
@@ -1178,6 +1211,14 @@ export default function DealWorkspace({
     if (!selectedLead || (activeRole !== 'admin' && activeRole !== 'sales')) return;
     const currentStage = lifecycleStageForLead(selectedLead, Boolean(progressDeal));
     if (target === currentStage || isTerminalLeadStage(currentStage)) return;
+    const hasNextActivity = getNextActivity(activities, { leadId: selectedLead.id, dealId: progressDeal?.id }).state !== 'none';
+    if (!hasNextActivity) {
+      if (company.requireNextActivityForStageChange) {
+        window.alert('Schedule a next activity before moving this lead to another stage.');
+        return;
+      }
+      if (!window.confirm('No next activity is scheduled. Continue with this stage change?')) return;
+    }
     if (target === 'Converted to deal') {
       convertLead();
       return;
@@ -1235,6 +1276,10 @@ export default function DealWorkspace({
     }
     if (!currentStage) {
       setMoveError('The deal’s current stage is not configured in its pipeline.');
+      return;
+    }
+    if (company.requireNextActivityForStageChange && activityForDeal(selectedDeal).state === 'none') {
+      setMoveError('Schedule a next activity before moving this deal to another stage.');
       return;
     }
     const now = new Date().toISOString();
@@ -2469,6 +2514,7 @@ export default function DealWorkspace({
                 <p className="mt-1 text-xs text-muted">Stage movement and client touchpoints.</p>
               </div>
               <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('schedule')}><CalendarDays size={13} /> Schedule next activity</button>
                 <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('meeting')}><CalendarDays size={13} /> Appointment</button>
                 <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('quote')}><FileText size={13} /> Proposal</button>
                 <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('note')}><Plus size={13} /> Note</button>
@@ -2501,6 +2547,9 @@ export default function DealWorkspace({
                 ['proposal', 'Proposals'],
                 ['note', 'Notes'],
                 ['task', 'Tasks'],
+                ['call', 'Calls'],
+                ['email', 'Emails'],
+                ['upload', 'Uploads'],
               ] as const).map(([category, label]) => (
                 <button key={category} type="button" aria-pressed={timelineFilter === category}
                   onClick={() => setTimelineFilter(category)}
@@ -2519,6 +2568,13 @@ export default function DealWorkspace({
                   date={entry.date}
                   durationMinutes={entry.durationMinutes}
                   category={entry.category}
+                  origin={entry.origin}
+                  actor={entry.actor}
+                  onMarkDone={entry.activityId && entry.scheduled && !entry.done
+                    ? () => setActivities(activities.map((activity) => activity.id === entry.activityId
+                      ? { ...activity, done: true }
+                      : activity))
+                    : undefined}
                 />)}
                 {!filteredTimelineEntries.length && <p className="min-w-full rounded-xl border border-ink-700 bg-ink-900/40 p-5 text-center text-sm text-muted">{timelineEntries.length ? 'No entries match this filter.' : 'No activity has been recorded yet.'}</p>}
               </div>
@@ -2601,11 +2657,12 @@ export default function DealWorkspace({
       <Modal open={Boolean(activityModal)} onClose={() => setActivityModal(null)}
         title={activityModal === 'meeting' ? 'Schedule / Log Meeting'
           : activityModal === 'quote' ? 'Add insurer quote'
-            : activityModal === 'task' ? 'Schedule task' : 'Add note'}
+            : activityModal === 'schedule' ? 'Schedule next activity'
+              : activityModal === 'task' ? 'Schedule task' : 'Add note'}
         subtitle={selectedItem?.client}
-        footer={<><button type="button" className="btn-ghost" onClick={() => setActivityModal(null)}>Cancel</button><button type="submit" form="workspace-activity-form" className="btn-primary">{activityModal === 'meeting' ? 'Save Meeting' : activityModal === 'task' ? 'Save task' : 'Save activity'}</button></>}>
+        footer={<><button type="button" className="btn-ghost" onClick={() => setActivityModal(null)}>Cancel</button><button type="submit" form="workspace-activity-form" className="btn-primary">{activityModal === 'meeting' ? 'Save Meeting' : activityModal === 'schedule' ? 'Schedule activity' : activityModal === 'task' ? 'Save task' : 'Save activity'}</button></>}>
         <form id="workspace-activity-form" onSubmit={addActivity} className="space-y-3">
-          <Field label={activityModal === 'task' ? 'Task title' : 'Title'}><input className="input" name="title" required maxLength={120} placeholder={activityModal === 'meeting' ? 'Client placement review' : activityModal === 'quote' ? 'Commercial terms' : activityModal === 'task' ? 'Follow up with client' : 'Activity note'} /></Field>
+          <Field label={activityModal === 'task' || activityModal === 'schedule' ? 'Activity title' : 'Title'}><input className="input" name="title" required maxLength={120} placeholder={activityModal === 'meeting' ? 'Client placement review' : activityModal === 'quote' ? 'Commercial terms' : activityModal === 'task' || activityModal === 'schedule' ? 'Follow up with client' : 'Activity note'} /></Field>
           {activityModal === 'meeting' && <>
             <Field label="Date & Time *"><input className="input" name="activityDate" type="datetime-local" required defaultValue={localDateTimeInput()} /></Field>
             <Field label="Mode *"><select className="input" name="meetingMode" required defaultValue=""><option value="" disabled>Select meeting mode</option><option>Call</option><option>Online</option><option>Site Visit</option><option>Physical Meeting</option></select></Field>
@@ -2624,14 +2681,24 @@ export default function DealWorkspace({
             <Field label="Insurer"><input className="input" name="insurer" required placeholder="Insurer name" /></Field>
             <div className="grid grid-cols-2 gap-3"><Field label="Premium"><input className="input" name="quoteAmount" type="number" min="0" step="0.01" required /></Field><Field label="Currency"><select className="input" name="quoteCurrency" defaultValue="MVR"><option>MVR</option><option>USD</option></select></Field></div>
           </>}
-          {activityModal !== 'meeting' && activityModal !== 'task' && <Field label={activityModal === 'quote' ? 'Terms / coverage notes' : 'Note'}><textarea className="input min-h-24" name="description" required placeholder="Record the terms, coverage, or next steps." /></Field>}
+          {activityModal === 'schedule' && <>
+            <Field label="Activity type"><select className="input" name="activityType" defaultValue="task"><option value="task">Task</option><option value="meeting">Meeting</option><option value="call">Call</option><option value="email">Email</option></select></Field>
+            <Field label="Due date *"><input className="input" name="dueDate" type="datetime-local" required defaultValue={localDateTimeInput()} /></Field>
+            <Field label="Assignee"><select className="input" name="assigneeId" defaultValue={selectedItem?.ownerId ?? ''}><option value="">Unassigned</option>{users.filter((person) => person.role === 'admin' || person.role === 'sales').map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></Field>
+          </>}
+          {activityModal !== 'meeting' && activityModal !== 'task' && activityModal !== 'schedule' && <Field label={activityModal === 'quote' ? 'Terms / coverage notes' : 'Note'}><textarea className="input min-h-24" name="description" required placeholder="Record the terms, coverage, or next steps." /></Field>}
+          {activityModal === 'schedule' && <Field label="Note (optional)"><textarea className="input min-h-20" name="description" placeholder="Add context or expected outcome." /></Field>}
         </form>
       </Modal>
 
       <Modal open={Boolean(moveStage)} onClose={() => { setMoveStage(null); setMoveError(''); setWinReason(''); }} title="Update deal stage" subtitle={`${selectedDeal?.client} · ${moveStage?.name}`} size="lg"
-        footer={<><button type="button" className="btn-ghost" onClick={() => { setMoveStage(null); setMoveError(''); setWinReason(''); }}>Cancel</button><button type="button" className="btn-primary" onClick={() => moveStage && applyStageChange(moveStage, lossReason)}>Save stage</button></>}>
+        footer={<><button type="button" className="btn-ghost" onClick={() => { setMoveStage(null); setMoveError(''); setWinReason(''); }}>Cancel</button><button type="button" className="btn-primary" disabled={Boolean(company.requireNextActivityForStageChange && selectedDeal && activityForDeal(selectedDeal).state === 'none')} onClick={() => moveStage && applyStageChange(moveStage, lossReason)}>Save stage</button></>}>
         <div className="space-y-3">
           <Field label="New stage"><input className="input" value={moveStage?.name ?? ''} readOnly aria-readonly="true" /></Field>
+          {selectedDeal && activityForDeal(selectedDeal).state === 'none' && <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warm/30 bg-warm/5 p-3 text-xs text-warm">
+            <span><AlertTriangle size={13} className="mr-1 inline" />No next activity is scheduled. {company.requireNextActivityForStageChange ? 'Scheduling is required by Settings.' : 'You may continue without scheduling one.'}</span>
+            <button type="button" className="btn-ghost !px-2 !py-1" onClick={() => { setMoveStage(null); setActivityModal('schedule'); }}>Schedule next activity</button>
+          </div>}
           {requiresCommunicationChannels(moveStage?.name ?? '') && <>
             <p className="rounded-lg border border-warm/30 bg-warm/5 p-3 text-xs text-muted">Tender and quote-comparison stages require complete client details, validated contact channels, insurer assignment, and the product-specific intake listed below.</p>
             <div className="grid gap-3 sm:grid-cols-2">

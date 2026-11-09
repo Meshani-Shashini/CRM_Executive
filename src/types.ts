@@ -178,6 +178,7 @@ export interface Activity {
   date: string;
   dueDate?: string;
   done?: boolean;
+  assigneeId?: string;
   userId: string;
   meetingMode?: 'Call' | 'Online' | 'Site Visit' | 'Physical Meeting';
   venue?: string;
@@ -225,6 +226,7 @@ export interface QuotationRequest {
   attachments?: string[];
   status: 'Draft' | 'Sent' | 'Responses received' | 'Closed';
   createdBy: string;
+  updatedBy?: string;
   createdAt: string;
   updatedAt: string;
 }

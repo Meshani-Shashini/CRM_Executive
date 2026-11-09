@@ -138,4 +138,12 @@ export const COMPANY = {
   email: '',
   phone: '',
   registration: '',
+  requireNextActivityForStageChange: false,
+  leadStageSlaDays: {
+    'Lead Identified': 3,
+    'Contact Made': 5,
+    'Key Person Identified': 5,
+    'Intro Email Sent': 7,
+    'Meetings Ongoing': 10,
+  },
 };

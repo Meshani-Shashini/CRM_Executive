@@ -663,7 +663,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setPayments(asArray<Payment>(records, 'payments'));
         setStageHistory(asArray<StageHistoryAudit>(records, 'stage-history'));
         const companyRecord = records.find((record) => record.resource === 'company');
-        setCompany(companyRecord ? companyRecord.data as typeof COMPANY : COMPANY);
+        const savedCompany = companyRecord?.data;
+        const savedLeadStageSlaDays = savedCompany?.leadStageSlaDays;
+        setCompany({
+          ...COMPANY,
+          ...savedCompany,
+          requireNextActivityForStageChange: typeof savedCompany?.requireNextActivityForStageChange === 'boolean'
+            ? savedCompany.requireNextActivityForStageChange
+            : COMPANY.requireNextActivityForStageChange,
+          leadStageSlaDays: {
+            ...COMPANY.leadStageSlaDays,
+            ...(savedLeadStageSlaDays && typeof savedLeadStageSlaDays === 'object'
+              ? savedLeadStageSlaDays as Partial<typeof COMPANY.leadStageSlaDays>
+              : {}),
+          },
+        });
         const templatesRecord = records.find((record) => record.resource === 'email-templates');
         setEmailTemplates(templatesRecord
           ? templatesRecord.data.templates as Record<string, string>

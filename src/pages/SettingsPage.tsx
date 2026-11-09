@@ -9,6 +9,8 @@ import {
 import type { Activity, TaxRate, Role, User, ProductCode, Lead, Deal } from '../types';
 import { PRODUCT_CODES } from '../data/catalogs';
 import { formatStaffIdentifier } from '../utils/staff';
+import { resolveLeadStageSlaDays } from '../utils/leadStageSla';
+import { LEAD_ACTIVE_STAGES } from '../utils/leadLifecycle';
 
 type Tab = 'general' | 'tax' | 'products' | 'email' | 'users' | 'audit';
 
@@ -186,6 +188,30 @@ export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) 
             <Labeled label="Phone" value={companyDetails.phone} onChange={(value) => setCompanyDetails({ ...companyDetails, phone: value })} />
             <div className="sm:col-span-2"><Labeled label="Address" value={companyDetails.address} onChange={(value) => setCompanyDetails({ ...companyDetails, address: value })} /></div>
           </div>
+          <div className="rounded-xl border border-ink-600 bg-ink-900/40 p-4">
+            <h3 className="font-semibold text-white">Lead stage SLA targets</h3>
+            <p className="mt-1 text-xs text-muted">Target days before an active lead stage is considered overdue.</p>
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {LEAD_ACTIVE_STAGES.map((stage) => <label key={stage} className="text-xs text-muted">
+                <span className="mb-1 block">{stage}</span>
+                <input className="input" type="number" min="0" step="1" aria-label={`${stage} SLA days`}
+                  value={resolveLeadStageSlaDays(companyDetails.leadStageSlaDays)[stage]}
+                  onChange={(event) => setCompanyDetails({
+                    ...companyDetails,
+                    leadStageSlaDays: {
+                      ...resolveLeadStageSlaDays(companyDetails.leadStageSlaDays),
+                      [stage]: Number(event.target.value),
+                    },
+                  })} />
+              </label>)}
+            </div>
+          </div>
+          <label className="flex items-start gap-2 rounded-xl border border-ink-600 bg-ink-900/40 p-4 text-sm text-white">
+            <input type="checkbox" className="mt-0.5" checked={companyDetails.requireNextActivityForStageChange}
+              onChange={(event) => setCompanyDetails({ ...companyDetails, requireNextActivityForStageChange: event.target.checked })} />
+            <span><span className="block font-medium">Require a next activity before stage changes</span>
+              <span className="mt-1 block text-xs text-muted">When off, users see a warning and can continue without scheduling.</span></span>
+          </label>
           <button className="btn-primary" onClick={saveCompany}><Save size={14} /> Save Changes</button>
         </div>
       )}

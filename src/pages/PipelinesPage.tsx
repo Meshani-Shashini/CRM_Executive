@@ -15,6 +15,7 @@ import {
 } from '../utils/stageSla';
 import { promptQuotationRequestForDeal } from '../utils/navigation';
 import { linkDealToLead } from '../utils/dealFactory';
+import { getNextActivity } from '../utils/nextActivity';
 
 const legacyStageNames: Record<string, string> = {
   'Lead Identified': 'Fact-Finding & Risk Survey',
@@ -96,12 +97,14 @@ function subtractDays(date: string, days: number): string {
   return result.toISOString().slice(0, 10);
 }
 
-function nextActivityBadge(date?: string) {
-  if (!date) return { label: 'No next activity', tone: 'hot' as const };
-  const days = Math.ceil((Date.parse(date) - Date.now()) / 86400000);
-  if (days < 0) return { label: 'Activity overdue', tone: 'hot' as const };
-  if (days <= 3) return { label: `Due in ${days}d`, tone: 'warm' as const };
-  return { label: `Due in ${days}d`, tone: 'win' as const };
+function nextActivityBadge(activity: ReturnType<typeof getNextActivity>) {
+  const tone = activity.state === 'overdue' ? 'hot' as const
+    : activity.state === 'future' ? 'win' as const : 'warm' as const;
+  const label = activity.state === 'overdue' ? `Overdue · ${activity.title ?? formatDate(activity.date)}`
+    : activity.state === 'today' ? `Due today · ${activity.title ?? ''}`
+      : activity.state === 'future' ? `${activity.title ?? 'Next activity'} · ${formatDate(activity.date)}`
+        : 'No next activity';
+  return { label, tone };
 }
 
 type HealthState = 'Healthy' | 'At Risk' | 'Rotting';
@@ -179,7 +182,7 @@ function makeId() {
 export default function PipelinesPage() {
   const {
     user, deals, setDeals, setLeads, clients, pipelines, setPipelines, pipelineStages, setPipelineStages,
-    stageHistory, setStageHistory, invoices, setInvoices, quotationRequests,
+    stageHistory, setStageHistory, invoices, setInvoices, quotationRequests, activities, company, leads,
   } = useApp();
   const [pipelineId, setPipelineId] = useState(pipelines.find((pipeline) => pipeline.isActive)?.id ?? '');
   const [pipelineModalOpen, setPipelineModalOpen] = useState(false);
@@ -193,6 +196,7 @@ export default function PipelinesPage() {
   const [pendingMove, setPendingMove] = useState<{ dealId: string; stage: PipelineStage } | null>(null);
   const [moveOutcome, setMoveOutcome] = useState<'won' | 'lost' | ''>('');
   const [moveModalOpen, setMoveModalOpen] = useState(false);
+  const [activityWarningOnly, setActivityWarningOnly] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [healthFilter, setHealthFilter] = useState<HealthState | ''>('');
   const [intentFilter, setIntentFilter] = useState<IntentTier | ''>('');
@@ -286,15 +290,24 @@ export default function PipelinesPage() {
         return;
       }
     }
+    const linkedLeadId = leads.find((lead) => lead.id === deal.leadId || lead.dealId === deal.id)?.id;
+    const nextActivity = getNextActivity(activities, {
+      dealId: deal.id,
+      leadId: linkedLeadId ?? deal.leadId,
+      legacyDueDate: deal.nextActivityAt,
+      legacyTitle: deal.nextActivityTitle,
+    });
     const renewalWin = isRenewalPipeline(selectedPipeline) && isWonStage(target);
-    if (requiresCommunicationChannels(target.name)
+    const needsMoveDialog = requiresCommunicationChannels(target.name)
       || target.name.toLowerCase().includes('proposal')
       || target.requiresApproval
       || isLostStage(target)
       || isWonStage(target)
-      || renewalWin) {
+      || renewalWin;
+    if (needsMoveDialog || nextActivity.state === 'none') {
       setPendingMove({ dealId, stage: target });
       setMoveOutcome(isWonStage(target) || renewalWin ? 'won' : isLostStage(target) ? 'lost' : '');
+      setActivityWarningOnly(!needsMoveDialog);
       setMoveModalOpen(true);
       return;
     }
@@ -312,6 +325,13 @@ export default function PipelinesPage() {
     const now = new Date().toISOString();
     const movingDeal = deals.find((deal) => deal.id === dealId);
     if (!movingDeal || isTerminalDealStage(movingDeal.stage, movingDeal.disposition, stageForDeal(movingDeal))) return;
+    const linkedLeadId = leads.find((lead) => lead.id === movingDeal.leadId || lead.dealId === movingDeal.id)?.id;
+    if (company.requireNextActivityForStageChange && getNextActivity(activities, {
+      dealId: movingDeal.id,
+      leadId: linkedLeadId ?? movingDeal.leadId,
+      legacyDueDate: movingDeal.nextActivityAt,
+      legacyTitle: movingDeal.nextActivityTitle,
+    }).state === 'none') return;
     const reachesPolicyBound = Boolean(movingDeal && isWonStage(to) && !isWonStage(stageForDeal(movingDeal) ?? movingDeal.stage));
     const boundClient = movingDeal && clients.find((client) => client.name.trim().toLowerCase() === movingDeal.client.trim().toLowerCase());
     const renewalPipeline = pipelines.find((pipeline) => pipeline.isActive && isRenewalPipeline(pipeline));
@@ -440,6 +460,7 @@ export default function PipelinesPage() {
     setMoveModalOpen(false);
     setPendingMove(null);
     setMoveOutcome('');
+    setActivityWarningOnly(false);
     if (selectedPipeline?.code.toUpperCase() === 'COMMERCIAL'
       && to.stageOrder === 2
       && !quotationRequests.some((request) => request.dealId === dealId)) {
@@ -452,6 +473,13 @@ export default function PipelinesPage() {
     if (!pendingMove) return;
     const deal = deals.find((item) => item.id === pendingMove.dealId);
     if (!deal) return;
+    const linkedLeadId = leads.find((lead) => lead.id === deal.leadId || lead.dealId === deal.id)?.id;
+    if (company.requireNextActivityForStageChange && getNextActivity(activities, {
+      dealId: deal.id,
+      leadId: linkedLeadId ?? deal.leadId,
+      legacyDueDate: deal.nextActivityAt,
+      legacyTitle: deal.nextActivityTitle,
+    }).state === 'none') return;
     const current = stageForDeal(deal);
     if (!current) return;
     const data = new FormData(event.currentTarget);
@@ -609,7 +637,9 @@ export default function PipelinesPage() {
       return (!healthFilter || health === healthFilter) && (!intentFilter || intent === intentFilter);
     });
 
-  const moveTitle = pendingMove && (isWonStage(pendingMove.stage)
+  const moveTitle = activityWarningOnly
+    ? 'Confirm stage change'
+    : pendingMove && (isWonStage(pendingMove.stage)
     || (isRenewalPipeline(selectedPipeline) && isWonStage(pendingMove.stage)))
     ? 'Confirm deal outcome'
     : pendingMove && isLostStage(pendingMove.stage)
@@ -741,7 +771,13 @@ export default function PipelinesPage() {
                     const intent = intentForDeal(deal);
                     const score = dealHealthScore(elapsed, targetDays, deal.probability);
                     const recentHistory = historyForDeal(deal.id)[0];
-                    const nextActivity = nextActivityBadge(deal.nextActivityAt);
+                    const linkedLeadId = leads.find((lead) => lead.id === deal.leadId || lead.dealId === deal.id)?.id;
+                    const nextActivity = nextActivityBadge(getNextActivity(activities, {
+                      dealId: deal.id,
+                      leadId: linkedLeadId ?? deal.leadId,
+                      legacyDueDate: deal.nextActivityAt,
+                      legacyTitle: deal.nextActivityTitle,
+                    }));
                     return (
                       <article key={deal.id} className={`rounded-xl border bg-ink-800/80 p-3 ${health === 'Rotting' ? 'border-hot/70 shadow-[0_0_0_1px_rgba(255,70,70,0.15)]' : health === 'At Risk' ? 'border-warm/60' : 'border-ink-600'}`}>
                         <div className="flex items-start justify-between gap-2">
@@ -825,18 +861,36 @@ export default function PipelinesPage() {
 
       <Modal
         open={moveModalOpen}
-        onClose={() => { setMoveModalOpen(false); setPendingMove(null); setMoveOutcome(''); }}
+        onClose={() => { setMoveModalOpen(false); setPendingMove(null); setMoveOutcome(''); setActivityWarningOnly(false); }}
         title={moveTitle}
         subtitle={pendingMove ? `${deals.find((deal) => deal.id === pendingMove.dealId)?.client} → ${pendingMove.stage.name}` : undefined}
         size="md"
         footer={<>
-          <button type="button" className="btn-ghost" onClick={() => { setMoveModalOpen(false); setPendingMove(null); setMoveOutcome(''); }}>Cancel</button>
-          <button type="submit" form="stage-gate-form" className="btn-primary">
-            <Check size={14} /> {moveOutcome === 'won' ? 'Confirm Won' : moveOutcome === 'lost' ? 'Confirm Lost' : 'Confirm Stage'}
+          <button type="button" className="btn-ghost" onClick={() => { setMoveModalOpen(false); setPendingMove(null); setMoveOutcome(''); setActivityWarningOnly(false); }}>Cancel</button>
+          <button type="submit" form="stage-gate-form" className="btn-primary" disabled={Boolean(company.requireNextActivityForStageChange && pendingMoveDeal
+            && getNextActivity(activities, {
+              dealId: pendingMoveDeal.id,
+              leadId: leads.find((lead) => lead.id === pendingMoveDeal.leadId || lead.dealId === pendingMoveDeal.id)?.id ?? pendingMoveDeal.leadId,
+              legacyDueDate: pendingMoveDeal.nextActivityAt,
+              legacyTitle: pendingMoveDeal.nextActivityTitle,
+            }).state === 'none')}>
+            <Check size={14} /> {activityWarningOnly && !company.requireNextActivityForStageChange
+              ? 'Continue without activity'
+              : moveOutcome === 'won' ? 'Confirm Won' : moveOutcome === 'lost' ? 'Confirm Lost' : 'Confirm Stage'}
           </button>
         </>}
       >
         <form id="stage-gate-form" onSubmit={submitGatedMove} className="space-y-3">
+          {pendingMoveDeal && getNextActivity(activities, {
+            dealId: pendingMoveDeal.id,
+            leadId: leads.find((lead) => lead.id === pendingMoveDeal.leadId || lead.dealId === pendingMoveDeal.id)?.id ?? pendingMoveDeal.leadId,
+            legacyDueDate: pendingMoveDeal.nextActivityAt,
+            legacyTitle: pendingMoveDeal.nextActivityTitle,
+          }).state === 'none' && <p role="status" className="rounded-lg border border-warm/30 bg-warm/5 p-3 text-xs text-warm">
+            <Clock3 size={13} className="mr-1 inline" />No next activity is scheduled. {company.requireNextActivityForStageChange
+              ? 'Settings require a scheduled activity before this change. Open the deal details to schedule one.'
+              : 'You can schedule one now from the deal details or continue without one.'}
+          </p>}
           {pendingMove && (isWonStage(pendingMove.stage)
             || (isRenewalPipeline(selectedPipeline) && isWonStage(pendingMove.stage))) && <>
             <p className="rounded-lg border border-win/30 bg-win/5 p-3 text-sm text-muted">
@@ -849,12 +903,12 @@ export default function PipelinesPage() {
               Confirm the policy renewal. It will remain in the Annual Renewals pipeline as Won; proceed with invoicing and active sales follow-up.
             </p>
           )}
-          {pendingMove && isLostStage(pendingMove.stage) ? (
+          {!activityWarningOnly && pendingMove && isLostStage(pendingMove.stage) ? (
             <>
               <Field label="Loss reason (required)"><select className="input" name="lossReason" required defaultValue=""><option value="" disabled>Select a reason</option>{getPipelineLossReasons(pendingMovePipelineCode).map((reason) => <option key={reason}>{reason}</option>)}</select></Field>
               <Field label="Additional notes"><textarea className="input min-h-20" name="notes" /></Field>
             </>
-          ) : pendingMove
+          ) : !activityWarningOnly && pendingMove
             && !isWonStage(pendingMove.stage)
             && !(isRenewalPipeline(selectedPipeline) && isWonStage(pendingMove.stage)) ? (
             <>

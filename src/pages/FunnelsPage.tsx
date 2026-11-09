@@ -3,6 +3,13 @@ import { BarChart3, TrendingDown } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import { useApp } from '../store/AppContext';
 import { isLostPipelineStage } from '../utils/stageSla';
+import { resolveLeadStageSlaDays } from '../utils/leadStageSla';
+import { buildLeadStageHistoryRecords } from '../utils/leadLifecycle';
+import { summarizeStageVisits, type StageVisit } from '../utils/stageDuration';
+
+function durationLabel(days?: number) {
+  return days === undefined ? '—' : `${days.toFixed(1)} d`;
+}
 
 function isLostStage(stage: Parameters<typeof isLostPipelineStage>[0]) {
   const isLost = isLostPipelineStage(stage);
@@ -20,7 +27,7 @@ function isCombinedDispositionStage(stage: Parameters<typeof isLostPipelineStage
 }
 
 export default function FunnelsPage() {
-  const { pipelines, pipelineStages, stageHistory } = useApp();
+  const { pipelines, pipelineStages, stageHistory, deals, leads, company } = useApp();
   const [pipelineId, setPipelineId] = useState(pipelines.find((pipeline) => pipeline.isActive)?.id ?? '');
   useEffect(() => {
     if (!pipelines.some((pipeline) => pipeline.id === pipelineId && pipeline.isActive)) {
@@ -74,6 +81,47 @@ export default function FunnelsPage() {
       .map((entry) => entry.dealId)).size
     : 0;
   const totalTracked = new Set(stageHistory.filter((entry) => stages.some((stage) => stage.id === entry.toStageId)).map((entry) => entry.dealId)).size;
+  const dealStageVisits: StageVisit[] = deals
+    .filter((deal) => deal.pipelineId === pipelineId)
+    .flatMap((deal) => {
+      const history = stageHistory
+        .filter((entry) => entry.dealId === deal.id && entry.fromStageId !== entry.toStageId)
+        .sort((left, right) => Date.parse(left.enteredAt) - Date.parse(right.enteredAt));
+      const visits: StageVisit[] = history.flatMap((entry) => {
+        const stage = pipelineStages.find((candidate) => candidate.id === entry.toStageId);
+        return stage ? [{
+          recordId: deal.id,
+          stageName: stage.name,
+          enteredAt: entry.enteredAt,
+          exitedAt: entry.exitedAt,
+          targetDays: stage.stagnationDaysThreshold,
+        }] : [];
+      });
+      if (!history.some((entry) => !entry.exitedAt && pipelineStages.find((stage) => stage.id === entry.toStageId)?.name === deal.stage)) {
+        const currentStage = pipelineStages.find((stage) => stage.pipelineId === deal.pipelineId && stage.name === deal.stage);
+        const enteredAt = deal.stageChangedAt ?? deal.createdAt;
+        if (currentStage && enteredAt) visits.push({
+          recordId: deal.id,
+          stageName: currentStage.name,
+          enteredAt,
+          targetDays: currentStage.stagnationDaysThreshold,
+        });
+      }
+      return visits;
+    });
+  const dealDurationSummary = summarizeStageVisits(dealStageVisits);
+  const leadStageVisits: StageVisit[] = leads.flatMap((lead) => buildLeadStageHistoryRecords([lead]).map((record) => {
+    const stage = record.stage;
+    const resolvedSla = resolveLeadStageSlaDays(company.leadStageSlaDays);
+    return {
+      recordId: lead.id,
+      stageName: stage,
+      enteredAt: record.entered_at,
+      exitedAt: record.exited_at,
+      targetDays: resolvedSla[stage as keyof typeof resolvedSla],
+    };
+  }));
+  const leadDurationSummary = summarizeStageVisits(leadStageVisits);
 
   return (
     <div className="space-y-5">
@@ -126,8 +174,50 @@ export default function FunnelsPage() {
           <p className="mt-5 text-xs text-muted">Conversion rates count distinct deals with an audit entry in both consecutive stages.</p>
         </div>
       )}
+      <section className="glass space-y-4 rounded-2xl p-5">
+        <div>
+          <h3 className="font-semibold text-white">Stage duration analytics</h3>
+          <p className="mt-1 text-xs text-muted">Average and median time in each stage and between consecutive stages.</p>
+        </div>
+        <DurationTable title="Selected deal pipeline" summary={dealDurationSummary} />
+        <div className="border-t border-ink-700 pt-4">
+          <DurationTable title="Lead funnel" summary={leadDurationSummary} />
+        </div>
+      </section>
     </div>
   );
+}
+
+function DurationTable({ title, summary }: {
+  title: string;
+  summary: ReturnType<typeof summarizeStageVisits>;
+}) {
+  return <div>
+    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <h4 className="text-sm font-medium text-white">{title}</h4>
+      <Badge variant={summary.stagnantCount ? 'hot' : 'muted'}>{summary.stagnantCount} stagnating</Badge>
+    </div>
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[560px] text-left text-xs" aria-label={`${title} duration metrics`}>
+        <thead className="text-muted"><tr><th className="pb-2 pr-3 font-medium">Stage / transition</th><th className="pb-2 pr-3 font-medium">Records</th><th className="pb-2 pr-3 font-medium">Average</th><th className="pb-2 font-medium">Median</th></tr></thead>
+        <tbody>
+          {summary.stages.map((stage) => <tr key={`stage-${stage.stageName}`} className="border-t border-ink-700/70">
+            <td className="py-2 pr-3 text-white">{stage.stageName}{stage.stagnantCount > 0 && <span className="ml-2 text-hot">{stage.stagnantCount} overdue</span>}</td>
+            <td className="py-2 pr-3 text-muted">{stage.sampleCount}</td>
+            <td className="py-2 pr-3 text-muted">{durationLabel(stage.averageDays)}</td>
+            <td className="py-2 text-muted">{durationLabel(stage.medianDays)}</td>
+          </tr>)}
+          {summary.transitions.map((transition) => <tr key={`transition-${transition.fromStage}-${transition.toStage}`} className="border-t border-ink-700/70">
+            <td className="py-2 pr-3 text-muted">{transition.fromStage} → {transition.toStage}</td>
+            <td className="py-2 pr-3 text-muted">{transition.sampleCount}</td>
+            <td className="py-2 pr-3 text-muted">{durationLabel(transition.averageDays)}</td>
+            <td className="py-2 text-muted">{durationLabel(transition.medianDays)}</td>
+          </tr>)}
+          {!summary.stages.length && <tr><td colSpan={4} className="py-4 text-center text-muted">No stage history available.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  </div>;
 }
 
 function Metric({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {

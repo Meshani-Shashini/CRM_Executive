@@ -43,6 +43,7 @@ describe('Deal list row accessibility', () => {
       stageHistory: [], setStageHistory: vi.fn(), invoices: [], setInvoices: vi.fn(),
       user: { id: 'user-1', name: 'QA User', email: 'qa@example.com', role: 'sales' },
       users: [], vendors: [], viewAsRole: null, quotationRequests: [],
+      company: { requireNextActivityForStageChange: false },
     });
   });
 

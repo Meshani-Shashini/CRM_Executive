@@ -186,7 +186,7 @@ export default function QSlipsPage() {
     if (!canTransitionQuotationRequestStatus(request.status, status, activeRole)) return;
     const now = new Date().toISOString();
     setQuotationRequests((current) => current.map((item) => item.id === request.id
-      ? { ...item, status, updatedAt: now }
+      ? { ...item, status, updatedBy: user.id, updatedAt: now }
       : item));
   };
 

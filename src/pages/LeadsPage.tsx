@@ -30,6 +30,8 @@ import {
 } from '../utils/leadLifecycle';
 import { formatStaffIdentifier } from '../utils/staff';
 import { buildLeadConversion } from '../utils/leadConversion';
+import { getNextActivity } from '../utils/nextActivity';
+import { getLeadStageSla } from '../utils/leadStageSla';
 
 const tableBadgeClass = 'inline-flex h-6 items-center gap-1 whitespace-nowrap rounded-full border px-1.5 text-[9px] font-bold leading-none tracking-wide uppercase';
 
@@ -78,6 +80,35 @@ function boardStageForLead(
   ));
 }
 
+function NextActivityIndicator({ state, date, title, compact = false }: {
+  state: 'overdue' | 'today' | 'future' | 'none';
+  date?: string;
+  title?: string;
+  compact?: boolean;
+}) {
+  const tone = state === 'overdue' ? 'text-hot' : state === 'future' ? 'text-emerald-300' : 'text-amber-300';
+  const dot = state === 'overdue' ? 'bg-hot' : state === 'future' ? 'bg-emerald-400' : 'bg-amber-400';
+  const label = date ? formatDate(date) : title ?? 'No activity';
+  return <span className={`inline-flex min-w-0 items-center gap-1.5 ${tone}`} title={`${title ?? label}${date ? ` · ${label}` : ''}`}>
+    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
+    {!compact && <span className="truncate">{label}</span>}
+  </span>;
+}
+
+function LeadStageSlaIndicator({ lead, stage, targets }: {
+  lead: Lead;
+  stage: LeadLifecycleStage;
+  targets: ReturnType<typeof useApp>['company']['leadStageSlaDays'];
+}) {
+  if (!LEAD_ACTIVE_STAGES.includes(stage as (typeof LEAD_ACTIVE_STAGES)[number])) return null;
+  const sla = getLeadStageSla(lead, stage, targets);
+  if (!sla) return null;
+  return <span className="inline-flex items-center gap-1 text-[10px] text-muted">
+    {Math.floor(sla.elapsedDays)}d in stage
+    {sla.overdue && <Badge variant="hot">Overdue</Badge>}
+  </span>;
+}
+
 function boardStageIcon(stage: LeadLifecycleStage) {
   if (stage === 'Lead Identified') return CircleDot;
   if (stage === 'Contact Made') return UserRound;
@@ -92,7 +123,7 @@ export default function LeadsPage() {
   const {
     leads, setLeads, deals, setDeals, clients, setClients, user, users, pipelines,
     pipelineStages, setStageHistory, customerLookups, setCustomerLookups, products, activities, setActivities, viewAsRole,
-    quotationRequests,
+    quotationRequests, company,
   } = useApp();
   const activeRole = viewAsRole ?? user.role;
   const PRODUCT_CODES = products;
@@ -248,6 +279,12 @@ export default function LeadsPage() {
     }
     const currentStage = boardStageForLead(lead, linkedDealIds, linkedLeadIds);
     if (stage === currentStage || isTerminalLeadStage(currentStage)) return;
+    const linkedDeal = deals.find((deal) => deal.id === lead.dealId || deal.leadId === lead.id);
+    const hasNextActivity = getNextActivity(activities, { leadId: lead.id, dealId: linkedDeal?.id }).state !== 'none';
+    if (!hasNextActivity && company.requireNextActivityForStageChange) {
+      window.alert('Schedule a next activity before moving this lead to another stage.');
+      return;
+    }
     if (stage === 'Converted to deal') {
       setInspectedLeadId(lead.id);
       return;
@@ -526,6 +563,16 @@ export default function LeadsPage() {
     const valueMvr = toMvr(amount, leadCurrency, rate);
     const now = new Date().toISOString();
     const stageChanged = Boolean(editingLead && leadBoardStage !== boardStageForLead(editingLead, linkedDealIds, linkedLeadIds));
+    const linkedLeadDeal = editingLead
+      ? deals.find((deal) => deal.id === editingLead.dealId || deal.leadId === editingLead.id)
+      : undefined;
+    const hasNextActivity = editingLead
+      ? getNextActivity(activities, { leadId: editingLead.id, dealId: linkedLeadDeal?.id }).state !== 'none'
+      : true;
+    if (stageChanged && !hasNextActivity && company.requireNextActivityForStageChange) {
+      setFormError('Schedule a next activity from the Lead Activity section before changing its stage.');
+      return;
+    }
     const stageHistory = editingLead && stageChanged
       ? appendLeadStageTransition(editingLead, leadBoardStage, now)
       : editingLead?.stageHistory ?? [];
@@ -733,6 +780,8 @@ export default function LeadsPage() {
                   const isLinked = Boolean((lead.dealId && linkedDealIds.has(lead.dealId)) || linkedLeadIds.has(lead.id));
                   const currentStage = boardStageForLead(lead, linkedDealIds, linkedLeadIds);
                   const isTerminal = isTerminalLeadStage(currentStage);
+                  const linkedDeal = deals.find((deal) => deal.id === lead.dealId || deal.leadId === lead.id);
+                  const nextActivity = getNextActivity(activities, { leadId: lead.id, dealId: linkedDeal?.id });
                   return <article key={lead.id} draggable={!isLinked && !isTerminal}
                     onDragStart={(event) => {
                       event.dataTransfer.setData('text/lead-id', lead.id);
@@ -763,6 +812,10 @@ export default function LeadsPage() {
                       <span className="font-medium text-white">{formatAmount(lead.valueMvr ?? toMvr(lead.value ?? lead.premium, lead.currency ?? 'MVR', lead.exchangeRate), 'MVR')}</span>
                     </div>
                     <div className="mt-1 text-[10px] text-muted">Expected close {formatDate(lead.closeDate ?? lead.renewalDate)}</div>
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[10px]">
+                      <LeadStageSlaIndicator lead={lead} stage={currentStage} targets={company.leadStageSlaDays} />
+                      <NextActivityIndicator {...nextActivity} compact />
+                    </div>
                     <label className="mt-2 block">
                       <span className="sr-only">Move {lead.title ?? lead.client} to stage</span>
                       <select className="input !min-h-8 !py-1 text-[11px]" value={currentStage} disabled={isLinked || isTerminal} onClick={(event) => event.stopPropagation()} onChange={(event) => moveLeadToStage(lead, event.target.value as LeadLifecycleStage)}>
@@ -792,6 +845,16 @@ export default function LeadsPage() {
                 <div className="flex items-center justify-between text-sm text-white"><span>{stage}</span><Badge variant="muted">{stageLeads.length}</Badge></div>
                 <div className="mt-3 text-xl font-semibold text-brand-200">{formatAmount(total, 'MVR')}</div>
                 <div className="mt-1 text-xs text-muted">Unweighted pipeline value</div>
+                <div className="mt-3 max-h-36 space-y-2 overflow-y-auto border-t border-ink-700 pt-2">
+                  {stageLeads.map((lead) => {
+                    const linkedDeal = deals.find((deal) => deal.id === lead.dealId || deal.leadId === lead.id);
+                    return <div key={lead.id} className="flex items-center justify-between gap-2 text-[10px]">
+                      <span className="min-w-0 truncate text-white">{lead.title ?? lead.client}</span>
+                      <NextActivityIndicator {...getNextActivity(activities, { leadId: lead.id, dealId: linkedDeal?.id })} compact />
+                    </div>;
+                  })}
+                  {!stageLeads.length && <span className="text-[10px] text-muted">No leads in this stage.</span>}
+                </div>
               </div>;
             })}
           </div>
@@ -812,6 +875,8 @@ export default function LeadsPage() {
             <tbody>
               {searchedLeads.map((lead) => {
                 const stage = boardStageForLead(lead, linkedDealIds, linkedLeadIds);
+                const linkedDeal = deals.find((deal) => deal.id === lead.dealId || deal.leadId === lead.id);
+                const nextActivity = getNextActivity(activities, { leadId: lead.id, dealId: linkedDeal?.id });
                 const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? formatStaffIdentifier(lead.ownerId);
                 const statusVariant = lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win';
                 return <tr key={lead.id} role="link" tabIndex={0} aria-label={`Open lead details for ${lead.title ?? lead.client}`} draggable={!isTerminalLeadStage(stage) && !((lead.dealId && linkedDealIds.has(lead.dealId)) || linkedLeadIds.has(lead.id))} className="cursor-pointer border-b border-[#1B1E22] last:border-0 transition-colors hover:bg-[#111214] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-400"
@@ -841,6 +906,7 @@ export default function LeadsPage() {
                         ? <StagePill stage={stage} outcome={stage === 'Lost' ? 'lost' : 'won'} uppercase />
                         : <span className="min-w-0 flex-1 truncate">{stage}</span>}
                     </span>
+                    <LeadStageSlaIndicator lead={lead} stage={stage} targets={company.leadStageSlaDays} />
                   </td>
                   <td data-label={leadTableColumns[3].label} className="whitespace-nowrap px-2 py-2 font-normal"><ProductCodePill code={lead.productCode} name={products.find((product) => product.code === lead.productCode)?.name} /></td>
                   <td data-label={leadTableColumns[4].label} className="whitespace-nowrap px-1 py-2 font-normal" onClick={(event) => event.stopPropagation()}>
@@ -855,6 +921,7 @@ export default function LeadsPage() {
                     <span className={`lead-table-status ${tableBadgeClass} ${statusVariant === 'todo' ? 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]' : statusVariant === 'backlog' ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]' : statusVariant === 'in-progress' ? 'border-[#25375B] bg-[#101C39] text-[#5B8DEF]' : 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]'}`}>
                       <CheckCircle2 size={11} className="shrink-0" /> {lead.status}
                     </span>
+                    <div className="mt-1 text-[10px]"><NextActivityIndicator {...nextActivity} /></div>
                   </td>
                   <td data-label={leadTableColumns[6].label} className="px-2 py-2 font-normal">
                     <OwnerCell name={ownerName} />
@@ -936,7 +1003,12 @@ export default function LeadsPage() {
         title={pendingLeadStageChange ? 'Update Lead Stage' : editingLead ? 'Edit Lead' : 'Add Lead'}
         subtitle={pendingLeadStageChange ? `Move from ${pendingLeadStageChange.from} to ${pendingLeadStageChange.to}.` : editingLead ? 'Update this lead in its sales pipeline.' : 'Create a lead in a sales pipeline.'}
         size="lg"
-        footer={<><button type="button" className="btn-ghost" onClick={() => { setNewLeadOpen(false); resetLeadForm(); }}><X size={14} /> Cancel</button><button type="submit" form="new-lead-form" className="btn-primary">Save</button></>}
+        footer={<><button type="button" className="btn-ghost" onClick={() => { setNewLeadOpen(false); resetLeadForm(); }}><X size={14} /> Cancel</button><button type="submit" form="new-lead-form" className="btn-primary"
+          disabled={Boolean(editingLead && pendingLeadStageChange && company.requireNextActivityForStageChange
+            && getNextActivity(activities, {
+              leadId: editingLead.id,
+              dealId: deals.find((deal) => deal.id === editingLead.dealId || deal.leadId === editingLead.id)?.id,
+            }).state === 'none')}>Save</button></>}
       >
         <form id="new-lead-form" onSubmit={createLead} noValidate className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <SectionHeading title="Basic Information" />
@@ -1133,6 +1205,15 @@ export default function LeadsPage() {
           </Field>}
           {pendingLeadStageChange && <div className="sm:col-span-2 rounded-lg border border-brand-400/20 bg-brand-400/5 p-3">
             <p className="mb-2 text-xs text-muted">Stage change: <span className="text-white">{pendingLeadStageChange.from} → {pendingLeadStageChange.to}</span></p>
+            {editingLead && getNextActivity(activities, {
+              leadId: editingLead.id,
+              dealId: deals.find((deal) => deal.id === editingLead.dealId || deal.leadId === editingLead.id)?.id,
+            }).state === 'none' && <p role="status" className="mb-2 flex items-start gap-2 text-xs text-warm">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              No next activity is scheduled. {company.requireNextActivityForStageChange
+                ? 'Schedule one from the Lead Activity section before saving.'
+                : 'You may continue without scheduling one.'}
+            </p>}
             <Field label="Remarks / Notes (optional)"><textarea className="input min-h-20" value={stageChangeRemarks} onChange={(event) => setStageChangeRemarks(event.target.value)} placeholder="Add stage-change notes to the activity timeline." maxLength={2000} /></Field>
           </div>}
           <Field label="Deal pipeline">
