@@ -47,6 +47,8 @@ async function selectDealForInspection(page: Page, title: string) {
     const goToList = page.getByRole('button', { name: 'Go to List' });
     if (await goToList.count()) await goToList.click();
   }
+  const pipelineFilter = page.getByLabel('Filter deals by pipeline');
+  if (await pipelineFilter.count()) await pipelineFilter.selectOption({ label: 'All pipelines' });
   const dealRow = page.getByRole('link', { name: `Open deal details for ${title}` });
   await dealRow.focus();
   await page.keyboard.press('Enter');
@@ -115,9 +117,7 @@ for (const viewport of viewports) {
   test(`deal stage stepper fits at ${viewport.width}x${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.goto('/#/deals');
-    await page.getByRole('tab', { name: 'Inspection' }).click();
-    await expect(page.getByRole('heading', { name: 'No record selected' })).toBeVisible();
-    await page.getByRole('button', { name: 'Go to List' }).click();
+    await page.getByRole('tab', { name: 'List' }).click();
     await selectDealForInspection(page, 'Bonavista Maldives - Contractors All Risks');
 
     const stepper = await captureStepper(page, 'open', viewport.width, 6);

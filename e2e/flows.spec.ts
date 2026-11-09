@@ -13,11 +13,15 @@ test('lead conversion creates one linked deal and blocks a second conversion', a
   await convertedRow.getByRole('button', { name: `Actions for ${title}` }).click();
   await expect(page.getByRole('menuitem', { name: 'Convert to Deal' })).toHaveCount(0);
   await page.goto('/#/deals');
+  await page.getByRole('tab', { name: 'List' }).click();
+  await page.getByLabel('Filter deals by pipeline').selectOption({ label: 'All pipelines' });
   await expect(page.getByText('6 deals', { exact: true })).toBeVisible();
 });
 
-test('changing a deal stage in List is reflected in Kanban', async ({ page }) => {
+test('changing a deal stage in List is reflected in Pipeline', async ({ page }) => {
   await page.goto('/#/deals');
+  await page.getByRole('tab', { name: 'List' }).click();
+  await page.getByLabel('Filter deals by pipeline').selectOption({ label: 'All pipelines' });
   const title = 'Male Retail Package';
   const row = page.getByRole('link', { name: `Open deal details for ${title}` });
   const stageTrigger = row.getByRole('button', { name: `Change stage for ${title}` });
@@ -26,24 +30,86 @@ test('changing a deal stage in List is reflected in Kanban', async ({ page }) =>
     .getByRole('menuitem', { name: 'Client Confirmation' }).click();
   await expect(page.getByRole('heading', { name: 'Update deal stage' })).toBeVisible();
   await page.getByRole('button', { name: 'Save stage' }).click();
-  await page.getByRole('tab', { name: 'Kanban' }).click();
-  await page.getByLabel('Select deal pipeline').selectOption({ label: 'Retail, SME & Velocity Packages' });
+  await page.getByRole('tab', { name: 'Pipeline' }).click();
+  await page.getByLabel('Filter deals by pipeline').selectOption({ label: 'Retail, SME & Velocity Packages' });
   await expect(page.locator('.deals-board > section').filter({ hasText: 'Client Confirmation' })
-    .getByRole('button', { name: /Lagoon Resorts Dwelling Fire/ })).toBeVisible();
+    .getByRole('button', { name: /Male Retail Package/ })).toBeVisible();
 });
 
-test('legacy deal import creates and displays a linked lead', async ({ page }) => {
+test('legacy deal import creates a deal row without exposing linked lead IDs', async ({ page }) => {
   await page.goto('/#/deals');
-  await page.getByRole('button', { name: '+ Legacy deal' }).click();
+  await page.getByRole('button', { name: 'Legacy deal' }).click();
   await expect(page.getByRole('heading', { name: 'Import legacy deal' })).toBeVisible();
   await page.getByLabel('Remark *').fill('Imported for browser QA.');
   await page.getByRole('button', { name: 'Create legacy deal' }).click();
+  await page.getByRole('tab', { name: 'List' }).click();
 
   const legacyDeal = page.getByRole('link', { name: 'Open deal details for Legacy import' });
   await expect(legacyDeal).toBeVisible();
-  const linkedLeadCell = legacyDeal.locator('td[data-label="Linked Lead"]');
-  await expect(linkedLeadCell).toContainText('Legacy import');
-  await expect(linkedLeadCell).not.toContainText('lead-');
+  await expect(page.getByRole('columnheader', { name: 'Linked Lead' })).toHaveCount(0);
+  const dealCell = legacyDeal.locator('td[data-label="Deal"]');
+  await expect(dealCell).toContainText('Legacy import');
+  await expect(legacyDeal).not.toContainText(/lead-[a-z0-9-]+/i);
+});
+
+test('deal search is shared across views and forecast drag updates expected close', async ({ page }) => {
+  await page.goto('/#/deals?view=list');
+  await page.getByRole('searchbox', { name: 'Search deals' }).fill('Male Retail Package');
+  await expect(page.getByRole('link', { name: 'Open deal details for Male Retail Package' })).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Pipeline' }).click();
+  await page.getByLabel('Filter deals by pipeline').selectOption({ label: 'Retail, SME & Velocity Packages' });
+  const pipelineCard = page.locator('.deals-board article[data-deal-id]').filter({ hasText: 'Male Retail Package' });
+  await expect(pipelineCard).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Forecast' }).click();
+  const forecast = page.getByLabel('Deal forecast');
+  const card = forecast.locator('article[data-deal-id]').filter({ hasText: 'Male Retail Package' }).first();
+  await expect(card).toBeVisible();
+  const dealId = await card.getAttribute('data-deal-id');
+  const sourcePeriod = await card.evaluate((element) => element.closest<HTMLElement>('section')?.dataset.periodStart);
+  const sourceDate = await card.getAttribute('data-expected-close');
+  const periodColumns = forecast.locator('.forecast-periods > section');
+  const targets = await periodColumns.evaluateAll((elements) => elements.map((element, index) => ({
+    index,
+    start: (element as HTMLElement).dataset.periodStart,
+  })));
+  const target = targets.find((period) => period.start !== sourcePeriod && period.start !== sourceDate);
+  expect(target).toBeDefined();
+  await card.dragTo(periodColumns.nth(target!.index));
+  const movedCard = forecast.locator(`article[data-deal-id="${dealId}"]`);
+  await expect(movedCard).toHaveAttribute('data-expected-close', target!.start ?? '');
+  await movedCard.getByRole('button').click();
+  const activityTimeline = page.getByTestId('workspace-activity');
+  await expect(activityTimeline.getByText('Expected close changed', { exact: true })).toBeVisible();
+  await expect(activityTimeline).toContainText('Demo Administrator');
+});
+
+test('dragging a pipeline card to Lost opens the mandatory loss-reason flow', async ({ page }) => {
+  await page.goto('/#/deals');
+  await page.getByLabel('Filter deals by pipeline').selectOption({ label: 'Commercial Lines Brokerage' });
+  await expect(page.getByLabel('Show closed deals')).toHaveCount(0);
+  const dealCard = page.locator('.deals-board article[data-deal-id]').filter({ hasText: 'Bonavista Maldives - Contractors All Risks' });
+  const lostColumn = page.locator('.deals-board > section[data-stage-name="Lost / Market Declined"]');
+  await expect(dealCard).toBeVisible();
+  await dealCard.dragTo(lostColumn);
+  await expect(page.getByRole('heading', { name: 'Update deal stage' })).toBeVisible();
+  await page.getByRole('button', { name: 'Save stage' }).click();
+  await expect(page.getByRole('alert')).toHaveText('A loss reason is mandatory.');
+  await page.getByRole('button', { name: 'Cancel' }).click();
+});
+
+test('archive outcome filter shows only the selected closed-deal state', async ({ page }) => {
+  await page.goto('/#/deals?view=archive');
+  const archive = page.locator('.deals-archive-fit');
+  const outcome = page.getByLabel('Filter archived deals');
+  await expect(archive).toBeVisible();
+  await outcome.selectOption('won');
+  await expect(archive).toContainText('Lagoon Resort Fire Cover');
+  await expect(archive).not.toContainText('Coral Construction Machinery Cover');
+  await outcome.selectOption('lost');
+  await expect(archive).toContainText('Coral Construction Machinery Cover');
+  await expect(archive).not.toContainText('Lagoon Resort Fire Cover');
 });
 
 test('vendor email validation blocks invalid input and Escape closes the modal', async ({ page }) => {
@@ -97,6 +163,8 @@ test('linked lead, deal, and vendor deletion is blocked', async ({ page }) => {
   await expect(page.getByRole('link', { name: `Open lead details for ${leadTitle}` })).toBeVisible();
 
   await page.goto('/#/deals');
+  await page.getByRole('tab', { name: 'List' }).click();
+  await page.getByLabel('Filter deals by pipeline').selectOption({ label: 'All pipelines' });
   const dealTitle = 'Coral Construction Machinery Cover';
   const dealRow = page.getByRole('link', { name: `Open deal details for ${dealTitle}` });
   await dealRow.getByRole('button', { name: `Actions for ${dealTitle}` }).click();

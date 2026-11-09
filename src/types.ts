@@ -176,6 +176,8 @@ export interface Activity {
   title: string;
   description: string;
   date: string;
+  dueDate?: string;
+  done?: boolean;
   userId: string;
   meetingMode?: 'Call' | 'Online' | 'Site Visit' | 'Physical Meeting';
   venue?: string;

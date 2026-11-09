@@ -84,25 +84,30 @@ for (const viewport of viewports) {
     await takeViewportScreenshot(page, `leads-inspection-${sizeLabel}`);
 
     await page.goto('/#/deals');
-    const tabs = page.getByRole('tablist', { name: 'Deal workspace views' }).getByRole('tab');
-    await expect(tabs).toHaveText(['List', 'Kanban', 'Inspection']);
+    const tabs = page.getByRole('tablist', { name: 'Deal views' }).getByRole('tab');
+    await expect.poll(() => tabs.evaluateAll((items) => items.map((item) => item.getAttribute('aria-label'))))
+      .toEqual(['Pipeline', 'List', 'Forecast', 'Archive']);
+    await expect.poll(() => tabs.evaluateAll((items) => items.map((item) => item.getAttribute('title'))))
+      .toEqual(['Pipeline', 'List', 'Forecast', 'Archive']);
     await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true');
-    await tabs.nth(2).click();
-    await expect(page.getByRole('heading', { name: 'No record selected' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Go to List' })).toBeVisible();
-    await expect(page.getByText('Deals & Leads', { exact: true })).toHaveCount(0);
-    await expect(page.getByText(/Lead 360/i)).toHaveCount(0);
-    await page.getByRole('button', { name: 'Go to List' }).click();
+    await tabs.nth(0).focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('ArrowLeft');
     await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true');
+    await assertNoHorizontalOverflow(page);
+    await takeViewportScreenshot(page, `deals-pipeline-${sizeLabel}`);
+
+    await tabs.nth(1).click();
+    await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
     await assertTableFields(page);
     await assertNoHorizontalOverflow(page);
     const dealCells = page.locator('.deals-list-fit tbody tr[data-pipeline-id] td[data-label="Client"]');
     await expect(dealCells.first()).toHaveCSS('font-size', leadCellStyle.fontSize);
     await expect(dealCells.first()).toHaveCSS('color', leadCellStyle.color);
-    const linkedLeadCells = page.locator('.deals-list-fit tbody tr[data-pipeline-id] td[data-label="Linked Lead"]');
-    for (const cell of await linkedLeadCells.all()) {
-      await expect(cell).not.toContainText(/lead-d-\d+/);
-    }
+    await expect(page.getByRole('columnheader', { name: 'Linked Lead' })).toHaveCount(0);
+    const visibleDealText = await page.locator('.deals-list-fit tbody tr[data-pipeline-id]').allTextContents();
+    expect(visibleDealText.join(' ')).not.toMatch(/lead-d-\d+/i);
     if (viewport.width >= 640) {
       const maxLeadRowHeight = Math.max(...leadRowHeights);
       const dealRowHeights = await page.locator('.deals-list-fit tbody tr[data-pipeline-id]')
@@ -111,7 +116,7 @@ for (const viewport of viewports) {
         expect(height, `deal row height ${height}px exceeds lead row height ${maxLeadRowHeight}px + 8px`).toBeLessThanOrEqual(maxLeadRowHeight + 8);
       }
     }
-    const requiredNoWrapLabels = ['Pipeline', 'Deal Stage', 'Insurance', 'Value', 'Expected close'];
+    const requiredNoWrapLabels = ['Pipeline', 'Stage', 'Insurance', 'Value', 'Expected close'];
     const noWrapResults = await page.locator('.deals-list-fit tbody tr[data-pipeline-id]').evaluateAll((rows, labels) =>
       rows.flatMap((row) => labels.map((label) => {
         const cell = row.querySelector<HTMLElement>(`td[data-label="${label}"]`);
@@ -120,6 +125,18 @@ for (const viewport of viewports) {
     requiredNoWrapLabels);
     expect(noWrapResults.every(({ whiteSpace }) => whiteSpace === 'nowrap')).toBe(true);
     await takeViewportScreenshot(page, `deals-list-${sizeLabel}`);
+
+    await tabs.nth(2).click();
+    await expect(page.getByLabel('Deal forecast')).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Forecast period' })).toBeVisible();
+    await assertNoHorizontalOverflow(page);
+    await takeViewportScreenshot(page, `deals-forecast-${sizeLabel}`);
+
+    await tabs.nth(3).click();
+    await expect(page.locator('.deals-archive-fit table')).toBeVisible();
+    await assertNoHorizontalOverflow(page);
+    await takeViewportScreenshot(page, `deals-archive-${sizeLabel}`);
+    await tabs.nth(1).click();
 
     const firstDeal = page.getByRole('link', { name: /^Open deal details for/ }).first();
     const stageTrigger = firstDeal.getByRole('button', { name: /^Change stage for/ });
@@ -175,7 +192,7 @@ for (const viewport of viewports) {
     expect(menuBounds.right).toBeLessThanOrEqual(menuBounds.viewportWidth);
     expect(menuBounds.bottom).toBeLessThanOrEqual(menuBounds.viewportHeight);
     if (viewport.width < 640) expect(menuBounds.bottom).toBeLessThanOrEqual(bottomAnchorTop);
-    await page.getByRole('heading', { name: 'Deals list' }).click();
+    await tabs.nth(1).click();
     await expect(bottomStageMenu).toHaveCount(0);
 
     const dealActionsButton = firstDeal.getByRole('button', { name: /^Actions for/ });
@@ -219,16 +236,19 @@ for (const viewport of viewports) {
       await expect(page.locator('.deals-list-fit table')).toBeVisible();
     }
 
-    await tabs.nth(1).click();
-    const pipelineSelect = page.getByLabel('Select deal pipeline');
+    await tabs.nth(0).click();
+    const pipelineSelect = page.getByLabel('Filter deals by pipeline');
     await pipelineSelect.selectOption({ label: 'Commercial Lines Brokerage' });
-    const board = page.locator('.deals-fit');
-    const boardWidth = await board.evaluate((element) => element.clientWidth);
-    const expectedColumns = boardWidth < 640 ? 1 : boardWidth < 1000 ? 3 : 6;
     await expect(page.locator('.deals-board > section')).toHaveCount(6);
-    await expect.poll(() => page.locator('.deals-board').evaluate((element) =>
-      getComputedStyle(element).gridTemplateColumns.split(' ').length,
-    )).toBe(expectedColumns);
+    await expect(page.getByLabel('Show closed deals')).toHaveCount(0);
+    for (const column of await page.locator('.deals-board > section').all()) {
+      const { total, cardTotal } = await column.evaluate((element) => ({
+        total: Number(element.getAttribute('data-total-mvr')),
+        cardTotal: [...element.querySelectorAll<HTMLElement>('[data-deal-value-mvr]')]
+          .reduce((sum, card) => sum + Number(card.dataset.dealValueMvr), 0),
+      }));
+      expect(cardTotal).toBeCloseTo(total, 4);
+    }
     for (const stage of [
       'Fact-Finding & Risk Survey',
       'Market Tender & Placing Slip Submission',
@@ -238,9 +258,9 @@ for (const viewport of viewports) {
       'Lost / Market Declined',
     ]) await expect(page.locator('.deals-board')).toContainText(stage);
     await assertNoHorizontalOverflow(page);
-    await takeViewportScreenshot(page, `deals-kanban-${sizeLabel}`);
+    await takeViewportScreenshot(page, `deals-pipeline-closed-${sizeLabel}`);
 
-    const firstKanbanDeal = page.locator('.deals-board > section button').first();
+    const firstKanbanDeal = page.locator('.deals-board article[data-deal-id] button').first();
     await firstKanbanDeal.click();
     await expect(page.getByTestId('deal-stage-stepper')).toBeVisible();
     await expect(page.getByTestId('activity-summary')).toBeVisible();

@@ -250,20 +250,34 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   }
 }
 
-.fit-wrap.deals-list-fit col:nth-child(1) { width: 12%; }
-.fit-wrap.deals-list-fit col:nth-child(2) { width: 8%; }
-.fit-wrap.deals-list-fit col:nth-child(3) { width: 12%; }
-.fit-wrap.deals-list-fit col:nth-child(4) { width: 8%; }
-.fit-wrap.deals-list-fit col:nth-child(5) { width: 13%; }
-.fit-wrap.deals-list-fit col:nth-child(6) { width: 6%; }
-.fit-wrap.deals-list-fit col:nth-child(7) { width: 9%; }
-.fit-wrap.deals-list-fit col:nth-child(8) { width: 12%; }
+.fit-wrap.deals-list-fit col:nth-child(1) { width: 13%; }
+.fit-wrap.deals-list-fit col:nth-child(2) { width: 10%; }
+.fit-wrap.deals-list-fit col:nth-child(3) { width: 8%; }
+.fit-wrap.deals-list-fit col:nth-child(4) { width: 13%; }
+.fit-wrap.deals-list-fit col:nth-child(5) { width: 7%; }
+.fit-wrap.deals-list-fit col:nth-child(6) { width: 9%; }
+.fit-wrap.deals-list-fit col:nth-child(7) { width: 10%; }
+.fit-wrap.deals-list-fit col:nth-child(8) { width: 8%; }
 .fit-wrap.deals-list-fit col:nth-child(9) { width: 8%; }
-.fit-wrap.deals-list-fit col:nth-child(10) { width: 8%; }
-.fit-wrap.deals-list-fit col:nth-child(11) { width: 4%; }
+.fit-wrap.deals-list-fit col:nth-child(10) { width: 9%; }
+.fit-wrap.deals-list-fit col:nth-child(11) { width: 5%; }
+
+.fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(1) { width: 12%; }
+.fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(2) { width: 8%; }
+.fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(3) { width: 7%; }
+.fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(4) { width: 10%; }
+.fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(5) { width: 6%; }
+.fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(6) { width: 7%; }
+.fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(7) { width: 8%; }
+.fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(8) { width: 8%; }
+.fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(9) { width: 7%; }
+.fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(10) { width: 7%; }
+.fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(11) { width: 7%; }
+.fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(12) { width: 9%; }
+.fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(13) { width: 4%; }
 
 .fit-wrap.deals-list-fit td[data-label="Pipeline"],
-.fit-wrap.deals-list-fit td[data-label="Deal Stage"],
+.fit-wrap.deals-list-fit td[data-label="Stage"],
 .fit-wrap.deals-list-fit td[data-label="Insurance"],
 .fit-wrap.deals-list-fit td[data-label="Value"],
 .fit-wrap.deals-list-fit td[data-label="Expected close"] {
@@ -359,15 +373,29 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
 @container (min-width: 640px) and (max-width: 899px) {
   .fit-wrap.deals-list-fit col:nth-child(1) { width: 12%; }
   .fit-wrap.deals-list-fit col:nth-child(2) { width: 7%; }
-  .fit-wrap.deals-list-fit col:nth-child(3) { width: 10%; }
-  .fit-wrap.deals-list-fit col:nth-child(4) { width: 7%; }
-  .fit-wrap.deals-list-fit col:nth-child(5) { width: 15%; }
-  .fit-wrap.deals-list-fit col:nth-child(6) { width: 6%; }
-  .fit-wrap.deals-list-fit col:nth-child(7) { width: 8%; }
-  .fit-wrap.deals-list-fit col:nth-child(8) { width: 14%; }
-  .fit-wrap.deals-list-fit col:nth-child(9) { width: 5%; }
+  .fit-wrap.deals-list-fit col:nth-child(3) { width: 7%; }
+  .fit-wrap.deals-list-fit col:nth-child(4) { width: 11%; }
+  .fit-wrap.deals-list-fit col:nth-child(5) { width: 7%; }
+  .fit-wrap.deals-list-fit col:nth-child(6) { width: 7%; }
+  .fit-wrap.deals-list-fit col:nth-child(7) { width: 9%; }
+  .fit-wrap.deals-list-fit col:nth-child(8) { width: 10%; }
+  .fit-wrap.deals-list-fit col:nth-child(9) { width: 8%; }
   .fit-wrap.deals-list-fit col:nth-child(10) { width: 10%; }
-  .fit-wrap.deals-list-fit col:nth-child(11) { width: 6%; }
+  .fit-wrap.deals-list-fit col:nth-child(11) { width: 12%; }
+
+  .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(1) { width: 10%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(2) { width: 6%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(3) { width: 6%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(4) { width: 9%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(5) { width: 6%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(6) { width: 6%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(7) { width: 7%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(8) { width: 8%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(9) { width: 6%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(10) { width: 7%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(11) { width: 7%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(12) { width: 13%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(13) { width: 9%; }
 }
 
 @container (max-width: 639px) {
@@ -405,6 +433,18 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
     grid-column: 1 / -1;
   }
 }
+
+  .forecast-periods {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  @media (min-width: 768px) {
+    .forecast-periods { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  @media (min-width: 1200px) {
+    .forecast-periods { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
 
 .fit-wrap.qrs-list-fit col:nth-child(1) { width: 8%; }
 .fit-wrap.qrs-list-fit col:nth-child(2) { width: 10%; }

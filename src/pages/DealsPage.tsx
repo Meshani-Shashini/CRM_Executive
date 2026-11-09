@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
-import { Plus, Filter, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import type { CompanyContactProfile, Deal, Lead, ProductCode } from '../types';
 import {
   DEFAULT_USD_TO_MVR_RATE, formatAmount, formatCurrencyInput, formatCurrencyInputForDisplay,
@@ -447,19 +447,16 @@ export default function DealsPage() {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><h1 className="text-xl font-semibold text-white">Deals pipeline</h1><p className="mt-1 text-xs text-muted">Kanban stage progression, validation, activity timeline, and placement inspection.</p></div>
-        <div className="flex items-center gap-3">
-          <div className="hidden text-right sm:block"><div className="text-[10px] text-muted">Open deals</div><div className="text-sm font-semibold text-white">{deals.length}</div></div>
-          <button type="button" className="btn-ghost !py-1.5" onClick={() => setFilterOpen(true)}><Filter size={14} /> Filter</button>
-          {['admin', 'sales'].includes(viewAsRole ?? user.role) && <button type="button" className="btn-primary !py-1.5 !text-xs" onClick={openLegacyImport} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before importing legacy deals' : undefined}>+ Legacy deal</button>}
-        </div>
+        <div><h1 className="text-xl font-semibold text-white">Deals</h1><p className="mt-1 text-xs text-muted">Pipeline, forecast, active deals, and archive.</p></div>
       </div>
       <DealWorkspace
         deals={visibleDeals}
+        dealsPageMode
         onEditDeal={openEditDeal}
         onDeleteLead={requestDeleteLead}
         onDeleteDeal={requestDeleteDeal}
         onOpenFilters={() => setFilterOpen(true)}
+        onLegacyImport={['admin', 'sales'].includes(viewAsRole ?? user.role) ? openLegacyImport : undefined}
         pipelineFilter={pipelineFilter}
         onPipelineFilterChange={setPipelineFilter}
       />

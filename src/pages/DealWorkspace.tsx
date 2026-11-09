@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, Building2, CalendarDays, Check, Clock3, Columns3, Filter,
-  FileText, List, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, Wallet, Trash2,
+  AlertTriangle, Archive, ArrowLeft, ArrowRight, Building2, CalendarDays, Check,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Clock3, Columns3, Filter, FileText, List,
+  MoreHorizontal, Pencil, Plus, Search, ShieldCheck, Wallet, Trash2, TrendingUp, X,
 } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
@@ -16,7 +17,7 @@ import ActivityTimelineItem from '../components/ActivityTimelineItem';
 import { useApp } from '../store/AppContext';
 import { TENANT_ID } from '../lib/supabase';
 import type { Activity, CompanyContactProfile, Deal, Lead, PipelineStage, StageHistoryAudit } from '../types';
-import { formatAmount } from '../utils/currency';
+import { formatAmount, toMvr } from '../utils/currency';
 import { formatDate } from '../utils/date';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile } from '../utils/customerProfile';
@@ -34,7 +35,7 @@ import {
 import { formatStaffIdentifier } from '../utils/staff';
 import { calculateLeadContactSla, getContactMadeSlaTargetDays, getLeadContactedAt } from '../utils/leadSla';
 import { buildLeadConversion } from '../utils/leadConversion';
-import { promptQuotationRequestForDeal } from '../utils/navigation';
+import { dashboardHref, hashParams, promptQuotationRequestForDeal } from '../utils/navigation';
 
 interface TimelineEntry {
   key: string;
@@ -66,16 +67,102 @@ const EMPTY_CONTACT_DRAFT: ContactEditorDraft = {
 const dealListColumns = [
   { key: 'deal', label: 'Deal' },
   { key: 'client', label: 'Client' },
-  { key: 'lead', label: 'Linked Lead' },
   { key: 'pipeline', label: 'Pipeline' },
-  { key: 'stage', label: 'Deal Stage' },
+  { key: 'stage', label: 'Stage' },
   { key: 'product', label: 'Insurance' },
   { key: 'vendor', label: 'Vendor' },
   { key: 'value', label: 'Value' },
   { key: 'owner', label: 'Owner' },
+  { key: 'activity', label: 'Next activity' },
   { key: 'close', label: 'Expected close' },
   { key: 'actions', label: 'Actions' },
 ] as const;
+
+type DealsView = 'pipeline' | 'list' | 'forecast' | 'archive';
+type ConditionField = 'owner' | 'client' | 'stage' | 'vendor' | 'product' | 'value' | 'closeDate' | 'activity';
+type ConditionOperator = 'is' | 'is not' | 'contains' | '>' | '<' | 'between' | 'empty';
+interface DealFilterCondition {
+  id: string;
+  field: ConditionField;
+  operator: ConditionOperator;
+  value: string;
+  secondValue: string;
+}
+
+interface DealActivityState {
+  date?: string;
+  title?: string;
+  state: 'overdue' | 'today' | 'future' | 'none';
+}
+
+function DealActivityIndicator({ activity, compact = false }: { activity: DealActivityState; compact?: boolean }) {
+  const label = activity.state === 'overdue'
+    ? 'View overdue activity'
+    : activity.state === 'today' || activity.state === 'none'
+      ? activity.title ?? 'No activity scheduled'
+      : activity.title ?? 'Scheduled activity';
+  const color = activity.state === 'overdue'
+    ? 'bg-hot text-hot'
+    : activity.state === 'future'
+      ? 'bg-emerald-400 text-emerald-300'
+      : 'bg-amber-400 text-amber-300';
+  return <span className="inline-flex min-w-0 items-center gap-1.5" aria-label={label}
+    title={`${label}${activity.date ? ` · ${localDate(activity.date)}` : ''}`}>
+    <span className={`h-2 w-2 shrink-0 rounded-full ${color.split(' ')[0]}`} aria-hidden="true" />
+    {!compact && <span className={`truncate text-[10px] ${color.split(' ')[1]}`}>{activity.date ? localDate(activity.date) : 'No activity'}</span>}
+  </span>;
+}
+
+const CONDITION_FIELDS: { value: ConditionField; label: string }[] = [
+  { value: 'owner', label: 'Owner' },
+  { value: 'client', label: 'Client' },
+  { value: 'stage', label: 'Stage' },
+  { value: 'vendor', label: 'Vendor' },
+  { value: 'product', label: 'Insurance type' },
+  { value: 'value', label: 'Value' },
+  { value: 'closeDate', label: 'Expected close' },
+  { value: 'activity', label: 'Next activity' },
+];
+
+const CONDITION_OPERATORS: ConditionOperator[] = ['is', 'is not', 'contains', '>', '<', 'between', 'empty'];
+
+function isClosedDeal(deal: Deal, stage?: PipelineStage) {
+  return isTerminalDealStage(deal.stage, deal.disposition, stage);
+}
+
+function isWonDeal(deal: Deal, stage?: PipelineStage) {
+  return deal.disposition === 'won' || Boolean(stage?.isClosedWon) || (!stage && isWonPipelineStage(deal.stage));
+}
+
+function localDate(value?: string) {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toLocaleDateString('en-CA') : '';
+}
+
+function dateAtLocalMidnight(value: string) {
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  return [year, month, day].every(Number.isFinite)
+    ? new Date(year, month - 1, day)
+    : new Date(value);
+}
+
+function forecastPeriods(mode: 'month' | 'quarter', offset: number, now = new Date()) {
+  return Array.from({ length: 4 }, (_, index) => {
+    const shift = offset + index;
+    const start = new Date(now.getFullYear(), mode === 'month' ? now.getMonth() + shift : Math.floor(now.getMonth() / 3) * 3 + shift * 3, 1);
+    const end = new Date(start.getFullYear(), start.getMonth() + (mode === 'month' ? 1 : 3), 1);
+    return {
+      start,
+      end,
+      key: `${start.getFullYear()}-${start.getMonth()}`,
+      label: mode === 'month'
+        ? start.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+        : `Q${Math.floor(start.getMonth() / 3) + 1} ${start.getFullYear()}`,
+      startDate: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-01`,
+    };
+  });
+}
 
 function isLostStage(stage: string | PipelineStage) {
   return isLostPipelineStage(stage);
@@ -204,7 +291,7 @@ function stageSlaHealth(durationMilliseconds: number | undefined, targetDays: nu
 
 function isBusinessActivity(activity: Activity) {
   if (!activity.id.startsWith('audit-')) return true;
-  return /^(?:Lead|Deal) created$|^(?:Lead|Deal) stage changed:|^Lead temperature changed:/.test(activity.title)
+  return /^(?:Lead|Deal) created$|^(?:Lead|Deal) stage changed:|^Lead temperature changed:|^Deal expected close changed$/.test(activity.title)
     || /^Quotation request (?:created|status changed)$/.test(activity.title)
     || (activity.title === 'Lead updated' && activity.description.includes('Activity status:'));
 }
@@ -218,6 +305,8 @@ export default function DealWorkspace({
   onOpenFilters,
   pipelineFilter,
   onPipelineFilterChange,
+  dealsPageMode = false,
+  onLegacyImport,
   initialSelectedKey,
   onClose,
 }: {
@@ -229,6 +318,8 @@ export default function DealWorkspace({
   onOpenFilters?: () => void;
   pipelineFilter?: string;
   onPipelineFilterChange?: (pipelineId: string) => void;
+  dealsPageMode?: boolean;
+  onLegacyImport?: () => void;
   initialSelectedKey?: string;
   onClose?: () => void;
 }) {
@@ -237,12 +328,35 @@ export default function DealWorkspace({
     products, pipelines, pipelineStages, stageHistory, setStageHistory, invoices, setInvoices, user, users, vendors, viewAsRole,
     quotationRequests,
   } = useApp();
-  const [selectedKey, setSelectedKey] = useState('');
-  const [workspaceView, setWorkspaceView] = useState<'list' | 'kanban' | 'inspection'>('list');
+  const [selectedKey, setSelectedKey] = useState(() => {
+    const dealId = dealsPageMode ? hashParams().get('id') : null;
+    return dealId ? `deal:${dealId}` : '';
+  });
+  const [workspaceView, setWorkspaceView] = useState<'list' | 'kanban' | 'inspection' | DealsView>(() => {
+    if (!dealsPageMode) return 'list';
+    const view = hashParams().get('view');
+    return view === 'list' || view === 'forecast' || view === 'archive' || view === 'pipeline' ? view : 'pipeline';
+  });
   const [kanbanPipelineId, setKanbanPipelineId] = useState('');
   const selectedPipelineFilter = pipelineFilter ?? kanbanPipelineId;
   const changePipelineFilter = onPipelineFilterChange ?? setKanbanPipelineId;
   const [dealListSearch, setDealListSearch] = useState('');
+  const [dealOwnerFilter, setDealOwnerFilter] = useState('');
+  const [filterConditions, setFilterConditions] = useState<DealFilterCondition[]>([]);
+  const [conditionBuilderOpen, setConditionBuilderOpen] = useState(false);
+  const [conditionDraft, setConditionDraft] = useState<DealFilterCondition>({
+    id: '',
+    field: 'owner',
+    operator: 'is',
+    value: '',
+    secondValue: '',
+  });
+  const [sortKey, setSortKey] = useState<'deal' | 'client' | 'pipeline' | 'stage' | 'product' | 'vendor' | 'value' | 'owner' | 'activity' | 'close'>('close');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [pipelineSort, setPipelineSort] = useState<'activity' | 'value' | 'close' | 'created'>('activity');
+  const [archiveFilter, setArchiveFilter] = useState<'all' | 'won' | 'lost'>('all');
+  const [forecastMode, setForecastMode] = useState<'month' | 'quarter'>('month');
+  const [forecastOffset, setForecastOffset] = useState(0);
   const [openDealActionsId, setOpenDealActionsId] = useState('');
   const [dealActionsAnchor, setDealActionsAnchor] = useState<HTMLButtonElement | null>(null);
   const [openStageMenuId, setOpenStageMenuId] = useState('');
@@ -336,6 +450,7 @@ export default function DealWorkspace({
   const selectedProduct = products.find((product) => product.code === selectedItem?.productCode)
     ?? products.find((product) => product.name === (selectedDeal?.product ?? ''));
   const selectedPipeline = pipelines.find((pipeline) => pipeline.id === selectedItem?.pipelineId);
+  const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
   const stages = pipelineStages.filter((stage) => stage.pipelineId === progressDeal?.pipelineId)
     .sort((left, right) => left.stageOrder - right.stageOrder);
   const selectedLeadProbability = selectedLead && progressDeal
@@ -565,7 +680,6 @@ export default function DealWorkspace({
       )
       : recordSlaStatus(selected)
     : undefined;
-  const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
   const dealReferences = useMemo(() => {
     const sortedDeals = [...allDeals].sort((left, right) => {
       const leftYear = (left.createdAt ? new Date(left.createdAt).getFullYear() : new Date().getFullYear());
@@ -583,20 +697,147 @@ export default function DealWorkspace({
       return [deal.id, `DL-${year}-${String(sequence).padStart(4, '0')}`];
     }));
   }, [allDeals]);
+  const dealTitle = (deal: Deal) => leads.find((lead) => lead.id === deal.leadId || lead.dealId === deal.id)?.title
+    ?? deal.proposalSummary
+    ?? `${deal.product} placement`;
+  const ownerNameForDeal = (deal: Deal) => users.find((person) => person.id === deal.ownerId)?.name
+    ?? formatStaffIdentifier(deal.ownerId);
+  const activityForDeal = (deal: Deal): DealActivityState => {
+    const linkedLeadId = leads.find((lead) => lead.id === deal.leadId || lead.dealId === deal.id)?.id;
+    const scheduledActivities = activities
+      .filter((activity) => !activity.done
+        && (activity.dealId === deal.id || (Boolean(linkedLeadId) && activity.leadId === linkedLeadId)))
+      .map((activity) => ({
+        date: activity.dueDate ?? activity.date,
+        title: activity.title,
+      }))
+      .filter((activity) => Number.isFinite(Date.parse(activity.date)));
+    if (deal.nextActivityAt && Number.isFinite(Date.parse(deal.nextActivityAt))) {
+      scheduledActivities.push({ date: deal.nextActivityAt, title: deal.nextActivityTitle ?? 'Scheduled follow-up' });
+    }
+    const next = scheduledActivities.sort((left, right) => Date.parse(left.date) - Date.parse(right.date))[0];
+    if (!next) return { state: 'none' as const };
+    const dueDay = localDate(next.date);
+    const today = localDate(new Date().toISOString());
+    return {
+      ...next,
+      state: dueDay < today ? 'overdue' as const : dueDay === today ? 'today' as const : 'future' as const,
+    };
+  };
+  const productForDeal = (deal: Deal) => products.find((product) => product.code === deal.productCode)
+    ?? products.find((product) => product.name.trim().toLowerCase() === deal.product.trim().toLowerCase());
+  const conditionValue = (deal: Deal, field: ConditionField) => {
+    const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
+    const activity = activityForDeal(deal);
+    switch (field) {
+      case 'owner': return ownerNameForDeal(deal);
+      case 'client': return deal.client;
+      case 'stage': return deal.stage;
+      case 'vendor': return vendors.find((item) => item.id === deal.vendorId)?.name ?? deal.insurer ?? '';
+      case 'product': return productForDeal(deal)?.name ?? deal.product;
+      case 'value': return deal.value;
+      case 'closeDate': return deal.closeDate ?? '';
+      case 'activity': return activity.title ?? '';
+      default: return stage?.name ?? '';
+    }
+  };
+  const conditionMatches = (deal: Deal, condition: DealFilterCondition) => {
+    const current = conditionValue(deal, condition.field);
+    if (condition.operator === 'empty') return current === '' || current === undefined || current === null;
+    if (condition.operator === 'between') {
+      const currentNumber = condition.field === 'value' ? Number(current) : Date.parse(String(current));
+      const first = condition.field === 'value' ? Number(condition.value) : Date.parse(condition.value);
+      const second = condition.field === 'value' ? Number(condition.secondValue) : Date.parse(condition.secondValue);
+      return Number.isFinite(currentNumber) && Number.isFinite(first) && Number.isFinite(second)
+        && currentNumber >= Math.min(first, second) && currentNumber <= Math.max(first, second);
+    }
+    if (condition.operator === '>' || condition.operator === '<') {
+      const left = condition.field === 'value' ? Number(current) : Date.parse(String(current));
+      const right = condition.field === 'value' ? Number(condition.value) : Date.parse(condition.value);
+      return Number.isFinite(left) && Number.isFinite(right) && (condition.operator === '>' ? left > right : left < right);
+    }
+    const left = String(current ?? '').toLowerCase();
+    const right = condition.value.toLowerCase();
+    return condition.operator === 'is' ? left === right
+      : condition.operator === 'is not' ? left !== right
+        : left.includes(right);
+  };
   const listDeals = deals.filter((deal) => {
     if (selectedPipelineFilter && deal.pipelineId !== selectedPipelineFilter) return false;
-    const lead = leads.find((item) => item.id === deal.leadId || item.dealId === deal.id);
+    if (dealOwnerFilter && deal.ownerId !== dealOwnerFilter) return false;
+    if (filterConditions.some((condition) => !conditionMatches(deal, condition))) return false;
     const vendor = vendors.find((item) => item.id === deal.vendorId)?.name ?? deal.insurer;
-    const title = lead?.title ?? deal.proposalSummary ?? `${deal.product} placement`;
+    const title = dealTitle(deal);
     const reference = dealReferences.get(deal.id) ?? deal.id;
-    const searchable = `${reference} ${deal.id} ${title} ${deal.client} ${lead?.id ?? ''} ${vendor}`.toLowerCase();
+    const searchable = `${reference} ${deal.id} ${title} ${deal.client} ${vendor}`.toLowerCase();
     return searchable.includes(dealListSearch.trim().toLowerCase());
   });
-  const kanbanPipeline = activePipelines.find((pipeline) => pipeline.id === selectedPipelineFilter);
-  const kanbanStages = kanbanPipeline
+  const sortedListDeals = [...listDeals].sort((left, right) => {
+    const leftValue = sortKey === 'deal' ? dealTitle(left)
+      : sortKey === 'client' ? left.client
+        : sortKey === 'pipeline' ? pipelines.find((pipeline) => pipeline.id === left.pipelineId)?.name ?? ''
+          : sortKey === 'stage' ? left.stage
+            : sortKey === 'product' ? productForDeal(left)?.name ?? left.product
+              : sortKey === 'vendor' ? vendors.find((vendor) => vendor.id === left.vendorId)?.name ?? left.insurer
+                : sortKey === 'value' ? left.value
+                  : sortKey === 'owner' ? ownerNameForDeal(left)
+                    : sortKey === 'activity' ? Date.parse(activityForDeal(left).date ?? '')
+                      : Date.parse(left.closeDate ?? '');
+    const rightValue = sortKey === 'deal' ? dealTitle(right)
+      : sortKey === 'client' ? right.client
+        : sortKey === 'pipeline' ? pipelines.find((pipeline) => pipeline.id === right.pipelineId)?.name ?? ''
+          : sortKey === 'stage' ? right.stage
+            : sortKey === 'product' ? productForDeal(right)?.name ?? right.product
+              : sortKey === 'vendor' ? vendors.find((vendor) => vendor.id === right.vendorId)?.name ?? right.insurer
+                : sortKey === 'value' ? right.value
+                  : sortKey === 'owner' ? ownerNameForDeal(right)
+                    : sortKey === 'activity' ? Date.parse(activityForDeal(right).date ?? '')
+                      : Date.parse(right.closeDate ?? '');
+    const comparison = typeof leftValue === 'number' && typeof rightValue === 'number'
+      ? leftValue - rightValue
+      : String(leftValue).localeCompare(String(rightValue));
+    return comparison * (sortDirection === 'asc' ? 1 : -1);
+  });
+  const archiveDeals = sortedListDeals.filter((deal) => {
+    const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
+    if (!isClosedDeal(deal, stage)) return false;
+    return archiveFilter === 'all' || (archiveFilter === 'won' ? isWonDeal(deal, stage) : !isWonDeal(deal, stage));
+  });
+  const pipelineId = selectedPipelineFilter || activePipelines[0]?.id || '';
+  const kanbanPipeline = activePipelines.find((pipeline) => pipeline.id === pipelineId);
+  const kanbanStages = (kanbanPipeline
     ? pipelineStages.filter((stage) => stage.pipelineId === kanbanPipeline.id)
       .sort((left, right) => left.stageOrder - right.stageOrder)
-    : [];
+    : []);
+  const pipelineDealsByStage = (stage: PipelineStage) => listDeals
+    .filter((deal) => deal.pipelineId === kanbanPipeline?.id && deal.stage === stage.name)
+    .sort((left, right) => {
+      if (pipelineSort === 'value') return right.value - left.value;
+      if (pipelineSort === 'close') return (left.closeDate ?? '').localeCompare(right.closeDate ?? '');
+      if (pipelineSort === 'created') return (left.createdAt ?? '').localeCompare(right.createdAt ?? '');
+      const leftDate = Date.parse(activityForDeal(left).date ?? '');
+      const rightDate = Date.parse(activityForDeal(right).date ?? '');
+      return (Number.isFinite(leftDate) ? leftDate : Number.POSITIVE_INFINITY)
+        - (Number.isFinite(rightDate) ? rightDate : Number.POSITIVE_INFINITY);
+    });
+  const forecastData = useMemo(() => forecastPeriods(forecastMode, forecastOffset, new Date(clockNow)), [forecastMode, forecastOffset, clockNow]);
+  const forecastDeals = listDeals.filter((deal) => {
+    const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
+    return !stage?.isClosedLost && deal.disposition !== 'lost' && !isLostPipelineStage(deal.stage);
+  });
+  const archiveColumns = [
+    ...dealListColumns.slice(0, -1),
+    { key: 'closedDate', label: 'Closed date' },
+    { key: 'lossReason', label: 'Loss reason' },
+    dealListColumns[dealListColumns.length - 1],
+  ];
+  const tableColumns = workspaceView === 'archive' ? archiveColumns : dealListColumns;
+  const tableDeals = workspaceView === 'archive' ? archiveDeals : sortedListDeals;
+  const pipelineViewDeals = listDeals.filter((deal) => deal.pipelineId === kanbanPipeline?.id);
+  const toolbarDealCount = workspaceView === 'pipeline' ? pipelineViewDeals.length
+    : workspaceView === 'archive' ? archiveDeals.length
+      : workspaceView === 'forecast' ? forecastDeals.length
+        : listDeals.length;
   const timelineEntries: TimelineEntry[] = [
     ...(selectedLead && leadCreatedAt ? [{
       key: `lead-created-${selectedLead.id}`,
@@ -632,16 +873,18 @@ export default function DealWorkspace({
       const actor = entry.userName
         ?? users.find((person) => person.id === entry.userId)?.name
         ?? (entry.userId === user.id ? user.name : entry.userId ? formatStaffIdentifier(entry.userId) : '');
+      const expectedCloseChange = entry.details?.startsWith('Expected close changed');
       return {
         key: entry.id,
-        title: `Stage changed: ${fromStage} → ${target}`,
+        title: expectedCloseChange ? 'Expected close changed' : `Stage changed: ${fromStage} → ${target}`,
         description: [
+          expectedCloseChange ? entry.details ?? '' : '',
           entry.lossReason ? `Loss reason: ${entry.lossReason}` : '',
-          entry.details ?? '',
-          actor ? `By ${actor}` : '',
+          !expectedCloseChange ? entry.details ?? '' : '',
+          !expectedCloseChange && actor ? `By ${actor}` : '',
         ].filter(Boolean).join(' · '),
         date: entry.enteredAt,
-        category: 'stage' as const,
+        category: expectedCloseChange ? 'activity' as const : 'stage' as const,
       };
     }),
     ...linkedQuotationRequests.flatMap((request) => {
@@ -667,6 +910,9 @@ export default function DealWorkspace({
     }),
     ...selectedActivities
       .filter((activity) => !(selectedLead && activity.id.startsWith('audit-') && activity.title === 'Lead created'))
+      .filter((activity) => !(activity.title === 'Deal expected close changed'
+        && selectedHistory.some((entry) => entry.details?.startsWith('Expected close changed')
+          && Date.parse(entry.enteredAt) === Date.parse(activity.date))))
       .filter((activity) => {
         if (!selectedLead) return true;
         if (activity.title.startsWith('Deal stage changed:')) return false;
@@ -709,6 +955,35 @@ export default function DealWorkspace({
   }, [changePipelineFilter, kanbanPipeline, selectedPipelineFilter]);
 
   useEffect(() => {
+    if (!dealsPageMode || workspaceView !== 'pipeline' || selectedPipelineFilter || !activePipelines.length) return;
+    const remembered = window.localStorage.getItem('crm:last-deals-pipeline');
+    changePipelineFilter(activePipelines.some((pipeline) => pipeline.id === remembered)
+      ? remembered!
+      : activePipelines[0].id);
+  }, [activePipelines, changePipelineFilter, dealsPageMode, selectedPipelineFilter, workspaceView]);
+
+  useEffect(() => {
+    if (!dealsPageMode || !selectedPipelineFilter) return;
+    window.localStorage.setItem('crm:last-deals-pipeline', selectedPipelineFilter);
+  }, [dealsPageMode, selectedPipelineFilter]);
+
+  useEffect(() => {
+    if (!dealsPageMode) return;
+    const syncDealsHash = () => {
+      const params = hashParams();
+      const view = params.get('view');
+      if (view === 'pipeline' || view === 'list' || view === 'forecast' || view === 'archive') {
+        setWorkspaceView(view);
+      }
+      const id = params.get('id');
+      const deal = id ? deals.find((item) => item.id === id) : undefined;
+      setSelectedKey(deal ? `deal:${deal.id}` : '');
+    };
+    window.addEventListener('hashchange', syncDealsHash);
+    return () => window.removeEventListener('hashchange', syncDealsHash);
+  }, [deals, dealsPageMode]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => setClockNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
@@ -720,8 +995,42 @@ export default function DealWorkspace({
   useEffect(() => {
     if (!initialSelectedKey) return;
     setSelectedKey(initialSelectedKey);
-    setWorkspaceView('inspection');
-  }, [initialSelectedKey]);
+    if (!dealsPageMode) setWorkspaceView('inspection');
+  }, [dealsPageMode, initialSelectedKey]);
+
+  const changeDealsView = (view: DealsView) => {
+    setWorkspaceView(view);
+    setSelectedKey('');
+    if (!dealsPageMode) return;
+    const params = Object.fromEntries(hashParams().entries());
+    delete params.id;
+    params.view = view;
+    window.location.hash = dashboardHref('deals', params);
+  };
+
+  const openDealRecord = (deal: Deal) => {
+    setSelectedKey(`deal:${deal.id}`);
+    if (!dealsPageMode) {
+      setWorkspaceView('inspection');
+      return;
+    }
+    const params = Object.fromEntries(hashParams().entries());
+    params.view = workspaceView === 'inspection' ? 'pipeline' : workspaceView;
+    params.id = deal.id;
+    window.location.hash = dashboardHref('deals', params);
+  };
+
+  const returnToDealsView = () => {
+    if (!dealsPageMode) {
+      onClose?.();
+      return;
+    }
+    setSelectedKey('');
+    const params = Object.fromEntries(hashParams().entries());
+    delete params.id;
+    params.view = workspaceView === 'inspection' ? 'pipeline' : workspaceView;
+    window.location.hash = dashboardHref('deals', params);
+  };
 
   useEffect(() => {
     if (!selectedItem) return;
@@ -1330,22 +1639,137 @@ export default function DealWorkspace({
     setAddContactError('');
   };
 
+  const moveDealForecastPeriod = (deal: Deal, expectedClose: string) => {
+    if (!expectedClose || deal.closeDate === expectedClose) return;
+    const now = new Date().toISOString();
+    const previousClose = deal.closeDate;
+    const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
+    setDeals((current) => current.map((item) => item.id === deal.id ? { ...item, closeDate: expectedClose } : item));
+    setActivities([{
+      id: `audit-${crypto.randomUUID()}`,
+      clientId: deal.clientId ?? '',
+      dealId: deal.id,
+      leadId: deal.leadId,
+      type: 'note',
+      title: 'Deal expected close changed',
+      description: `Expected close changed from ${previousClose} to ${expectedClose}`,
+      date: now,
+      createdAt: now,
+      userId: user.id,
+      actorName: user.name,
+    }, ...activities]);
+    if (stage) {
+      setStageHistory((current) => [...current, {
+        id: `stage-${crypto.randomUUID()}`,
+        tenantId: TENANT_ID,
+        dealId: deal.id,
+        userId: user.id,
+        userName: user.name,
+        fromStageId: stage.id,
+        toStageId: stage.id,
+        enteredAt: now,
+        exitedAt: now,
+        durationSeconds: 0,
+        details: `Expected close changed from ${previousClose} to ${expectedClose} by ${user.name}`,
+      }]);
+    }
+  };
+
   return (
     <div className="space-y-2">
-      {(workspaceView === 'list' || workspaceView === 'kanban' || !selectedItem) && <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-1 rounded-lg border border-ink-600 bg-ink-800/60 p-1" role="tablist" aria-label="Deal workspace views">
-          <button type="button" role="tab" aria-selected={workspaceView === 'list'} onClick={() => setWorkspaceView('list')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'list' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>List</button>
-          <button type="button" role="tab" aria-selected={workspaceView === 'kanban'} onClick={() => setWorkspaceView('kanban')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'kanban' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>Kanban</button>
-          <button type="button" role="tab" aria-selected={workspaceView === 'inspection'} onClick={() => setWorkspaceView('inspection')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'inspection' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>Inspection</button>
+      {(dealsPageMode ? !selectedItem : workspaceView === 'list' || workspaceView === 'kanban' || !selectedItem) && <div className="space-y-2">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+          <div className="flex gap-1 rounded-lg border border-ink-600 bg-ink-800/60 p-1" role="tablist" aria-label={dealsPageMode ? 'Deal views' : 'Deal workspace views'}
+            onKeyDown={(event) => {
+              const names: DealsView[] = ['pipeline', 'list', 'forecast', 'archive'];
+              if (!dealsPageMode || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+              event.preventDefault();
+              const current = names.indexOf(workspaceView as DealsView);
+              const next = (current + (event.key === 'ArrowRight' ? 1 : -1) + names.length) % names.length;
+              changeDealsView(names[next]);
+              requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-deals-view="${names[next]}"]`)?.focus());
+            }}>
+            {dealsPageMode ? ([
+              { key: 'pipeline' as const, label: 'Pipeline', Icon: Columns3 },
+              { key: 'list' as const, label: 'List', Icon: List },
+              { key: 'forecast' as const, label: 'Forecast', Icon: TrendingUp },
+              { key: 'archive' as const, label: 'Archive', Icon: Archive },
+            ]).map(({ key, label, Icon }) => <button key={key} type="button" role="tab" data-deals-view={key}
+              aria-label={label} title={label} aria-selected={workspaceView === key}
+              onClick={() => changeDealsView(key)}
+              className={`rounded-md p-2 transition ${workspaceView === key ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>
+              <Icon size={15} />
+            </button>) : <>
+              <button type="button" role="tab" aria-selected={workspaceView === 'list'} onClick={() => setWorkspaceView('list')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'list' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>List</button>
+              <button type="button" role="tab" aria-selected={workspaceView === 'kanban'} onClick={() => setWorkspaceView('kanban')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'kanban' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>Kanban</button>
+              <button type="button" role="tab" aria-selected={workspaceView === 'inspection'} onClick={() => setWorkspaceView('inspection')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'inspection' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>Inspection</button>
+            </>}
+          </div>
+          {!dealsPageMode && onClose && <button type="button" className="btn-ghost !py-1.5" onClick={onClose}>Back to leads</button>}
+          {dealsPageMode && <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+            <select className="input !w-auto max-w-full !py-1.5 !text-xs" value={workspaceView === 'pipeline' ? pipelineId : selectedPipelineFilter}
+              onChange={(event) => changePipelineFilter(event.target.value)} aria-label="Filter deals by pipeline">
+              {workspaceView !== 'pipeline' && <option value="">All pipelines</option>}
+              {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
+            </select>
+            <Badge variant="brand">{toolbarDealCount} {toolbarDealCount === 1 ? 'deal' : 'deals'}</Badge>
+            <select className="input !w-auto max-w-40 !py-1.5 !text-xs" value={dealOwnerFilter}
+              onChange={(event) => setDealOwnerFilter(event.target.value)} aria-label="Filter deals by owner">
+              <option value="">All owners</option>
+              {users.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
+            </select>
+            {dealOwnerFilter && <button type="button" className="rounded-full border border-ink-600 px-2 py-1 text-[10px] text-muted hover:text-white"
+              onClick={() => setDealOwnerFilter('')} aria-label="Clear owner filter">
+              {users.find((person) => person.id === dealOwnerFilter)?.name ?? formatStaffIdentifier(dealOwnerFilter)}<X size={11} className="ml-1 inline" />
+            </button>}
+            <label className="relative min-w-28 flex-1 md:max-w-56">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <input className="input !py-1.5 pl-9 !text-xs" type="search" value={dealListSearch} onChange={(event) => setDealListSearch(event.target.value)}
+                placeholder="Search deals" aria-label="Search deals" />
+            </label>
+            <button type="button" className={`btn-ghost !px-3 !py-1.5 !text-xs ${conditionBuilderOpen ? 'border-brand-400 text-white' : ''}`}
+              onClick={() => setConditionBuilderOpen((open) => !open)}><Plus size={13} /> Add condition</button>
+            {onOpenFilters && <button type="button" className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={onOpenFilters}><Filter size={13} /> Filter</button>}
+            {onLegacyImport && <button type="button" className="btn-primary !px-3 !py-1.5 !text-xs" onClick={onLegacyImport}><Plus size={13} /> Legacy deal</button>}
+          </div>}
         </div>
-        {onClose && <button type="button" className="btn-ghost !py-1.5" onClick={onClose}>Back to leads</button>}
+        {dealsPageMode && (conditionBuilderOpen || filterConditions.length > 0) && <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-ink-700 bg-ink-900/40 p-2">
+          {conditionBuilderOpen && <>
+            <select className="input !w-auto !py-1.5 !text-xs" aria-label="Condition field" value={conditionDraft.field}
+              onChange={(event) => setConditionDraft((current) => ({ ...current, field: event.target.value as ConditionField }))}>
+              {CONDITION_FIELDS.map((field) => <option key={field.value} value={field.value}>{field.label}</option>)}
+            </select>
+            <select className="input !w-auto !py-1.5 !text-xs" aria-label="Condition operator" value={conditionDraft.operator}
+              onChange={(event) => setConditionDraft((current) => ({ ...current, operator: event.target.value as ConditionOperator }))}>
+              {CONDITION_OPERATORS.map((operator) => <option key={operator}>{operator}</option>)}
+            </select>
+            {conditionDraft.operator !== 'empty' && <>
+              <input className="input !w-auto min-w-28 !py-1.5 !text-xs" aria-label="Condition value" type={conditionDraft.field === 'closeDate' ? 'date' : conditionDraft.field === 'value' ? 'number' : 'text'}
+                value={conditionDraft.value} onChange={(event) => setConditionDraft((current) => ({ ...current, value: event.target.value }))} />
+              {conditionDraft.operator === 'between' && <input className="input !w-auto min-w-28 !py-1.5 !text-xs" aria-label="Condition upper value"
+                type={conditionDraft.field === 'closeDate' ? 'date' : 'number'} value={conditionDraft.secondValue}
+                onChange={(event) => setConditionDraft((current) => ({ ...current, secondValue: event.target.value }))} />}
+            </>}
+            <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => {
+              if (conditionDraft.operator !== 'empty' && !conditionDraft.value.trim()) return;
+              setFilterConditions((current) => [...current, { ...conditionDraft, id: crypto.randomUUID() }]);
+              setConditionDraft((current) => ({ ...current, value: '', secondValue: '' }));
+              setConditionBuilderOpen(false);
+            }}>Apply</button>
+          </>}
+          {filterConditions.map((condition) => <button key={condition.id} type="button" className="rounded-full border border-brand-400/40 bg-brand-400/10 px-2 py-1 text-[10px] text-brand-100"
+            onClick={() => setFilterConditions((current) => current.filter((item) => item.id !== condition.id))}
+            title="Remove condition">
+            {CONDITION_FIELDS.find((field) => field.value === condition.field)?.label} {condition.operator} {condition.value || 'empty'}{condition.operator === 'between' ? ` – ${condition.secondValue}` : ''} <X size={10} className="ml-1 inline" />
+          </button>)}
+        </div>}
       </div>}
-      {workspaceView === 'list' ? (
+      {(workspaceView === 'list' || workspaceView === 'archive') && !selectedItem ? (
         <div className="min-w-0 space-y-3">
-          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+          {!dealsPageMode && <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h2 className="text-sm font-semibold text-white">Deals list</h2>
-              <Badge variant="brand">{listDeals.length} {listDeals.length === 1 ? 'deal' : 'deals'}</Badge>
+              <h2 className="text-sm font-semibold text-white">{workspaceView === 'archive' ? 'Deals archive' : 'Deals list'}</h2>
+              <Badge variant="brand">{(workspaceView === 'archive' ? archiveDeals : listDeals).length} {(workspaceView === 'archive' ? archiveDeals : listDeals).length === 1 ? 'deal' : 'deals'}</Badge>
               <select className="input !w-auto max-w-full !py-1.5 !text-xs" value={selectedPipelineFilter} onChange={(event) => changePipelineFilter(event.target.value)} aria-label="Filter deals by pipeline">
                 <option value="">All pipelines</option>
                 {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
@@ -1358,19 +1782,37 @@ export default function DealWorkspace({
               </label>
               {onOpenFilters && <button type="button" className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={onOpenFilters}><Filter size={13} /> Filters</button>}
             </div>
-          </div>
-          <TableShell className="deals-list-fit">
+          </div>}
+          {dealsPageMode && workspaceView === 'archive' && <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-white">Closed deals</h2>
+            <select className="input !w-auto !py-1.5 !text-xs" value={archiveFilter}
+              onChange={(event) => setArchiveFilter(event.target.value as 'all' | 'won' | 'lost')} aria-label="Filter archived deals">
+              <option value="all">All outcomes</option><option value="won">Won</option><option value="lost">Lost</option>
+            </select>
+          </div>}
+          <TableShell className={workspaceView === 'archive' ? 'deals-list-fit deals-archive-fit' : 'deals-list-fit'}>
             <table className="table-fixed w-full leading-tight text-left">
-              <colgroup>{dealListColumns.map((column) => <col key={column.key} />)}</colgroup>
+              <colgroup>{tableColumns.map((column) => <col key={column.key} />)}</colgroup>
               <thead className="bg-[#111214] text-[10px] font-semibold text-[#D0D3D9]">
-                <tr>{dealListColumns.map((column) => (
+                <tr>{tableColumns.map((column) => (
                   <th key={column.key} scope="col" className="border-b border-[#1B1E22] px-1 py-2 text-left">
-                    {column.key === 'actions' ? <span className="sr-only">{column.label}</span> : column.label}
+                    {column.key === 'actions' ? <span className="sr-only">{column.label}</span> : (
+                      ['closedDate', 'lossReason'].includes(column.key) ? column.label : <button type="button" className="inline-flex items-center gap-1 whitespace-nowrap" onClick={() => {
+                        const nextKey = column.key as typeof sortKey;
+                        if (sortKey === nextKey) setSortDirection((direction) => direction === 'asc' ? 'desc' : 'asc');
+                        else {
+                          setSortKey(nextKey);
+                          setSortDirection('asc');
+                        }
+                      }}>
+                        {column.label}{sortKey === column.key && <span aria-hidden="true">{sortDirection === 'asc' ? '↑' : '↓'}</span>}
+                      </button>
+                    )}
                   </th>
                 ))}</tr>
               </thead>
               <tbody>
-                {listDeals.map((deal) => {
+                {tableDeals.map((deal) => {
                   const lead = leads.find((item) => item.id === deal.leadId || item.dealId === deal.id);
                   const pipeline = pipelines.find((item) => item.id === deal.pipelineId);
                   const dealStages = pipelineStages.filter((stage) => stage.pipelineId === deal.pipelineId)
@@ -1382,8 +1824,9 @@ export default function DealWorkspace({
                   const isOverdue = stage ? isStageSlaOverdue(enteredAt, stage.stagnationDaysThreshold, clockNow) : false;
                   const vendorName = vendors.find((vendor) => vendor.id === deal.vendorId)?.name ?? deal.insurer ?? 'Not assigned';
                   const dealTitle = lead?.title ?? deal.proposalSummary ?? `${deal.product} placement`;
-                  const linkedLeadTitle = lead?.title ?? (lead ? `${lead.client} lead` : '');
+                  const clientContactName = deal.contactName ?? clients.find((client) => client.id === deal.clientId)?.contactPerson;
                   const ownerName = users.find((person) => person.id === deal.ownerId)?.name ?? formatStaffIdentifier(deal.ownerId);
+                  const nextActivity = activityForDeal(deal);
                   const terminal = isTerminalDealStage(deal.stage, deal.disposition, stage);
                   const outcome = deal.disposition === 'won' || stage?.isClosedWon
                     ? 'Won'
@@ -1393,6 +1836,12 @@ export default function DealWorkspace({
                   const product = products.find((item) => item.code === deal.productCode)
                     ?? products.find((item) => item.name.trim().toLowerCase() === deal.product.trim().toLowerCase());
                   const productCode = product?.code ?? deal.productCode ?? deal.product.slice(0, 2).toUpperCase();
+                  const closedHistory = stageHistory
+                    .filter((entry) => entry.dealId === deal.id && (entry.outcome || pipelineStages.some((candidate) =>
+                      candidate.id === entry.toStageId && (candidate.isClosedWon || candidate.isClosedLost))))
+                    .sort((left, right) => Date.parse(right.enteredAt) - Date.parse(left.enteredAt))[0];
+                  const closedDate = closedHistory?.exitedAt ?? closedHistory?.enteredAt ?? (terminal ? deal.stageChangedAt : undefined);
+                  const rowLossReason = deal.lossReason ?? stageHistory.find((entry) => entry.dealId === deal.id && entry.lossReason)?.lossReason;
                   const pipelineLabel = pipeline?.code.toUpperCase() === 'COMMERCIAL'
                     ? 'Commercial'
                     : pipeline?.code.toUpperCase() === 'SME_VELOCITY'
@@ -1407,32 +1856,27 @@ export default function DealWorkspace({
                       : 'neutral';
                   return (
                     <tr key={deal.id} data-pipeline-id={deal.pipelineId} role="link" tabIndex={0} aria-label={`Open deal details for ${dealTitle}`}
-                      onClick={() => { setSelectedKey(`deal:${deal.id}`); setWorkspaceView('inspection'); }}
+                      onClick={() => openDealRecord(deal)}
                       onKeyDown={(event) => {
                         if (event.target !== event.currentTarget) return;
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault();
-                          setSelectedKey(`deal:${deal.id}`);
-                          setWorkspaceView('inspection');
+                          openDealRecord(deal);
                         }
                       }}
                       className="cursor-pointer border-b border-[#1B1E22] last:border-0 transition-colors hover:bg-[#111214] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-400">
-                      <td data-label={dealListColumns[0].label} className="px-2 py-2 font-semibold text-white">
+                      <td data-label={dealListColumns[0].label} className={`px-2 py-2 font-semibold ${nextActivity.state === 'overdue' ? 'text-hot' : 'text-white'}`}>
                         <span className="block truncate" title={dealTitle}>{dealTitle}</span>
                         <span className="block truncate text-[10px] font-normal leading-none text-[#8E95A2]" title={dealReferences.get(deal.id) ?? deal.id}>{dealReferences.get(deal.id) ?? deal.id}</span>
                       </td>
-                      <td data-label={dealListColumns[1].label} className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={deal.client}>{deal.client}</span></td>
-                      <td data-label={dealListColumns[2].label} className="min-w-0 overflow-hidden px-2 py-2 font-normal text-[#E1E2E5]">
-                        {lead ? <button type="button" className="block w-full min-w-0 truncate text-left text-[#E1E2E5] hover:text-white" title={`${linkedLeadTitle} · ${lead.id}`} aria-label={`Open linked lead ${linkedLeadTitle} (${lead.id})`} onClick={(event) => {
-                          event.stopPropagation();
-                          setSelectedKey(`lead:${lead.id}`);
-                          setWorkspaceView('inspection');
-                        }}>{linkedLeadTitle}</button> : <span className="block truncate" title="Missing lead link">Missing lead link</span>}
+                      <td data-label={dealListColumns[1].label} className="px-2 py-2 font-normal text-[#E1E2E5]">
+                        <span className="block truncate" title={deal.client}>{deal.client}</span>
+                        {clientContactName && <span className="block truncate text-[10px] text-[#8E95A2]" title={clientContactName}>{clientContactName}</span>}
                       </td>
-                      <td data-label={dealListColumns[3].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
+                      <td data-label={dealListColumns[2].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
                         <span className="inline-flex max-w-full items-center rounded-full border border-[#2A2E35] bg-[#17191C] px-2 py-0.5 text-[10px] font-normal text-[#E1E2E5]" title={pipeline?.name ?? 'Unknown pipeline'}>{pipelineLabel}</span>
                       </td>
-                      <td data-label={dealListColumns[4].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
+                      <td data-label={dealListColumns[3].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
                         <div className="flex min-w-0 items-center gap-1">
                           <button
                             type="button"
@@ -1475,14 +1919,23 @@ export default function DealWorkspace({
                           />
                         </div>
                       </td>
-                      <td data-label={dealListColumns[5].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><ProductCodePill code={productCode} name={product?.name ?? deal.product} /></td>
-                      <td data-label={dealListColumns[6].label} className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={vendorName}>{vendorName}</span></td>
-                      <td data-label={dealListColumns[7].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
+                      <td data-label={dealListColumns[4].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><ProductCodePill code={productCode} name={product?.name ?? deal.product} /></td>
+                      <td data-label={dealListColumns[5].label} className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={vendorName}>{vendorName}</span></td>
+                      <td data-label={dealListColumns[6].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
                         <span className="block truncate font-semibold" title={formatAmount(deal.value, deal.currency ?? 'USD')}>{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
                         <span className="block text-[10px] leading-none text-[#8E95A2]">{deal.probability}%</span>
                       </td>
-                      <td data-label={dealListColumns[8].label} className="px-2 py-2 font-normal text-[#E1E2E5]"><OwnerCell name={ownerName} /></td>
+                      <td data-label={dealListColumns[7].label} className="px-2 py-2 font-normal text-[#E1E2E5]"><OwnerCell name={ownerName} /></td>
+                      <td data-label={dealListColumns[8].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
+                        <span className={nextActivity.state === 'overdue' ? 'text-hot' : ''}>
+                          <DealActivityIndicator activity={nextActivity} />
+                        </span>
+                      </td>
                       <td data-label={dealListColumns[9].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><TableDateCell value={deal.closeDate} /></td>
+                      {workspaceView === 'archive' && <>
+                        <td data-label="Closed date" className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><TableDateCell value={closedDate} /></td>
+                        <td data-label="Loss reason" className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={rowLossReason ?? ''}>{rowLossReason ?? '—'}</span></td>
+                      </>}
                       <td data-label={dealListColumns[10].label} className="relative px-1 py-2 text-right" onClick={(event) => event.stopPropagation()}>
                         <button type="button" className="rounded-md p-1.5 text-muted hover:bg-ink-700 hover:text-white" aria-label={`Actions for ${dealTitle}`} aria-haspopup="menu" aria-expanded={openDealActionsId === deal.id}
                           onClick={(event) => {
@@ -1507,12 +1960,75 @@ export default function DealWorkspace({
                     </tr>
                   );
                 })}
-                {!listDeals.length && <tr className="deals-list-empty"><td data-label={dealListColumns[0].label} colSpan={dealListColumns.length} className="px-4 py-8 text-center text-muted">No deals match these filters.</td></tr>}
+                {!tableDeals.length && <tr className="deals-list-empty"><td data-label={dealListColumns[0].label} colSpan={tableColumns.length} className="px-4 py-8 text-center text-muted">No deals match these filters.</td></tr>}
               </tbody>
             </table>
           </TableShell>
         </div>
-      ) : workspaceView === 'kanban' ? (
+      ) : dealsPageMode && workspaceView === 'pipeline' && !selectedItem ? (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-white">{kanbanPipeline?.name ?? 'Pipeline'}</h2>
+              <p className="mt-1 text-xs text-muted">Drag a deal between stages to use the existing stage-change flow.</p>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <label className="flex items-center gap-2 text-xs text-muted">
+                Sort
+                <select className="input !w-auto !py-1.5 !text-xs" value={pipelineSort} onChange={(event) => setPipelineSort(event.target.value as typeof pipelineSort)} aria-label="Sort pipeline deals">
+                  <option value="activity">Next activity</option><option value="value">Value</option>
+                  <option value="close">Expected close</option><option value="created">Created</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          {kanbanPipeline && kanbanStages.length ? <div className="deals-fit min-w-0">
+            <div className="deals-board grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
+              {kanbanStages.map((stage) => {
+                const stageDeals = pipelineDealsByStage(stage);
+                const totalMvr = stageDeals.reduce((total, deal) =>
+                  total + toMvr(deal.value, deal.currency, deal.exchangeRate), 0);
+                const canMoveStage = activeRole === 'admin' || activeRole === 'sales';
+                return <section key={stage.id} data-stage-name={stage.name} data-total-mvr={totalMvr}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const dealId = event.dataTransfer.getData('text/deal-id');
+                    const droppedDeal = listDeals.find((deal) => deal.id === dealId);
+                    if (canMoveStage && droppedDeal) requestStageChange(stage, droppedDeal);
+                  }}
+                  className="flex min-w-0 flex-col rounded-xl border border-ink-700 bg-ink-900/55 p-2.5">
+                  <header className="mb-2 min-w-0 px-1">
+                    <h3 className="truncate text-sm font-semibold text-white" title={stage.name}>{stage.name}</h3>
+                    <p className="mt-1 truncate text-[10px] text-muted">{formatAmount(totalMvr, 'MVR')} · {stageDeals.length} {stageDeals.length === 1 ? 'deal' : 'deals'}</p>
+                  </header>
+                  <div className="max-h-[calc(100vh-330px)] min-h-40 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
+                    {stageDeals.map((deal) => {
+                      const nextActivity = activityForDeal(deal);
+                      const ownerName = ownerNameForDeal(deal);
+                      return <article key={deal.id} draggable={canMoveStage} data-deal-id={deal.id}
+                        data-deal-value-mvr={toMvr(deal.value, deal.currency, deal.exchangeRate)}
+                        onDragStart={(event) => { event.dataTransfer.setData('text/deal-id', deal.id); event.dataTransfer.effectAllowed = 'move'; }}
+                        className="flex min-w-0 cursor-grab items-start gap-2 rounded-lg border border-ink-700 bg-ink-800/80 p-2.5 shadow-sm transition hover:border-brand-400/50 active:cursor-grabbing">
+                        <button type="button" onClick={() => openDealRecord(deal)} className="min-w-0 flex-1 text-left">
+                          <span className="block truncate text-xs font-semibold text-white" title={dealTitle(deal)}>{dealTitle(deal)}</span>
+                          <span className="mt-0.5 block truncate text-[10px] text-muted" title={deal.client}>{deal.client}</span>
+                          <span className="mt-2 flex min-w-0 items-center gap-1.5">
+                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#1E2024] text-[9px] font-semibold text-[#D0D3D9]" title={ownerName}>{avatarCode(ownerName)}</span>
+                            <span className="truncate text-[10px] text-brand-300">{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
+                          </span>
+                        </button>
+                        <span className="mt-0.5 shrink-0" aria-label="Next activity"><DealActivityIndicator activity={nextActivity} compact /></span>
+                      </article>;
+                    })}
+                    {!stageDeals.length && <p className="py-7 text-center text-[11px] text-muted/60">Drop deals here</p>}
+                  </div>
+                </section>;
+              })}
+            </div>
+          </div> : <div className="glass rounded-xl p-6 text-center text-sm text-muted">Choose an active pipeline with configured stages to view its pipeline.</div>}
+        </div>
+      ) : !dealsPageMode && workspaceView === 'kanban' ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div><h2 className="text-sm font-semibold text-white">Deals pipeline</h2><p className="mt-1 text-xs text-muted">Drag a deal to another stage to review and save the change.</p></div>
@@ -1524,7 +2040,7 @@ export default function DealWorkspace({
           {kanbanStages.length ? <div className="deals-fit">
             <div className="deals-board grid gap-3">
               {kanbanStages.map((stage) => {
-                const stageDeals = deals.filter((deal) => deal.pipelineId === kanbanPipeline?.id && deal.stage === stage.name);
+                const stageDeals = listDeals.filter((deal) => deal.pipelineId === kanbanPipeline?.id && deal.stage === stage.name);
                 return <section key={stage.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
                   event.preventDefault();
                   const dealId = event.dataTransfer.getData('text/deal-id');
@@ -1537,7 +2053,7 @@ export default function DealWorkspace({
                   <div className="max-h-[calc(100vh-310px)] min-h-48 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
                     {stageDeals.map((deal) => <button key={deal.id} type="button" draggable
                       onDragStart={(event) => { event.dataTransfer.setData('text/deal-id', deal.id); event.dataTransfer.effectAllowed = 'move'; }}
-                      onClick={() => { setSelectedKey(`deal:${deal.id}`); setWorkspaceView('inspection'); }}
+                      onClick={() => openDealRecord(deal)}
                       className="w-full cursor-grab rounded-lg border border-ink-700 bg-ink-800/80 p-3 text-left shadow-sm transition hover:border-brand-400/50 active:cursor-grabbing">
                       <span className="block truncate text-sm font-semibold text-white">{deal.client}</span>
                       <span className="mt-1 block truncate text-xs text-muted">{deal.product} · {deal.insurer}</span>
@@ -1550,6 +2066,79 @@ export default function DealWorkspace({
             </div>
           </div> : <div className="glass rounded-xl p-6 text-center text-sm text-muted">Choose a pipeline with configured stages to view its Kanban board.</div>}
         </div>
+      ) : dealsPageMode && workspaceView === 'forecast' && !selectedItem ? (
+        <section className="min-w-0 space-y-3" aria-label="Deal forecast">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-1">
+              <button type="button" className="btn-ghost !px-2 !py-1.5" aria-label="Back four periods" onClick={() => setForecastOffset((offset) => offset - 4)}><ChevronsLeft size={14} /></button>
+              <button type="button" className="btn-ghost !px-2 !py-1.5" aria-label="Previous period" onClick={() => setForecastOffset((offset) => offset - 1)}><ChevronLeft size={14} /></button>
+              <button type="button" className="btn-ghost !px-2 !py-1.5 text-xs" onClick={() => setForecastOffset(0)}>Today</button>
+              <button type="button" className="btn-ghost !px-2 !py-1.5" aria-label="Next period" onClick={() => setForecastOffset((offset) => offset + 1)}><ChevronRight size={14} /></button>
+              <button type="button" className="btn-ghost !px-2 !py-1.5" aria-label="Forward four periods" onClick={() => setForecastOffset((offset) => offset + 4)}><ChevronsRight size={14} /></button>
+            </div>
+            <div className="inline-flex rounded-lg border border-ink-600 bg-ink-900/50 p-1" role="group" aria-label="Forecast period">
+              <button type="button" className={`rounded-md px-3 py-1 text-xs ${forecastMode === 'month' ? 'bg-ink-700 text-white' : 'text-muted'}`} aria-pressed={forecastMode === 'month'} onClick={() => { setForecastMode('month'); setForecastOffset(0); }}>Month</button>
+              <button type="button" className={`rounded-md px-3 py-1 text-xs ${forecastMode === 'quarter' ? 'bg-ink-700 text-white' : 'text-muted'}`} aria-pressed={forecastMode === 'quarter'} onClick={() => { setForecastMode('quarter'); setForecastOffset(0); }}>Quarter</button>
+            </div>
+          </div>
+          <div className="forecast-periods grid min-w-0 gap-3">
+            {forecastData.map((period) => {
+              const periodDeals = forecastDeals.filter((deal) => {
+                if (!deal.closeDate) return false;
+                const close = dateAtLocalMidnight(deal.closeDate);
+                return close >= period.start && close < period.end;
+              });
+              const wonDeals = periodDeals.filter((deal) => {
+                const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
+                return isWonDeal(deal, stage);
+              });
+              const openDeals = periodDeals.filter((deal) => !wonDeals.includes(deal));
+              const mvrTotal = (items: Deal[]) => items.reduce((total, deal) =>
+                total + toMvr(deal.value, deal.currency, deal.exchangeRate), 0);
+              return <section key={period.key} data-period-start={period.startDate}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const deal = forecastDeals.find((item) => item.id === event.dataTransfer.getData('text/deal-id'));
+                  if (deal) moveDealForecastPeriod(deal, period.startDate);
+                }}
+                className="min-w-0 rounded-xl border border-ink-700 bg-ink-900/55 p-2.5">
+                <header className="mb-2 min-w-0 border-b border-ink-700 pb-2">
+                  <h3 className="truncate text-sm font-semibold text-white">{period.label}</h3>
+                  <p className="mt-1 truncate text-[10px] text-muted">Total {formatAmount(mvrTotal(periodDeals), 'MVR')}</p>
+                  <p className="mt-1 flex flex-wrap gap-x-3 text-[10px]">
+                    <span className="text-emerald-300">Won {formatAmount(mvrTotal(wonDeals), 'MVR')}</span>
+                    <span className="text-brand-300">Open {formatAmount(mvrTotal(openDeals), 'MVR')}</span>
+                  </p>
+                </header>
+                <div className="max-h-[calc(100vh-360px)] min-h-40 space-y-2 overflow-y-auto">
+                  {periodDeals.map((deal) => {
+                    const probability = Math.max(0, Math.min(100, deal.probability));
+                    const ownerName = ownerNameForDeal(deal);
+                    return <article key={deal.id} draggable data-deal-id={deal.id} data-expected-close={deal.closeDate ?? ''}
+                      onDragStart={(event) => { event.dataTransfer.setData('text/deal-id', deal.id); event.dataTransfer.effectAllowed = 'move'; }}
+                      className="flex min-w-0 items-start gap-2 rounded-lg border border-ink-700 bg-ink-800/80 p-2.5">
+                      <button type="button" onClick={() => openDealRecord(deal)} className="min-w-0 flex-1 text-left">
+                        <span className="block truncate text-xs font-semibold text-white" title={dealTitle(deal)}>{dealTitle(deal)}</span>
+                        <span className="mt-0.5 block truncate text-[10px] text-muted">{deal.client}</span>
+                        <span className="mt-1 block truncate text-[10px] font-semibold text-brand-300">{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
+                        <span className="mt-1 flex min-w-0 items-center gap-1.5">
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#1E2024] text-[9px] font-semibold text-[#D0D3D9]" title={ownerName}>{avatarCode(ownerName)}</span>
+                          <span className="truncate text-[10px] text-muted">{ownerName}</span>
+                        </span>
+                        <span className="mt-2 block h-1 overflow-hidden rounded-full bg-ink-600" aria-label={`${probability}% win probability`}>
+                          <span className="block h-full rounded-full bg-emerald-400" style={{ width: `${probability}%` }} />
+                        </span>
+                      </button>
+                      <span className="mt-0.5 shrink-0"><DealActivityIndicator activity={activityForDeal(deal)} /></span>
+                    </article>;
+                  })}
+                  {!periodDeals.length && <p className="py-7 text-center text-[11px] text-muted/60">Drop deals here</p>}
+                </div>
+              </section>;
+            })}
+          </div>
+        </section>
       ) : (
     <main className={`glass min-h-[460px] min-w-0 overflow-y-auto rounded-2xl px-3 py-1.5 sm:px-4 sm:py-1.5 xl:min-h-0 ${selectedLead ? 'flex flex-col' : ''}`}>
         {!selectedItem ? (
@@ -1582,16 +2171,35 @@ export default function DealWorkspace({
               </div>
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
-              <div className="flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-1" role="tablist" aria-label="Deal workspace views">
-                <button type="button" role="tab" aria-label="Kanban view" title="Kanban view" aria-selected={false} onClick={() => setWorkspaceView('kanban')} className="rounded-md p-2 text-muted transition hover:text-white"><Columns3 size={14} /></button>
-                <button type="button" role="tab" aria-label="Inspection view" title="Inspection view" aria-selected={true} onClick={() => setWorkspaceView('inspection')} className="rounded-md bg-[#1B1E22] p-2 text-white transition"><List size={14} /></button>
+              <div className="flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-1" role="tablist" aria-label="Deal workspace views"
+                onKeyDown={(event) => {
+                  if (!dealsPageMode || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+                  event.preventDefault();
+                  const names: DealsView[] = ['pipeline', 'list', 'forecast', 'archive'];
+                  const current = names.indexOf(workspaceView as DealsView);
+                  const next = (current + (event.key === 'ArrowRight' ? 1 : -1) + names.length) % names.length;
+                  changeDealsView(names[next]);
+                  requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-deals-view="${names[next]}"]`)?.focus());
+                }}>
+                {dealsPageMode ? ([
+                  { key: 'pipeline' as const, label: 'Pipeline', Icon: Columns3 },
+                  { key: 'list' as const, label: 'List', Icon: List },
+                  { key: 'forecast' as const, label: 'Forecast', Icon: TrendingUp },
+                  { key: 'archive' as const, label: 'Archive', Icon: Archive },
+                ]).map(({ key, label, Icon }) => <button key={key} type="button" role="tab" data-deals-view={key} aria-label={label} title={label}
+                  aria-selected={workspaceView === key} onClick={() => changeDealsView(key)}
+                  className={`rounded-md p-2 transition ${workspaceView === key ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><Icon size={14} /></button>)
+                  : <>
+                    <button type="button" role="tab" aria-label="Kanban view" title="Kanban view" aria-selected={false} onClick={() => setWorkspaceView('kanban')} className="rounded-md p-2 text-muted transition hover:text-white"><Columns3 size={14} /></button>
+                    <button type="button" role="tab" aria-label="Inspection view" title="Inspection view" aria-selected={true} onClick={() => setWorkspaceView('inspection')} className="rounded-md bg-[#1B1E22] p-2 text-white transition"><List size={14} /></button>
+                  </>}
               </div>
               <button
                 type="button"
                 aria-label={onClose ? 'Back to leads' : 'Back to deals'}
                 title={onClose ? 'Back to leads' : 'Back to deals'}
                 className="btn-ghost !px-2 !py-1.5"
-                onClick={onClose ?? (() => setWorkspaceView('list'))}
+                onClick={dealsPageMode ? returnToDealsView : onClose ?? (() => setWorkspaceView('list'))}
               >
                 <ArrowLeft size={14} />
               </button>
