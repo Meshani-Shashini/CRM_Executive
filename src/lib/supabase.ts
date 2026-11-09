@@ -2,9 +2,9 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const localAuthBypass = import.meta.env.DEV && import.meta.env.VITE_AUTH_BYPASS === 'true';
+export const AUTH_BYPASS = import.meta.env.DEV && import.meta.env.VITE_AUTH_BYPASS === 'true';
 
-if ((!supabaseUrl || !supabaseAnonKey) && !localAuthBypass) {
+if ((!supabaseUrl || !supabaseAnonKey) && !AUTH_BYPASS) {
   throw new Error('Supabase configuration is missing. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.');
 }
 

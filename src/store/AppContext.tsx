@@ -15,7 +15,7 @@ import {
   type CustomerLookupKey,
   type CustomerLookups,
 } from '../data/customerLookups';
-import { supabase, TENANT_ID } from '../lib/supabase';
+import { AUTH_BYPASS, supabase, TENANT_ID } from '../lib/supabase';
 import {
   createSampleLeadActivities,
   createSampleLeads,
@@ -91,6 +91,7 @@ interface TenantRecord {
   resource: string;
   record_id: string;
   data: Record<string, unknown>;
+  updated_at: string;
 }
 
 type AuditedRecord = Lead | Deal;
@@ -207,7 +208,6 @@ const DEMO_USER: User = {
   role: 'admin',
   title: 'Development Demo Session',
 };
-const AUTH_BYPASS = import.meta.env.DEV && import.meta.env.VITE_AUTH_BYPASS === 'true';
 const DEMO_SEED_ENABLED = AUTH_BYPASS && import.meta.env.VITE_DEMO_SEED === 'true';
 const DEMO_ADMIN_USERNAME = import.meta.env.VITE_DEMO_ADMIN_USERNAME;
 const DEMO_ADMIN_PASSWORD = import.meta.env.VITE_DEMO_ADMIN_PASSWORD;
@@ -355,8 +355,60 @@ function asArray<T>(records: TenantRecord[], resource: string): T[] {
     });
 }
 
-function writeArray(resource: string, items: unknown[]) {
-  return supabase.rpc('sync_tenant_records', { p_resource: resource, p_records: sanitizeRecords(items) });
+function writeArray(
+  resource: string,
+  items: unknown[],
+  versions: Map<string, string>,
+  deleteMissing: boolean,
+) {
+  const records = sanitizeRecords(items).map((record) => {
+    const updatedAt = versions.get(`${resource}:${record.id}`);
+    return updatedAt ? { ...record, __expectedUpdatedAt: updatedAt } : record;
+  });
+  return supabase.rpc('sync_tenant_records', {
+    p_resource: resource,
+    p_records: records,
+    p_delete_missing: deleteMissing,
+  });
+}
+
+function persistedRecordMap(value: unknown): Map<string, { updated_at: string; data: Record<string, unknown> }> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Supabase returned an invalid record synchronization response.');
+  }
+  const result = new Map<string, { updated_at: string; data: Record<string, unknown> }>();
+  for (const [id, row] of Object.entries(value)) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) {
+      throw new Error('Supabase returned invalid record synchronization metadata.');
+    }
+    const updatedAt = (row as Record<string, unknown>).updated_at;
+    const data = (row as Record<string, unknown>).data;
+    if (typeof updatedAt !== 'string' || !data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error('Supabase returned incomplete record synchronization metadata.');
+    }
+    result.set(id, { updated_at: updatedAt, data: data as Record<string, unknown> });
+  }
+  return result;
+}
+
+function reconcilePersistedFields<T extends { id: string }>(
+  items: T[],
+  records: Map<string, { updated_at: string; data: Record<string, unknown> }>,
+  fields: string[],
+): T[] {
+  let changed = false;
+  const result = items.map((item) => {
+    const persisted = records.get(item.id)?.data;
+    if (!persisted) return item;
+    const updates = Object.fromEntries(fields
+      .filter((field) => typeof persisted[field] === 'string'
+        && (item as Record<string, unknown>)[field] !== persisted[field])
+      .map((field) => [field, persisted[field]]));
+    if (!Object.keys(updates).length) return item;
+    changed = true;
+    return { ...item, ...updates };
+  });
+  return changed ? result : items;
 }
 
 function customerLookupRecord(options: CustomerLookups) {
@@ -399,6 +451,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [dataReady, setDataReady] = useState(AUTH_BYPASS);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const recordVersions = useRef(new Map<string, string>());
   const auditSnapshot = useRef<{
     leads: Lead[];
     deals: Deal[];
@@ -600,11 +653,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       try {
         const { data, error } = await supabase
           .from('tenant_records')
-          .select('resource, record_id, data')
+          .select('resource, record_id, data, updated_at')
           .eq('tenant_id', TENANT_ID);
         if (error) throw new Error(`Could not load Supabase records: ${error.message}`);
         if (cancelled) return;
         const records = (data ?? []) as TenantRecord[];
+        recordVersions.current = new Map(records.map((record) => [
+          `${record.resource}:${record.record_id}`,
+          record.updated_at,
+        ]));
         setTaxRates(asArray<TaxRate>(records, 'tax-rates'));
         const loadedLeads = asArray<Lead>(records, 'leads');
         const leadStageHistory = asArray<LeadStageHistoryRecord>(records, 'lead-stage-history');
@@ -702,17 +759,53 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const timer = window.setTimeout(() => {
       saveQueue.current = saveQueue.current.then(async () => {
         const resources = writableByRole[user.role];
-        const results = await Promise.all(
-          resources.map(async (resource) => ({
-            resource,
-            result: await writeArray(resource, allResources[resource]),
-          })),
-        );
-        const failed = results.find(({ result }) => result.error);
-        if (failed?.result.error) {
-          console.error(`Could not persist "${failed.resource}" records to Supabase.`, failed.result.error);
-          setPersistenceError(`Supabase save failed for ${failed.resource}: ${failed.result.error.message}`);
-          return;
+        const upsertOrder = [
+          'clients', 'vendors', 'pipelines', 'pipeline-stages', 'leads', 'deals',
+          'invoices', 'quotation-requests', 'payments', 'activities', 'stage-history',
+          'lead-stage-history', 'tax-rates', 'customer-lookups', 'products', 'policy-types',
+          'company', 'email-templates',
+        ].filter((resource) => resources.includes(resource));
+        const deleteOrder = [
+          'payments', 'activities', 'audit-log', 'quotation-requests', 'invoices', 'deals',
+          'stage-history', 'lead-stage-history', 'leads', 'clients', 'vendors',
+          'pipeline-stages', 'pipelines', 'customer-lookups', 'tax-rates', 'products',
+          'policy-types', 'company', 'email-templates',
+        ].filter((resource) => resources.includes(resource));
+        const savedRecords = new Map<string, Map<string, { updated_at: string; data: Record<string, unknown> }>>();
+
+        const syncResource = async (resource: string, deleteMissing: boolean) => {
+          const result = await writeArray(resource, allResources[resource], recordVersions.current, deleteMissing);
+          if (result.error) {
+            console.error(`Could not persist "${resource}" records to Supabase.`, result.error);
+            setPersistenceError(`Supabase save failed for ${resource}: ${result.error.message}`);
+            return false;
+          }
+          const persisted = persistedRecordMap(result.data);
+          for (const [recordId, record] of persisted) {
+            recordVersions.current.set(`${resource}:${recordId}`, record.updated_at);
+          }
+          if (!deleteMissing) savedRecords.set(resource, persisted);
+          return true;
+        };
+
+        for (const resource of upsertOrder) {
+          if (!await syncResource(resource, false)) return;
+        }
+
+        setDeals((current) => reconcilePersistedFields(current, savedRecords.get('deals') ?? new Map(), ['reference']));
+        setQuotationRequests((current) => reconcilePersistedFields(
+          current,
+          savedRecords.get('quotation-requests') ?? new Map(),
+          ['reference', 'ref'],
+        ));
+        setInvoices((current) => reconcilePersistedFields(
+          current,
+          savedRecords.get('invoices') ?? new Map(),
+          ['invoiceNumber', 'number'],
+        ));
+
+        for (const resource of deleteOrder) {
+          if (!await syncResource(resource, true)) return;
         }
         setPersistenceError(null);
       }).catch((error: unknown) => {

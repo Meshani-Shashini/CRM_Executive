@@ -12,22 +12,13 @@ import { dashboardHref, hashParams } from '../utils/navigation';
 import {
   canTransitionQuotationRequestStatus, quotationRequestStatusOptions, type QuotationRequestStatus,
 } from '../utils/quotationRequestStatus';
+import { getNextReference } from '../utils/references';
 
 const STATUSES: QuotationRequestStatus[] = ['Draft', 'Sent', 'Responses received', 'Closed'];
 const QUOTATION_REQUEST_COLUMNS = [
   'Ref', 'Deal', 'Lead', 'Client', 'Vendors', 'Product',
   'Sum insured + currency', 'Required by', 'Status', 'Actions',
 ] as const;
-
-function referenceForNextRequest(requests: QuotationRequest[], year: number) {
-  const prefix = `QR-${year}-`;
-  const nextNumber = requests.reduce((highest, request) => {
-    if (!request.ref.startsWith(prefix)) return highest;
-    const number = Number(request.ref.slice(prefix.length));
-    return Number.isInteger(number) ? Math.max(highest, number) : highest;
-  }, 0) + 1;
-  return `${prefix}${String(nextNumber).padStart(4, '0')}`;
-}
 
 function resolveDealClient(deal: Deal, clients: ReturnType<typeof useApp>['clients']) {
   return clients.find((client) => client.id === deal.clientId)
@@ -127,7 +118,7 @@ export default function QSlipsPage() {
     }).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }, [clientFilter, clients, deals, leads, products, quotationRequests, requestFilter, searchQuery, statusFilter, vendorFilter, vendorNames]);
 
-  const submitRequest = (event: FormEvent<HTMLFormElement>) => {
+  const submitRequest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError('');
     if (!selectedDeal || isTerminalDealStage(
@@ -161,9 +152,17 @@ export default function QSlipsPage() {
 
     const now = new Date().toISOString();
     const year = new Date().getFullYear();
+    let reference: string;
+    try {
+      reference = await getNextReference('quotation-request', year, quotationRequests.map((request) => request.ref));
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Could not allocate a quotation request reference.');
+      return;
+    }
     const request: QuotationRequest = {
       id: `quotation-request-${crypto.randomUUID()}`,
-      ref: referenceForNextRequest(quotationRequests, year),
+      ref: reference,
+      reference,
       dealId: selectedDeal.id,
       leadId: linkedLead.id,
       clientId: selectedClient.id,

@@ -214,6 +214,7 @@ export interface Vendor {
 export interface QuotationRequest {
   id: string;
   ref: string;
+  reference?: string;
   dealId: string;
   leadId: string;
   clientId: string;
@@ -264,6 +265,7 @@ export interface InvoiceItem {
 export interface Invoice {
   id: string;
   number: string;
+  invoiceNumber?: string;
   clientId: string;
   clientName: string;
   insurer: string;
@@ -312,6 +314,7 @@ export interface MiraRow {
 
 export interface Deal {
   id: string;
+  reference?: string;
   pipelineId?: string;
   createdAt?: string;
   stageChangedAt?: string;

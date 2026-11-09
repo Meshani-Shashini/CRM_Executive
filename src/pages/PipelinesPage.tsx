@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { ArrowDown, ArrowUp, CalendarClock, Check, Clock3, Plus, Settings2, Zap } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { getPipelineLossReasons, PIPELINE_TEMPLATES } from '../data/pipelineStageTemplates';
-import { TENANT_ID } from '../lib/supabase';
+import { AUTH_BYPASS, TENANT_ID } from '../lib/supabase';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
 import type { Client, Deal, Pipeline, PipelineStage, StageHistoryAudit } from '../types';
@@ -16,6 +16,7 @@ import {
 import { promptQuotationRequestForDeal } from '../utils/navigation';
 import { linkDealToLead } from '../utils/dealFactory';
 import { getNextActivity } from '../utils/nextActivity';
+import { nextLocalReference } from '../utils/references';
 
 const legacyStageNames: Record<string, string> = {
   'Lead Identified': 'Identified',
@@ -368,7 +369,10 @@ export default function PipelinesPage() {
         const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
         setInvoices([...invoices, {
           id: invoiceId,
-          number: `INV-${movingDeal.id.slice(-8).toUpperCase()}`,
+          number: AUTH_BYPASS
+            ? nextLocalReference('invoice', new Date(issueDate).getFullYear(), invoices.map((invoice) => invoice.number))
+            : '',
+          ...(AUTH_BYPASS ? {} : { invoiceNumber: '' }),
           clientId: boundClient?.id ?? '',
           clientName: movingDeal.client,
           insurer: movingDeal.insurer,

@@ -10,6 +10,7 @@ import { hashParams } from '../utils/navigation';
 import { formatDate } from '../utils/date';
 import DateInput from '../components/ui/DateInput';
 import { invoiceTotalInMvr } from '../utils/invoiceTotals';
+import { getNextReference } from '../utils/references';
 
 const statusVariant: Record<string, 'win' | 'warm' | 'hot' | 'cold' | 'muted'> = {
   Paid: 'win', Partial: 'warm', Pending: 'cold', Overdue: 'hot', Archived: 'muted',
@@ -23,6 +24,7 @@ export default function InvoicesPage() {
   });
   const [selected, setSelected] = useState<Invoice | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   useEffect(() => {
     const applyHashFilter = () => {
@@ -49,16 +51,25 @@ export default function InvoicesPage() {
     return { subtotal, vat, total: subtotal + vat };
   };
 
-  const createInvoice = (event: FormEvent<HTMLFormElement>) => {
+  const createInvoice = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setCreateError('');
     const data = new FormData(event.currentTarget);
     const client = clients.find((item) => item.id === data.get('clientId'));
     if (!client) return;
     const amount = Number(data.get('amount'));
     const issueDate = String(data.get('issueDate'));
+    let invoiceNumber: string;
+    try {
+      invoiceNumber = await getNextReference('invoice', new Date(issueDate).getFullYear(), invoices.map((invoice) => invoice.number));
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Could not allocate an invoice number.');
+      return;
+    }
     const invoice: Invoice = {
       id: `inv-${Date.now()}`,
-      number: `INV-${String(invoices.length + 1).padStart(3, '0')}-${new Date(issueDate).getFullYear()}`,
+      number: invoiceNumber,
+      invoiceNumber,
       clientId: client.id,
       clientName: client.name,
       insurer: client.insurer,
@@ -97,7 +108,7 @@ export default function InvoicesPage() {
             </button>
           ))}
         </div>
-        <button className="btn-primary !py-1.5" onClick={() => setCreateOpen(true)}><Plus size={14} /> New Invoice</button>
+        <button className="btn-primary !py-1.5" onClick={() => { setCreateError(''); setCreateOpen(true); }}><Plus size={14} /> New Invoice</button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -246,6 +257,7 @@ export default function InvoicesPage() {
       </Modal>
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="New Invoice" subtitle="Create an invoice for a client." footer={<><button type="button" className="btn-ghost" onClick={() => setCreateOpen(false)}><X size={14} /> Cancel</button><button type="submit" form="new-invoice-form" className="btn-primary"><Plus size={14} /> Create Invoice</button></>}>
         <form id="new-invoice-form" onSubmit={createInvoice} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {createError && <p role="alert" className="sm:col-span-2 text-sm text-hot">{createError}</p>}
           <Field label="Client"><select className="input" name="clientId" required>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></Field>
           <Field label="Description"><input className="input" name="description" required /></Field>
           <Field label="Amount (MVR)"><input className="input" type="number" name="amount" min="0.01" step="0.01" required /></Field>

@@ -15,7 +15,7 @@ import StageMenu from '../components/table/StageMenu';
 import { OwnerCell, ProductCodePill, StagePill, TableDateCell } from '../components/table/TableCells';
 import ActivityTimelineItem from '../components/ActivityTimelineItem';
 import { useApp } from '../store/AppContext';
-import { TENANT_ID } from '../lib/supabase';
+import { AUTH_BYPASS, TENANT_ID } from '../lib/supabase';
 import type { Activity, CompanyContactProfile, Deal, Lead, PipelineStage, StageHistoryAudit } from '../types';
 import { formatAmount, toMvr } from '../utils/currency';
 import { formatDate } from '../utils/date';
@@ -37,6 +37,7 @@ import { calculateLeadContactSla, getContactMadeSlaTargetDays, getLeadContactedA
 import { buildLeadConversion } from '../utils/leadConversion';
 import { getNextActivity } from '../utils/nextActivity';
 import { dashboardHref, hashParams, promptQuotationRequestForDeal } from '../utils/navigation';
+import { nextLocalReference } from '../utils/references';
 
 interface TimelineEntry {
   key: string;
@@ -725,7 +726,7 @@ export default function DealWorkspace({
       const year = Number.isFinite(timestamp) ? new Date(timestamp).getFullYear() : new Date().getFullYear();
       const sequence = (yearSequence.get(year) ?? 0) + 1;
       yearSequence.set(year, sequence);
-      return [deal.id, `DL-${year}-${String(sequence).padStart(4, '0')}`];
+      return [deal.id, deal.reference ?? (AUTH_BYPASS ? `DL-${year}-${String(sequence).padStart(4, '0')}` : '')];
     }));
   }, [allDeals]);
   const dealTitle = (deal: Deal) => leads.find((lead) => lead.id === deal.leadId || lead.dealId === deal.id)?.title
@@ -1499,7 +1500,10 @@ export default function DealWorkspace({
       const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
       setInvoices([...invoices, {
         id: invoiceId,
-        number: `INV-${selectedDeal.id.slice(-8).toUpperCase()}`,
+        number: AUTH_BYPASS
+          ? nextLocalReference('invoice', new Date(now).getFullYear(), invoices.map((invoice) => invoice.number))
+          : '',
+        ...(AUTH_BYPASS ? {} : { invoiceNumber: '' }),
         clientId: selectedClient?.id ?? '',
         clientName: selectedDeal.client,
         insurer: selectedDeal.insurer,
