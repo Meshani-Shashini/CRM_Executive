@@ -44,7 +44,7 @@ BEGIN
   )
   SELECT
     stage.tenant_id,
-    COALESCE(pipeline.data ->> 'id', pipeline.record_id),
+    COALESCE(p.data ->> 'id', p.record_id),
     COALESCE(stage.data ->> 'id', stage.record_id),
     COALESCE(stage.data ->> 'name', ''),
     CASE
@@ -56,13 +56,13 @@ BEGIN
       OR LOWER(COALESCE(stage.data ->> 'name', '')) ~ '(won|bound|renewed|immediate cover|paid)',
     COALESCE((stage.data ->> 'isClosedLost')::BOOLEAN, FALSE)
       OR LOWER(COALESCE(stage.data ->> 'name', '')) ~ '(lost|declined|lapsed)'
-  FROM public.tenant_records AS pipeline
+  FROM public.tenant_records AS p
   JOIN public.tenant_records AS stage
-    ON stage.tenant_id = pipeline.tenant_id
+    ON stage.tenant_id = p.tenant_id
     AND stage.resource = 'pipeline-stages'
-    AND stage.data ->> 'pipelineId' = COALESCE(pipeline.data ->> 'id', pipeline.record_id)
-  WHERE pipeline.resource = 'pipelines'
-    AND COALESCE(LOWER(pipeline.data ->> 'isActive'), 'false') = 'true';
+    AND stage.data ->> 'pipelineId' = COALESCE(p.data ->> 'id', p.record_id)
+  WHERE p.resource = 'pipelines'
+    AND COALESCE(LOWER(p.data ->> 'isActive'), 'false') = 'true';
 
   FOR pipeline IN
     SELECT tenant_id, COALESCE(data ->> 'id', record_id) AS pipeline_id
@@ -215,27 +215,27 @@ BEGIN
       COALESCE(mapping.target_stage_name, matching_target.stage_name, first_target.stage_name) AS target_stage_name,
       mapping.outcome
     FROM public.tenant_records AS deal
-    JOIN public.tenant_records AS pipeline
-      ON pipeline.tenant_id = deal.tenant_id
-      AND pipeline.resource = 'pipelines'
-      AND COALESCE(LOWER(pipeline.data ->> 'isActive'), 'false') = 'true'
-      AND COALESCE(pipeline.data ->> 'id', pipeline.record_id) = deal.data ->> 'pipelineId'
+    JOIN public.tenant_records AS p
+      ON p.tenant_id = deal.tenant_id
+      AND p.resource = 'pipelines'
+      AND COALESCE(LOWER(p.data ->> 'isActive'), 'false') = 'true'
+      AND COALESCE(p.data ->> 'id', p.record_id) = deal.data ->> 'pipelineId'
     LEFT JOIN LATERAL (
       SELECT stage_mapping.target_stage_name, stage_mapping.outcome
       FROM deal_pipeline_stage_mapping AS stage_mapping
       WHERE stage_mapping.tenant_id = deal.tenant_id
-        AND stage_mapping.pipeline_id = COALESCE(pipeline.data ->> 'id', pipeline.record_id)
+        AND stage_mapping.pipeline_id = COALESCE(p.data ->> 'id', p.record_id)
         AND stage_mapping.old_stage_name = deal.data ->> 'stage'
       ORDER BY stage_mapping.old_stage_id
       LIMIT 1
     ) AS mapping ON TRUE
     LEFT JOIN deal_pipeline_stage_targets AS matching_target
       ON matching_target.tenant_id = deal.tenant_id
-      AND matching_target.pipeline_id = COALESCE(pipeline.data ->> 'id', pipeline.record_id)
+      AND matching_target.pipeline_id = COALESCE(p.data ->> 'id', p.record_id)
       AND matching_target.stage_name = deal.data ->> 'stage'
     LEFT JOIN deal_pipeline_stage_targets AS first_target
       ON first_target.tenant_id = deal.tenant_id
-      AND first_target.pipeline_id = COALESCE(pipeline.data ->> 'id', pipeline.record_id)
+      AND first_target.pipeline_id = COALESCE(p.data ->> 'id', p.record_id)
       AND first_target.stage_order = 1
     WHERE deal.resource = 'deals'
   )
@@ -257,17 +257,17 @@ BEGIN
     AND deal.record_id = deal_updates.record_id;
 
   DELETE FROM public.tenant_records AS stage
-  USING public.tenant_records AS pipeline
-  WHERE stage.tenant_id = pipeline.tenant_id
+  USING public.tenant_records AS p
+  WHERE stage.tenant_id = p.tenant_id
     AND stage.resource = 'pipeline-stages'
-    AND pipeline.resource = 'pipelines'
-    AND COALESCE(LOWER(pipeline.data ->> 'isActive'), 'false') = 'true'
-    AND stage.data ->> 'pipelineId' = COALESCE(pipeline.data ->> 'id', pipeline.record_id)
+    AND p.resource = 'pipelines'
+    AND COALESCE(LOWER(p.data ->> 'isActive'), 'false') = 'true'
+    AND stage.data ->> 'pipelineId' = COALESCE(p.data ->> 'id', p.record_id)
     AND NOT EXISTS (
       SELECT 1
       FROM deal_pipeline_stage_targets AS target
       WHERE target.tenant_id = stage.tenant_id
-        AND target.pipeline_id = COALESCE(pipeline.data ->> 'id', pipeline.record_id)
+        AND target.pipeline_id = COALESCE(p.data ->> 'id', p.record_id)
         AND target.stage_id = COALESCE(stage.data ->> 'id', stage.record_id)
     );
 END $$;
