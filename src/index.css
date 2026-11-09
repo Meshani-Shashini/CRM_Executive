@@ -262,6 +262,27 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
 .fit-wrap.deals-list-fit col:nth-child(10) { width: 9%; }
 .fit-wrap.deals-list-fit col:nth-child(11) { width: 5%; }
 
+.fit-wrap.deals-page-list-fit col:nth-child(1) { width: 12%; }
+.fit-wrap.deals-page-list-fit col:nth-child(2) { width: 9%; }
+.fit-wrap.deals-page-list-fit col:nth-child(3) { width: 11%; }
+.fit-wrap.deals-page-list-fit col:nth-child(4) { width: 11%; }
+.fit-wrap.deals-page-list-fit col:nth-child(5) { width: 12%; }
+.fit-wrap.deals-page-list-fit col:nth-child(6) { width: 12%; }
+.fit-wrap.deals-page-list-fit col:nth-child(7) { width: 8%; }
+.fit-wrap.deals-page-list-fit col:nth-child(8) { width: 8%; }
+.fit-wrap.deals-page-list-fit col:nth-child(9) { width: 9%; }
+.fit-wrap.deals-page-list-fit col:nth-child(10) { width: 8%; }
+
+.fit-wrap.deals-page-list-fit th {
+  overflow-wrap: normal;
+  vertical-align: bottom;
+}
+
+.fit-wrap.deals-page-list-fit th button {
+  flex-wrap: wrap;
+  white-space: normal;
+}
+
 .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(1) { width: 12%; }
 .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(2) { width: 8%; }
 .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(3) { width: 7%; }
@@ -396,6 +417,17 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(11) { width: 7%; }
   .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(12) { width: 13%; }
   .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(13) { width: 9%; }
+
+  .fit-wrap.deals-page-list-fit col:nth-child(1) { width: 11%; }
+  .fit-wrap.deals-page-list-fit col:nth-child(2) { width: 8%; }
+  .fit-wrap.deals-page-list-fit col:nth-child(3) { width: 11%; }
+  .fit-wrap.deals-page-list-fit col:nth-child(4) { width: 10%; }
+  .fit-wrap.deals-page-list-fit col:nth-child(5) { width: 12%; }
+  .fit-wrap.deals-page-list-fit col:nth-child(6) { width: 12%; }
+  .fit-wrap.deals-page-list-fit col:nth-child(7) { width: 8%; }
+  .fit-wrap.deals-page-list-fit col:nth-child(8) { width: 8%; }
+  .fit-wrap.deals-page-list-fit col:nth-child(9) { width: 10%; }
+  .fit-wrap.deals-page-list-fit col:nth-child(10) { width: 10%; }
 }
 
 @container (max-width: 639px) {
@@ -698,13 +730,15 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   min-width: 0;
   container-type: inline-size;
   container-name: deals-fit;
-  overflow-x: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .deals-board {
-  width: 100%;
-  min-width: 0;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  width: max-content;
+  min-width: 100%;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(150px, 1fr);
 }
 
 .deals-board > section,
@@ -722,18 +756,6 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   min-width: 0;
   white-space: normal;
   overflow-wrap: anywhere;
-}
-
-@container deals-fit (max-width: 999px) {
-  .deals-board {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@container deals-fit (max-width: 639px) {
-  .deals-board {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 @layer components {

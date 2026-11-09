@@ -1873,7 +1873,7 @@ export default function DealWorkspace({
               <option value="all">All outcomes</option><option value="won">Won</option><option value="lost">Lost</option>
             </select>
           </div>}
-          <TableShell className={workspaceView === 'archive' ? 'deals-list-fit deals-archive-fit' : 'deals-list-fit'}>
+          <TableShell className={workspaceView === 'archive' ? 'deals-list-fit deals-archive-fit' : `deals-list-fit${dealsPageMode ? ' deals-page-list-fit' : ''}`}>
             <table className="table-fixed w-full leading-tight text-left">
               <colgroup>{tableColumns.map((column) => <col key={column.key} />)}</colgroup>
               <thead className="bg-[#111214] text-[10px] font-semibold text-[#D0D3D9]">
@@ -2101,7 +2101,7 @@ export default function DealWorkspace({
             </div>
           </div>
           {kanbanPipeline && kanbanStages.length ? <div className="deals-fit min-w-0">
-            <div className="deals-board grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
+            <div className="deals-board grid gap-2">
               {kanbanStages.map((stage) => {
                 const stageDeals = pipelineDealsByStage(stage);
                 const totalMvr = stageDeals.reduce((total, deal) =>

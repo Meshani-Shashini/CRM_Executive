@@ -4,7 +4,7 @@ import {
   LayoutDashboard, CalendarDays, Users, FileText, Receipt, Wallet,
   ShieldCheck, Settings, BarChart3, FolderKanban, Target,
   FileSliders, Percent, BookUser, Briefcase, Files,
-  CreditCard, Send, RefreshCcw, Info, ChevronRight, ChevronDown, LogOut,
+  CreditCard, Send, RefreshCcw, Info, ChevronRight, LogOut,
 } from 'lucide-react';
 import type { Role } from '../types';
 
@@ -52,23 +52,20 @@ const GROUPS: NavGroup[] = [
   {
     label: 'Admin Portal', icon: Settings,
     items: [
+      { key: 'plans', label: 'Plans', icon: Target, roles: ['admin', 'sales'] },
+      { key: 'reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'finance'] },
+      { key: 'documents', label: 'Documents', icon: Files, roles: ['admin', 'sales', 'finance', 'client'] },
+      { key: 'quotations', label: 'Quotations', icon: FileText, roles: ['admin', 'sales'] },
+      { key: 'internal-slips', label: 'Internal Slips', icon: BookUser, roles: ['admin', 'sales'] },
+      { key: 'pay-requests', label: 'Pay Requests', icon: Send, roles: ['admin', 'finance'] },
+      { key: 'info-requests', label: 'Info Requests', icon: Info, roles: ['admin', 'sales'] },
+      { key: 'rate-cards', label: 'Rate Cards', icon: Percent, roles: ['admin', 'sales'] },
+      { key: 'targets', label: 'Targets', icon: Target, roles: ['admin'] },
       { key: 'settings', label: 'Settings', icon: Settings, roles: ['admin'] },
       { key: 'funnels', label: 'Funnels', icon: BarChart3, roles: ['admin', 'sales', 'finance'] },
       { key: 'pipelines', label: 'Pipelines', icon: FileSliders, roles: ['admin', 'sales'] },
     ],
   },
-];
-
-const COMING_SOON_ITEMS: NavItemDef[] = [
-  { key: 'plans', label: 'Plans', icon: Target, roles: ['admin'] },
-  { key: 'reports', label: 'Reports', icon: BarChart3, roles: ['admin'] },
-  { key: 'documents', label: 'Documents', icon: Files, roles: ['admin'] },
-  { key: 'quotations', label: 'Quotations', icon: FileText, roles: ['admin'] },
-  { key: 'internal-slips', label: 'Internal Slips', icon: BookUser, roles: ['admin'] },
-  { key: 'pay-requests', label: 'Pay Requests', icon: Send, roles: ['admin'] },
-  { key: 'info-requests', label: 'Info Requests', icon: Info, roles: ['admin'] },
-  { key: 'rate-cards', label: 'Rate Cards', icon: Percent, roles: ['admin'] },
-  { key: 'targets', label: 'Targets', icon: Target, roles: ['admin'] },
 ];
 
 const roleLabel: Record<Role, string> = {
@@ -88,7 +85,6 @@ export default function Sidebar({
   const { user, viewAsRole, setViewAsRole, signOut, company } = useApp();
   const activeRole = viewAsRole ?? user.role;
   const [signOutError, setSignOutError] = useState('');
-  const [comingSoonOpen, setComingSoonOpen] = useState(false);
 
   return (
     <>
@@ -117,13 +113,14 @@ export default function Sidebar({
           {GROUPS.map((g) => {
             const visibleItems = g.items.filter((i) => i.roles.includes(activeRole));
             if (visibleItems.length === 0) return null;
+            const isAdminPortal = g.label === 'Admin Portal';
             return (
               <div key={g.label}>
-                <div className="flex items-center gap-2 px-3 mb-1.5 text-[10px] uppercase tracking-wider text-muted/70 font-semibold">
-                  <g.icon size={12} />
-                  {g.label}
-                  {g.label === 'Admin Portal' && (
-                    <span className="ml-auto pill bg-hot/10 text-hot border border-hot/30 !px-1.5 !py-0.5 !text-[9px]">
+                <div className={`mb-1.5 flex items-center uppercase text-muted/70 font-semibold ${isAdminPortal ? 'gap-1 whitespace-nowrap px-1 !text-[9px] !tracking-wide' : 'gap-2 px-3 text-[10px] tracking-wider'}`}>
+                  <g.icon size={isAdminPortal ? 10 : 12} className="shrink-0" />
+                  <span className="whitespace-nowrap">{g.label}</span>
+                  {isAdminPortal && (
+                    <span className="ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap pill bg-hot/10 text-hot border border-hot/30 !px-1 !py-0.5 !text-[8px]">
                       <ShieldCheck size={9} /> Restricted
                     </span>
                   )}
@@ -150,41 +147,6 @@ export default function Sidebar({
               </div>
             );
           })}
-          {user.role === 'admin' && (
-            <div>
-              <button
-                type="button"
-                aria-expanded={comingSoonOpen}
-                onClick={() => setComingSoonOpen((open) => !open)}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted/70 hover:text-white"
-              >
-                <Target size={12} />
-                <span className="flex-1">Coming soon</span>
-                {comingSoonOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-              </button>
-              {comingSoonOpen && (
-                <div className="mt-1 space-y-1.5">
-                  {COMING_SOON_ITEMS.map((item) => {
-                    const Icon = item.icon;
-                    const isActive = active === item.key;
-                    return (
-                      <a
-                        key={item.key}
-                        href={`#/${item.key}`}
-                        onClick={onClose}
-                        aria-current={isActive ? 'page' : undefined}
-                        className={`nav-item w-full !px-2 !text-xs !font-medium no-underline ${isActive ? 'nav-item-active' : ''}`}
-                      >
-                        <Icon size={16} />
-                        <span className="flex-1 text-left">{item.label}</span>
-                        {isActive && <ChevronRight size={14} className="text-brand-400" />}
-                      </a>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
         </nav>
 
         {/* Profile */}
