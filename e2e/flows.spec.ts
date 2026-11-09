@@ -27,12 +27,12 @@ test('changing a deal stage in List is reflected in Pipeline', async ({ page }) 
   const stageTrigger = row.getByRole('button', { name: `Change stage for ${title}` });
   await stageTrigger.click();
   await page.getByRole('menu', { name: `Stages for ${title}` })
-    .getByRole('menuitem', { name: 'Client Confirmation' }).click();
+    .getByRole('menuitem', { name: 'Meetings' }).click();
   await expect(page.getByRole('heading', { name: 'Update deal stage' })).toBeVisible();
   await page.getByRole('button', { name: 'Save stage' }).click();
   await page.getByRole('tab', { name: 'Pipeline' }).click();
   await page.getByLabel('Filter deals by pipeline').selectOption({ label: 'Retail, SME & Velocity Packages' });
-  await expect(page.locator('.deals-board > section').filter({ hasText: 'Client Confirmation' })
+  await expect(page.locator('.deals-board > section').filter({ hasText: 'Meetings' })
     .getByRole('button', { name: /Male Retail Package/ })).toBeVisible();
 });
 
@@ -47,7 +47,7 @@ test('legacy deal import creates a deal row without exposing linked lead IDs', a
   const legacyDeal = page.getByRole('link', { name: 'Open deal details for Legacy import' });
   await expect(legacyDeal).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'Linked Lead' })).toHaveCount(0);
-  const dealCell = legacyDeal.locator('td[data-label="Deal"]');
+  const dealCell = legacyDeal.locator('td[data-label="Title"]');
   await expect(dealCell).toContainText('Legacy import');
   await expect(legacyDeal).not.toContainText(/lead-[a-z0-9-]+/i);
 });
@@ -85,18 +85,65 @@ test('deal search is shared across views and forecast drag updates expected clos
   await expect(activityTimeline).toContainText('Demo Administrator');
 });
 
-test('dragging a pipeline card to Lost opens the mandatory loss-reason flow', async ({ page }) => {
-  await page.goto('/#/deals');
-  await page.getByLabel('Filter deals by pipeline').selectOption({ label: 'Commercial Lines Brokerage' });
-  await expect(page.getByLabel('Show closed deals')).toHaveCount(0);
-  const dealCard = page.locator('.deals-board article[data-deal-id]').filter({ hasText: 'Bonavista Maldives - Contractors All Risks' });
-  const lostColumn = page.locator('.deals-board > section[data-stage-name="Lost / Market Declined"]');
-  await expect(dealCard).toBeVisible();
-  await dealCard.dragTo(lostColumn);
-  await expect(page.getByRole('heading', { name: 'Update deal stage' })).toBeVisible();
-  await page.getByRole('button', { name: 'Save stage' }).click();
+test('Deals list shows the exact stage filter and required table fields', async ({ page }) => {
+  await page.goto('/#/deals?view=list');
+  expect(await page.locator('thead th').evaluateAll((cells) =>
+    cells.map((cell) => cell.textContent?.replace(/[↑↓]/g, '').trim()))).toEqual([
+    'Title',
+    'Value',
+    'Organization',
+    'Contact Person',
+    'Expected Close Date',
+    'Next Activity Date',
+    'Owner',
+    'Stage',
+    'Pipeline',
+    'Actions',
+  ]);
+  await page.getByRole('button', { name: 'Filter', exact: true }).click();
+  await expect(page.getByLabel('Stage').locator('option')).toHaveText([
+    'All stages',
+    'Identified',
+    'Contact Made',
+    'Key Person Identified',
+    'Intro Mail',
+    'Meetings',
+    'Requirements Identified',
+    'Quotation / Underwriting',
+    'Quoted / Proposed',
+    'Review and Follow up',
+  ]);
+});
+
+test('Mark lost is a separate deal outcome and requires a reason', async ({ page }) => {
+  await page.goto('/#/deals?view=list');
+  const title = 'Bonavista Maldives - Contractors All Risks';
+  const row = page.getByRole('link', { name: `Open deal details for ${title}` });
+  await row.getByRole('button', { name: `Actions for ${title}` }).click();
+  await page.getByRole('menuitem', { name: 'Mark lost' }).click();
+  await expect(page.getByRole('heading', { name: 'Mark deal lost' })).toBeVisible();
+  await page.getByRole('button', { name: 'Mark lost' }).click();
   await expect(page.getByRole('alert')).toHaveText('A loss reason is mandatory.');
-  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByLabel('Loss reason (required)').selectOption({ label: 'Incumbent Retained' });
+  await page.getByRole('button', { name: 'Mark lost' }).click();
+  await page.getByRole('tab', { name: 'Archive' }).click();
+  await expect(row).toContainText('Incumbent Retained');
+});
+
+test('Mark won is a separate deal outcome and requires a win reason', async ({ page }) => {
+  await page.goto('/#/deals?view=list');
+  const title = 'Male Retail Package';
+  const row = page.getByRole('link', { name: `Open deal details for ${title}` });
+  await row.getByRole('button', { name: `Actions for ${title}` }).click();
+  await page.getByRole('menuitem', { name: 'Mark won' }).click();
+  await expect(page.getByRole('heading', { name: 'Mark deal won' })).toBeVisible();
+  await page.getByRole('button', { name: 'Mark won' }).click();
+  await expect(page.getByRole('alert')).toHaveText('A win reason is mandatory.');
+  await page.getByLabel('Win reason (required)').fill('Client accepted the proposal.');
+  await page.getByRole('button', { name: 'Mark won' }).click();
+  await page.getByRole('tab', { name: 'Archive' }).click();
+  await page.getByLabel('Filter archived deals').selectOption('won');
+  await expect(row).toBeVisible();
 });
 
 test('archive outcome filter shows only the selected closed-deal state', async ({ page }) => {

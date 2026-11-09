@@ -7,7 +7,7 @@ import type {
   QuotationRequest, Role, StageHistoryAudit, TaxRate, User, ProductCode, Vendor,
 } from '../types';
 import { COMPANY, PRODUCT_CODES } from '../data/catalogs';
-import { applyPipelineStagePresentation, PIPELINE_STAGE_SEEDS } from '../data/pipelineStageTemplates';
+import { DEAL_PIPELINE_STAGES } from '../data/pipelineStageTemplates';
 import { migrateVendorData } from '../data/vendors';
 import {
   createDefaultCustomerLookups,
@@ -23,6 +23,7 @@ import {
   SAMPLE_LEAD_IDS,
 } from '../lib/sampleLeads';
 import { reconcileContactAssociations } from '../utils/contactProfiles';
+import { isLostPipelineStage, isWonPipelineStage } from '../utils/stageSla';
 import { buildLeadStageHistoryRecords, hydrateLeadStageHistory } from '../utils/leadLifecycle';
 import { migrateDealLeadLinks } from '../utils/dealFactory';
 import { createDemoSeed } from '../dev/demoSeed';
@@ -223,112 +224,82 @@ const normalizeProduct = (product: ProductCode): ProductCode => {
   };
 };
 
-const LEGACY_STAGE_ALIASES: Record<string, Record<string, string>> = {
-  COMMERCIAL: {
-    'Lead Identified': 'Fact-Finding & Risk Survey',
-    'Contact Made': 'Market Tender & Placing Slip Submission',
-    'Key Person Identified': 'Market Tender & Placing Slip Submission',
-    Quoted: 'Comparative Analysis & Presentation',
-    'Internal Slip': 'Underwriter Negotiation & Structuring',
-    'Closed-Won': 'Policy Bound / Won',
-    'Policy Bound / Won': 'Policy Bound / Won',
-    'Closed-Lost': 'Lost / Market Declined',
-    'Market Placement / Tender': 'Market Tender & Placing Slip Submission',
-    'Qualified (Discovery)': 'Fact-Finding & Risk Survey',
-    'Proposal / Business Case': 'Comparative Analysis & Presentation',
-    'Quote Comparison Presented': 'Comparative Analysis & Presentation',
-    'Negotiation & Legal': 'Underwriter Negotiation & Structuring',
-  },
-  SME_VELOCITY: {
-    'Intake & Rating': 'Intake & Automated Rating',
-    Quoted: 'Standard Package Quoted',
-    'Payment & Immediate Cover': 'Payment & Immediate Cover',
-    'Closed-Lost': 'Closed-Lost',
-  },
-  RENEWALS: {
-    'T-90d Audit': 'Renewal Audit & Loss Review (T-90d)',
-    'T-60d Re-tender': 'Expiring Carrier Terms / Market Re-tender (T-60d)',
-    'T-30d Presentation': 'Renewal Terms Presentation (T-30d)',
-    'T-15d Sign-Off': 'Client Renewal Sign-Off (T-15d)',
-    'Renewed & Re-Invoiced': 'Policy Renewed & Re-Invoiced',
-    'Closed-Lost': 'Lapsed / Lost to Competitor',
-  },
-};
+function migratePipelineStageData(
+  pipelines: Pipeline[],
+  pipelineStages: PipelineStage[],
+  deals: Deal[],
+  stageHistory: StageHistoryAudit[],
+) {
+  const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
+  const stageTargets = new Map<string, { stageId: string; stageOrder: number; outcome?: 'won' | 'lost' }>();
+  const normalizedStages = pipelineStages.filter((stage) =>
+    !activePipelines.some((pipeline) => pipeline.id === stage.pipelineId));
 
-function canonicalStageName(pipelineCode: string | undefined, stageName: string): string {
-  const value = stageName.trim();
-  if (!pipelineCode) return value;
-  const aliases = LEGACY_STAGE_ALIASES[pipelineCode.toUpperCase()];
-  return aliases?.[value] ?? value;
-}
+  for (const pipeline of activePipelines) {
+    const existing = pipelineStages
+      .filter((stage) => stage.pipelineId === pipeline.id)
+      .sort((left, right) => left.stageOrder - right.stageOrder);
+    const alreadyCanonical = DEAL_PIPELINE_STAGES.every((template, index) =>
+      existing.some((stage) => stage.stageOrder === index + 1 && stage.name === template.name));
+    const targets = DEAL_PIPELINE_STAGES.map((template, index) => {
+      const stageOrder = index + 1;
+      const previous = existing.find((stage) => stage.stageOrder === stageOrder);
+      const stage: PipelineStage = {
+        ...previous,
+        ...template,
+        ...(alreadyCanonical && previous ? {
+          winProbabilityPct: previous.winProbabilityPct,
+          stagnationDaysThreshold: previous.stagnationDaysThreshold,
+        } : {}),
+        id: previous?.id ?? `stage-${crypto.randomUUID()}`,
+        pipelineId: pipeline.id,
+        stageOrder,
+      };
+      normalizedStages.push(stage);
+      return stage;
+    });
 
-function migratePipelineStageData(pipelines: Pipeline[], pipelineStages: PipelineStage[], deals: Deal[]) {
-  const normalizedDeals = deals.map((deal) => {
-    const pipeline = pipelines.find((item) => item.id === deal.pipelineId);
-    const canonicalName = pipeline ? canonicalStageName(pipeline.code, deal.stage) : deal.stage;
-    return canonicalName && canonicalName !== deal.stage ? { ...deal, stage: canonicalName } : deal;
-  });
-
-  const dedupedStages = [...pipelineStages];
-  const seen = new Map<string, PipelineStage>();
-  for (const stage of dedupedStages) {
-    const slug = `${stage.pipelineId}:${stage.name.trim().toLowerCase()}`;
-    if (!seen.has(slug)) {
-      seen.set(slug, stage);
+    for (const stage of existing) {
+      const outcome = isWonPipelineStage(stage) ? 'won' : isLostPipelineStage(stage) ? 'lost' : undefined;
+      const targetOrder = outcome
+        ? DEAL_PIPELINE_STAGES.length
+        : Math.max(1, Math.min(stage.stageOrder, DEAL_PIPELINE_STAGES.length));
+      stageTargets.set(stage.id, {
+        stageId: targets[targetOrder - 1].id,
+        stageOrder: targetOrder,
+        outcome,
+      });
     }
   }
 
-  for (const pipeline of pipelines) {
-    const code = pipeline.code.toUpperCase();
-    const seed = PIPELINE_STAGE_SEEDS[code];
-    if (!seed) continue;
-    const pipelineStagesForPipeline = dedupedStages.filter((stage) => stage.pipelineId === pipeline.id);
-    for (let index = 0; index < seed.length; index += 1) {
-      const templateStage = seed[index];
-      const match = pipelineStagesForPipeline.find((stage) => stage.stageOrder === index + 1);
-      if (!match) {
-        dedupedStages.push({
-          id: `stage-${crypto.randomUUID()}`,
-          pipelineId: pipeline.id,
-          name: templateStage.name,
-          stageOrder: index + 1,
-          winProbabilityPct: templateStage.winProbabilityPct,
-          stagnationDaysThreshold: templateStage.stagnationDaysThreshold,
-          isClosedWon: templateStage.isClosedWon,
-          isClosedLost: templateStage.isClosedLost,
-          requiresApproval: templateStage.requiresApproval,
-        });
-      }
-    }
-  }
-
-  const cleanedStages: PipelineStage[] = [];
-  const cleanedSeen = new Set<string>();
-  for (const stage of dedupedStages) {
-    const slug = `${stage.pipelineId}:${canonicalStageName(
-      pipelines.find((pipeline) => pipeline.id === stage.pipelineId)?.code,
-      stage.name,
-    ).trim().toLowerCase()}`;
-    if (cleanedSeen.has(slug)) continue;
-    cleanedSeen.add(slug);
-    cleanedStages.push({ ...stage, name: canonicalStageName(
-      pipelines.find((pipeline) => pipeline.id === stage.pipelineId)?.code,
-      stage.name,
-    ) });
-  }
-  const normalizedStages = cleanedStages.map((stage) => {
-    const pipelineCode = pipelines.find((pipeline) => pipeline.id === stage.pipelineId)?.code.toUpperCase();
-    const templateStage = PIPELINE_STAGE_SEEDS[pipelineCode ?? '']?.[stage.stageOrder - 1];
-    return templateStage ? {
-      ...applyPipelineStagePresentation(stage, pipelineCode),
-      isClosedWon: templateStage.isClosedWon,
-      isClosedLost: templateStage.isClosedLost,
-      requiresApproval: templateStage.requiresApproval,
-    } : stage;
-  });
   normalizedStages.sort((left, right) => left.pipelineId.localeCompare(right.pipelineId) || left.stageOrder - right.stageOrder);
+  const normalizedDeals = deals.map((deal) => {
+    const pipeline = activePipelines.find((item) => item.id === deal.pipelineId);
+    if (!pipeline) return deal;
+    const oldStage = pipelineStages.find((stage) =>
+      stage.pipelineId === pipeline.id && stage.name === deal.stage);
+    const mappedStage = oldStage ? stageTargets.get(oldStage.id) : undefined;
+    const outcome = deal.disposition ?? mappedStage?.outcome
+      ?? (isWonPipelineStage(deal.stage) ? 'won' : isLostPipelineStage(deal.stage) ? 'lost' : undefined);
+    const stageOrder = mappedStage?.stageOrder
+      ?? (outcome ? DEAL_PIPELINE_STAGES.length
+        : Math.max(1, DEAL_PIPELINE_STAGES.findIndex((stage) => stage.name === deal.stage) + 1));
+    const stage = DEAL_PIPELINE_STAGES[stageOrder - 1];
+    return {
+      ...deal,
+      stage: stage.name,
+      probability: outcome === 'won' ? 100 : outcome === 'lost' ? 0 : stage.winProbabilityPct,
+      weighted: Math.round(deal.value * (outcome === 'won' ? 100 : outcome === 'lost' ? 0 : stage.winProbabilityPct)) / 100,
+      ...(outcome ? { disposition: outcome } : {}),
+    };
+  });
+  const normalizedHistory = stageHistory.map((entry) => ({
+    ...entry,
+    fromStageId: entry.fromStageId ? stageTargets.get(entry.fromStageId)?.stageId ?? entry.fromStageId : null,
+    toStageId: stageTargets.get(entry.toStageId)?.stageId ?? entry.toStageId,
+  }));
 
-  return { deals: normalizedDeals, pipelineStages: normalizedStages };
+  return { deals: normalizedDeals, pipelineStages: normalizedStages, stageHistory: normalizedHistory };
 }
 
 const DEFAULT_EMAIL_TEMPLATES = Object.fromEntries([
@@ -642,7 +613,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const leadsWithHistory = hydrateLeadStageHistory(loadedLeads, leadStageHistory);
         const rawPipelines = asArray<Pipeline>(records, 'pipelines');
         const rawPipelineStages = asArray<PipelineStage>(records, 'pipeline-stages');
-        const migrated = migratePipelineStageData(rawPipelines, rawPipelineStages, loadedDeals);
+        const migrated = migratePipelineStageData(
+          rawPipelines,
+          rawPipelineStages,
+          loadedDeals,
+          asArray<StageHistoryAudit>(records, 'stage-history'),
+        );
         const linkedRecords = migrateDealLeadLinks(migrated.deals, leadsWithHistory, loadedClients);
         const contactsReconciled = reconcileContactAssociations(linkedRecords.leads, loadedClients, linkedRecords.deals);
         setLeads(contactsReconciled.leads);
@@ -661,7 +637,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setPipelineStages(migrated.pipelineStages);
         setInvoices(asArray<Invoice>(records, 'invoices'));
         setPayments(asArray<Payment>(records, 'payments'));
-        setStageHistory(asArray<StageHistoryAudit>(records, 'stage-history'));
+        setStageHistory(migrated.stageHistory);
         const companyRecord = records.find((record) => record.resource === 'company');
         const savedCompany = companyRecord?.data;
         const savedLeadStageSlaDays = savedCompany?.leadStageSlaDays;

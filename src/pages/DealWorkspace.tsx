@@ -71,6 +71,19 @@ const EMPTY_CONTACT_DRAFT: ContactEditorDraft = {
 };
 
 const dealListColumns = [
+  { key: 'deal', label: 'Title' },
+  { key: 'value', label: 'Value' },
+  { key: 'client', label: 'Organization' },
+  { key: 'contact', label: 'Contact Person' },
+  { key: 'close', label: 'Expected Close Date' },
+  { key: 'activity', label: 'Next Activity Date' },
+  { key: 'owner', label: 'Owner' },
+  { key: 'stage', label: 'Stage' },
+  { key: 'pipeline', label: 'Pipeline' },
+  { key: 'actions', label: 'Actions' },
+] as const;
+
+const workspaceListColumns = [
   { key: 'deal', label: 'Deal' },
   { key: 'client', label: 'Client' },
   { key: 'pipeline', label: 'Pipeline' },
@@ -358,7 +371,7 @@ export default function DealWorkspace({
     value: '',
     secondValue: '',
   });
-  const [sortKey, setSortKey] = useState<'deal' | 'client' | 'pipeline' | 'stage' | 'product' | 'vendor' | 'value' | 'owner' | 'activity' | 'close'>('close');
+  const [sortKey, setSortKey] = useState<'deal' | 'client' | 'contact' | 'pipeline' | 'stage' | 'product' | 'vendor' | 'value' | 'owner' | 'activity' | 'close'>('close');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [pipelineSort, setPipelineSort] = useState<'activity' | 'value' | 'close' | 'created'>('activity');
   const [archiveFilter, setArchiveFilter] = useState<'all' | 'won' | 'lost'>('all');
@@ -370,6 +383,7 @@ export default function DealWorkspace({
   const [stageMenuAnchor, setStageMenuAnchor] = useState<HTMLButtonElement | null>(null);
   const [activityModal, setActivityModal] = useState<'meeting' | 'note' | 'quote' | 'task' | 'schedule' | null>(null);
   const [moveStage, setMoveStage] = useState<PipelineStage | null>(null);
+  const [moveOutcome, setMoveOutcome] = useState<'won' | 'lost' | null>(null);
   const [lossReason, setLossReason] = useState('');
   const [winReason, setWinReason] = useState('');
   const [moveError, setMoveError] = useState('');
@@ -719,6 +733,9 @@ export default function DealWorkspace({
     ?? `${deal.product} placement`;
   const ownerNameForDeal = (deal: Deal) => users.find((person) => person.id === deal.ownerId)?.name
     ?? formatStaffIdentifier(deal.ownerId);
+  const contactNameForDeal = (deal: Deal) => deal.contactName
+    ?? clients.find((client) => client.id === deal.clientId)?.contactPerson
+    ?? '';
   const activityForDeal = (deal: Deal): DealActivityState => {
     const linkedLeadId = leads.find((lead) => lead.id === deal.leadId || lead.dealId === deal.id)?.id;
     return getNextActivity(activities, {
@@ -779,6 +796,7 @@ export default function DealWorkspace({
   const sortedListDeals = [...listDeals].sort((left, right) => {
     const leftValue = sortKey === 'deal' ? dealTitle(left)
       : sortKey === 'client' ? left.client
+        : sortKey === 'contact' ? contactNameForDeal(left)
         : sortKey === 'pipeline' ? pipelines.find((pipeline) => pipeline.id === left.pipelineId)?.name ?? ''
           : sortKey === 'stage' ? left.stage
             : sortKey === 'product' ? productForDeal(left)?.name ?? left.product
@@ -789,6 +807,7 @@ export default function DealWorkspace({
                       : Date.parse(left.closeDate ?? '');
     const rightValue = sortKey === 'deal' ? dealTitle(right)
       : sortKey === 'client' ? right.client
+        : sortKey === 'contact' ? contactNameForDeal(right)
         : sortKey === 'pipeline' ? pipelines.find((pipeline) => pipeline.id === right.pipelineId)?.name ?? ''
           : sortKey === 'stage' ? right.stage
             : sortKey === 'product' ? productForDeal(right)?.name ?? right.product
@@ -829,13 +848,14 @@ export default function DealWorkspace({
     const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
     return !stage?.isClosedLost && deal.disposition !== 'lost' && !isLostPipelineStage(deal.stage);
   });
+  const baseListColumns = dealsPageMode ? dealListColumns : workspaceListColumns;
   const archiveColumns = [
-    ...dealListColumns.slice(0, -1),
+    ...baseListColumns.slice(0, -1),
     { key: 'closedDate', label: 'Closed date' },
     { key: 'lossReason', label: 'Loss reason' },
-    dealListColumns[dealListColumns.length - 1],
+    baseListColumns[baseListColumns.length - 1],
   ];
-  const tableColumns = workspaceView === 'archive' ? archiveColumns : dealListColumns;
+  const tableColumns = workspaceView === 'archive' ? archiveColumns : baseListColumns;
   const tableDeals = workspaceView === 'archive' ? archiveDeals : sortedListDeals;
   const pipelineViewDeals = listDeals.filter((deal) => deal.pipelineId === kanbanPipeline?.id);
   const toolbarDealCount = workspaceView === 'pipeline' ? pipelineViewDeals.length
@@ -1265,7 +1285,7 @@ export default function DealWorkspace({
     }, ...activities]);
   };
 
-  const applyStageChange = (target: PipelineStage, reason?: string) => {
+  const applyStageChange = (target: PipelineStage, reason?: string, outcome?: 'won' | 'lost') => {
     if (!selectedDeal) {
       setMoveError('Select a deal before changing its stage.');
       return;
@@ -1283,8 +1303,8 @@ export default function DealWorkspace({
       return;
     }
     const now = new Date().toISOString();
-    const lost = isLostStage(target);
-    const bound = isBoundStage(target);
+    const lost = outcome === 'lost' || isLostStage(target);
+    const bound = outcome === 'won' || isBoundStage(target);
     if (lost && !reason?.trim()) {
       setMoveError('A loss reason is mandatory.');
       return;
@@ -1402,7 +1422,7 @@ export default function DealWorkspace({
       const updated = current.map((deal) => deal.id === selectedDeal.id
         ? {
           ...deal,
-          stage: target.name,
+          stage: outcome ? selectedDeal.stage : target.name,
           stageChangedAt: now,
           contactName: stageContactName.trim(),
           ...(contactProfileId ? {
@@ -1415,8 +1435,8 @@ export default function DealWorkspace({
           telegram: stageTelegram.trim(),
           insurer: stageInsurer.trim(),
           intakeCompleted: intakeComplete,
-          probability: lost ? 0 : target.winProbabilityPct,
-          weighted: Math.round(deal.value * (lost ? 0 : target.winProbabilityPct)) / 100,
+          probability: lost ? 0 : bound ? 100 : target.winProbabilityPct,
+          weighted: Math.round(deal.value * (lost ? 0 : bound ? 100 : target.winProbabilityPct)) / 100,
           ...(lost ? { disposition: 'lost' as const, lossReason: reason?.trim() } : bound ? {
             disposition: 'won' as const,
             linkedInvoiceId: invoiceId,
@@ -1494,19 +1514,20 @@ export default function DealWorkspace({
       }]);
     }
     setMoveStage(null);
+    setMoveOutcome(null);
     setLossReason('');
     setWinReason('');
     setMoveError('');
     setStageChangeRemarks('');
     const dealPipeline = pipelines.find((pipeline) => pipeline.id === selectedDeal.pipelineId);
     if (dealPipeline?.code.toUpperCase() === 'COMMERCIAL'
-      && target.stageOrder === 2
+      && target.name === 'Quotation / Underwriting'
       && !quotationRequests.some((request) => request.dealId === selectedDeal.id)) {
       promptQuotationRequestForDeal(selectedDeal.id);
     }
   };
 
-  const requestStageChange = (target: PipelineStage, deal = selectedDeal) => {
+  const requestStageChange = (target: PipelineStage, deal = selectedDeal, outcome: 'won' | 'lost' | null = null) => {
     if (!deal || isTerminalDealStage(
       deal.stage,
       deal.disposition,
@@ -1515,6 +1536,7 @@ export default function DealWorkspace({
     setSelectedKey(`deal:${deal.id}`);
     setContactError('');
     setMoveStage(target);
+    setMoveOutcome(outcome);
     setLossReason('');
     setWinReason('');
     setMoveError('');
@@ -1526,6 +1548,21 @@ export default function DealWorkspace({
     setStageTelegram(deal.telegram ?? '');
     setStageInsurer(deal.insurer ?? '');
     setIntakeComplete(deal.intakeCompleted ?? false);
+  };
+
+  const requestDealOutcome = (outcome: 'won' | 'lost', deal: Deal) => {
+    const currentStage = pipelineStages.find((stage) => stage.pipelineId === deal.pipelineId && stage.name === deal.stage);
+    if (!currentStage) {
+      window.alert('Configure this deal’s current pipeline stage before closing the deal.');
+      return;
+    }
+    requestStageChange({
+      ...currentStage,
+      name: outcome === 'won' ? 'Policy Bound / Won' : 'Lost / Market Declined',
+      isClosedWon: outcome === 'won',
+      isClosedLost: outcome === 'lost',
+      winProbabilityPct: outcome === 'won' ? 100 : 0,
+    }, deal, outcome);
   };
 
   const visibleQuotes = quotes.map((quote) => ({
@@ -1900,6 +1937,51 @@ export default function DealWorkspace({
                     : stage && isBoundStage(stage)
                       ? 'won'
                       : 'neutral';
+                  const stageCell = (
+                    <td data-label="Stage" className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
+                      <div className="flex min-w-0 items-center gap-1">
+                        <button
+                          type="button"
+                          className="deal-stage-trigger"
+                          title={`${stage?.name ?? deal.stage} · ${deal.probability}% win probability`}
+                          aria-label={`Change stage for ${dealTitle}`}
+                          aria-haspopup="menu"
+                          aria-expanded={openStageMenuId === deal.id}
+                          disabled={!stage || (activeRole !== 'admin' && activeRole !== 'sales')}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (openStageMenuId === deal.id) {
+                              setOpenStageMenuId('');
+                              setStageMenuAnchor(null);
+                            } else {
+                              setOpenStageMenuId(deal.id);
+                              setStageMenuAnchor(event.currentTarget);
+                            }
+                          }}
+                        >
+                          <StagePill stage={stage?.name ?? deal.stage} outcome={stageOutcome} truncate />
+                          <span className={`deal-stage-sla ${isOverdue ? 'deal-stage-sla-overdue' : ''}`} title={stage?.stagnationDaysThreshold ? `Stage SLA: ${elapsedDays ?? 0} of ${stage.stagnationDaysThreshold} days` : 'No stage SLA configured'}>
+                            {stage?.stagnationDaysThreshold ? `${elapsedDays ?? 0}/${stage.stagnationDaysThreshold}d` : 'No SLA'}
+                          </span>
+                        </button>
+                        <StageMenu
+                          open={openStageMenuId === deal.id}
+                          anchor={stageMenuAnchor}
+                          label={`Stages for ${dealTitle}`}
+                          stages={dealStages}
+                          onClose={() => {
+                            setOpenStageMenuId('');
+                            setStageMenuAnchor(null);
+                          }}
+                          onSelect={(target) => {
+                            setOpenStageMenuId('');
+                            setStageMenuAnchor(null);
+                            requestStageChange(target, deal);
+                          }}
+                        />
+                      </div>
+                    </td>
+                  );
                   return (
                     <tr key={deal.id} data-pipeline-id={deal.pipelineId} role="link" tabIndex={0} aria-label={`Open deal details for ${dealTitle}`}
                       onClick={() => openDealRecord(deal)}
@@ -1911,78 +1993,56 @@ export default function DealWorkspace({
                         }
                       }}
                       className="cursor-pointer border-b border-[#1B1E22] last:border-0 transition-colors hover:bg-[#111214] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-400">
-                      <td data-label={dealListColumns[0].label} className={`px-2 py-2 font-semibold ${nextActivity.state === 'overdue' ? 'text-hot' : 'text-white'}`}>
-                        <span className="block truncate" title={dealTitle}>{dealTitle}</span>
-                        <span className="block truncate text-[10px] font-normal leading-none text-[#8E95A2]" title={dealReferences.get(deal.id) ?? deal.id}>{dealReferences.get(deal.id) ?? deal.id}</span>
-                      </td>
-                      <td data-label={dealListColumns[1].label} className="px-2 py-2 font-normal text-[#E1E2E5]">
-                        <span className="block truncate" title={deal.client}>{deal.client}</span>
-                        {clientContactName && <span className="block truncate text-[10px] text-[#8E95A2]" title={clientContactName}>{clientContactName}</span>}
-                      </td>
-                      <td data-label={dealListColumns[2].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
-                        <span className="inline-flex max-w-full items-center rounded-full border border-[#2A2E35] bg-[#17191C] px-2 py-0.5 text-[10px] font-normal text-[#E1E2E5]" title={pipeline?.name ?? 'Unknown pipeline'}>{pipelineLabel}</span>
-                      </td>
-                      <td data-label={dealListColumns[3].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
-                        <div className="flex min-w-0 items-center gap-1">
-                          <button
-                            type="button"
-                            className="deal-stage-trigger"
-                            title={`${stage?.name ?? deal.stage} · ${deal.probability}% win probability`}
-                            aria-label={`Change stage for ${dealTitle}`}
-                            aria-haspopup="menu"
-                            aria-expanded={openStageMenuId === deal.id}
-                            disabled={!stage || (activeRole !== 'admin' && activeRole !== 'sales')}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              if (openStageMenuId === deal.id) {
-                                setOpenStageMenuId('');
-                                setStageMenuAnchor(null);
-                              } else {
-                                setOpenStageMenuId(deal.id);
-                                setStageMenuAnchor(event.currentTarget);
-                              }
-                            }}
-                          >
-                            <StagePill stage={stage?.name ?? deal.stage} outcome={stageOutcome} truncate />
-                            <span className={`deal-stage-sla ${isOverdue ? 'deal-stage-sla-overdue' : ''}`} title={stage?.stagnationDaysThreshold ? `Stage SLA: ${elapsedDays ?? 0} of ${stage.stagnationDaysThreshold} days` : 'No stage SLA configured'}>
-                              {stage?.stagnationDaysThreshold ? `${elapsedDays ?? 0}/${stage.stagnationDaysThreshold}d` : 'No SLA'}
-                            </span>
-                          </button>
-                          <StageMenu
-                            open={openStageMenuId === deal.id}
-                            anchor={stageMenuAnchor}
-                            label={`Stages for ${dealTitle}`}
-                            stages={dealStages}
-                            onClose={() => {
-                              setOpenStageMenuId('');
-                              setStageMenuAnchor(null);
-                            }}
-                            onSelect={(target) => {
-                              setOpenStageMenuId('');
-                              setStageMenuAnchor(null);
-                              requestStageChange(target, deal);
-                            }}
-                          />
-                        </div>
-                      </td>
-                      <td data-label={dealListColumns[4].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><ProductCodePill code={productCode} name={product?.name ?? deal.product} /></td>
-                      <td data-label={dealListColumns[5].label} className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={vendorName}>{vendorName}</span></td>
-                      <td data-label={dealListColumns[6].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
-                        <span className="block truncate font-semibold" title={formatAmount(deal.value, deal.currency ?? 'USD')}>{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
-                        <span className="block text-[10px] leading-none text-[#8E95A2]">{deal.probability}%</span>
-                      </td>
-                      <td data-label={dealListColumns[7].label} className="px-2 py-2 font-normal text-[#E1E2E5]"><OwnerCell name={ownerName} /></td>
-                      <td data-label={dealListColumns[8].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
-                        <span className={nextActivity.state === 'overdue' ? 'text-hot' : ''}>
-                          <DealActivityIndicator activity={nextActivity} />
-                        </span>
-                      </td>
-                      <td data-label={dealListColumns[9].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><TableDateCell value={deal.closeDate} /></td>
+                      {dealsPageMode ? <>
+                        <td data-label="Title" className={`px-2 py-2 font-semibold ${nextActivity.state === 'overdue' ? 'text-hot' : 'text-white'}`}>
+                          <span className="block truncate" title={dealTitle}>{dealTitle}</span>
+                          <span className="block truncate text-[10px] font-normal leading-none text-[#8E95A2]" title={dealReferences.get(deal.id) ?? deal.id}>{dealReferences.get(deal.id) ?? deal.id}</span>
+                        </td>
+                        <td data-label="Value" className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
+                          <span className="block truncate font-semibold" title={formatAmount(deal.value, deal.currency ?? 'USD')}>{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
+                          <span className="block text-[10px] leading-none text-[#8E95A2]">{deal.probability}%</span>
+                        </td>
+                        <td data-label="Organization" className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={deal.client}>{deal.client}</span></td>
+                        <td data-label="Contact Person" className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={clientContactName}>{clientContactName ?? '—'}</span></td>
+                        <td data-label="Expected Close Date" className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><TableDateCell value={deal.closeDate} /></td>
+                        <td data-label="Next Activity Date" className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
+                          <span className={nextActivity.state === 'overdue' ? 'text-hot' : ''}><DealActivityIndicator activity={nextActivity} /></span>
+                        </td>
+                        <td data-label="Owner" className="px-2 py-2 font-normal text-[#E1E2E5]"><OwnerCell name={ownerName} /></td>
+                        {stageCell}
+                        <td data-label="Pipeline" className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
+                          <span className="inline-flex max-w-full items-center rounded-full border border-[#2A2E35] bg-[#17191C] px-2 py-0.5 text-[10px] font-normal text-[#E1E2E5]" title={pipeline?.name ?? 'Unknown pipeline'}>{pipelineLabel}</span>
+                        </td>
+                      </> : <>
+                        <td data-label={workspaceListColumns[0].label} className={`px-2 py-2 font-semibold ${nextActivity.state === 'overdue' ? 'text-hot' : 'text-white'}`}>
+                          <span className="block truncate" title={dealTitle}>{dealTitle}</span>
+                          <span className="block truncate text-[10px] font-normal leading-none text-[#8E95A2]" title={dealReferences.get(deal.id) ?? deal.id}>{dealReferences.get(deal.id) ?? deal.id}</span>
+                        </td>
+                        <td data-label={workspaceListColumns[1].label} className="px-2 py-2 font-normal text-[#E1E2E5]">
+                          <span className="block truncate" title={deal.client}>{deal.client}</span>
+                          {clientContactName && <span className="block truncate text-[10px] text-[#8E95A2]" title={clientContactName}>{clientContactName}</span>}
+                        </td>
+                        <td data-label={workspaceListColumns[2].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
+                          <span className="inline-flex max-w-full items-center rounded-full border border-[#2A2E35] bg-[#17191C] px-2 py-0.5 text-[10px] font-normal text-[#E1E2E5]" title={pipeline?.name ?? 'Unknown pipeline'}>{pipelineLabel}</span>
+                        </td>
+                        {stageCell}
+                        <td data-label={workspaceListColumns[4].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><ProductCodePill code={productCode} name={product?.name ?? deal.product} /></td>
+                        <td data-label={workspaceListColumns[5].label} className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={vendorName}>{vendorName}</span></td>
+                        <td data-label={workspaceListColumns[6].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
+                          <span className="block truncate font-semibold" title={formatAmount(deal.value, deal.currency ?? 'USD')}>{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
+                          <span className="block text-[10px] leading-none text-[#8E95A2]">{deal.probability}%</span>
+                        </td>
+                        <td data-label={workspaceListColumns[7].label} className="px-2 py-2 font-normal text-[#E1E2E5]"><OwnerCell name={ownerName} /></td>
+                        <td data-label={workspaceListColumns[8].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
+                          <span className={nextActivity.state === 'overdue' ? 'text-hot' : ''}><DealActivityIndicator activity={nextActivity} /></span>
+                        </td>
+                        <td data-label={workspaceListColumns[9].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><TableDateCell value={deal.closeDate} /></td>
+                      </>}
                       {workspaceView === 'archive' && <>
                         <td data-label="Closed date" className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><TableDateCell value={closedDate} /></td>
                         <td data-label="Loss reason" className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={rowLossReason ?? ''}>{rowLossReason ?? '—'}</span></td>
                       </>}
-                      <td data-label={dealListColumns[10].label} className="relative px-1 py-2 text-right" onClick={(event) => event.stopPropagation()}>
+                      <td data-label="Actions" className="relative px-1 py-2 text-right" onClick={(event) => event.stopPropagation()}>
                         <button type="button" className="rounded-md p-1.5 text-muted hover:bg-ink-700 hover:text-white" aria-label={`Actions for ${dealTitle}`} aria-haspopup="menu" aria-expanded={openDealActionsId === deal.id}
                           onClick={(event) => {
                             if (openDealActionsId === deal.id) {
@@ -1998,6 +2058,18 @@ export default function DealWorkspace({
                           anchor={dealActionsAnchor}
                           label={`Deal actions for ${dealTitle}`}
                         >
+                          {!terminal && (activeRole === 'admin' || activeRole === 'sales') && <>
+                            <button type="button" role="menuitem" className="table-row-actions-item text-win hover:bg-ink-700" onClick={() => {
+                              setOpenDealActionsId('');
+                              setDealActionsAnchor(null);
+                              requestDealOutcome('won', deal);
+                            }}><Check size={12} /> Mark won</button>
+                            <button type="button" role="menuitem" className="table-row-actions-item text-hot hover:bg-ink-700" onClick={() => {
+                              setOpenDealActionsId('');
+                              setDealActionsAnchor(null);
+                              requestDealOutcome('lost', deal);
+                            }}><X size={12} /> Mark lost</button>
+                          </>}
                           {onEditDeal && <button type="button" role="menuitem" className="table-row-actions-item text-white hover:bg-ink-700" onClick={() => { setOpenDealActionsId(''); setDealActionsAnchor(null); onEditDeal(deal); }}><Pencil size={12} /> Edit deal</button>}
                           {onDeleteDeal && <button type="button" role="menuitem" className="table-row-actions-item text-hot hover:bg-ink-700" onClick={() => { setOpenDealActionsId(''); setDealActionsAnchor(null); onDeleteDeal(deal); }}><Trash2 size={12} /> Delete deal</button>}
                           <span className="block whitespace-nowrap px-3 py-2 text-[10px] text-muted">{outcome}</span>
@@ -2006,7 +2078,7 @@ export default function DealWorkspace({
                     </tr>
                   );
                 })}
-                {!tableDeals.length && <tr className="deals-list-empty"><td data-label={dealListColumns[0].label} colSpan={tableColumns.length} className="px-4 py-8 text-center text-muted">No deals match these filters.</td></tr>}
+                {!tableDeals.length && <tr className="deals-list-empty"><td data-label={baseListColumns[0].label} colSpan={tableColumns.length} className="px-4 py-8 text-center text-muted">No deals match these filters.</td></tr>}
               </tbody>
             </table>
           </TableShell>
@@ -2691,13 +2763,13 @@ export default function DealWorkspace({
         </form>
       </Modal>
 
-      <Modal open={Boolean(moveStage)} onClose={() => { setMoveStage(null); setMoveError(''); setWinReason(''); }} title="Update deal stage" subtitle={`${selectedDeal?.client} · ${moveStage?.name}`} size="lg"
-        footer={<><button type="button" className="btn-ghost" onClick={() => { setMoveStage(null); setMoveError(''); setWinReason(''); }}>Cancel</button><button type="button" className="btn-primary" disabled={Boolean(company.requireNextActivityForStageChange && selectedDeal && activityForDeal(selectedDeal).state === 'none')} onClick={() => moveStage && applyStageChange(moveStage, lossReason)}>Save stage</button></>}>
+      <Modal open={Boolean(moveStage)} onClose={() => { setMoveStage(null); setMoveOutcome(null); setMoveError(''); setWinReason(''); }} title={moveOutcome ? `Mark deal ${moveOutcome}` : 'Update deal stage'} subtitle={`${selectedDeal?.client} · ${moveOutcome ? 'Outcome' : moveStage?.name}`} size="lg"
+        footer={<><button type="button" className="btn-ghost" onClick={() => { setMoveStage(null); setMoveOutcome(null); setMoveError(''); setWinReason(''); }}>Cancel</button><button type="button" className="btn-primary" disabled={Boolean(company.requireNextActivityForStageChange && selectedDeal && activityForDeal(selectedDeal).state === 'none')} onClick={() => moveStage && applyStageChange(moveStage, lossReason, moveOutcome ?? undefined)}>{moveOutcome ? `Mark ${moveOutcome}` : 'Save stage'}</button></>}>
         <div className="space-y-3">
-          <Field label="New stage"><input className="input" value={moveStage?.name ?? ''} readOnly aria-readonly="true" /></Field>
+          <Field label={moveOutcome ? 'Current stage' : 'New stage'}><input className="input" value={moveOutcome ? selectedDeal?.stage ?? '' : moveStage?.name ?? ''} readOnly aria-readonly="true" /></Field>
           {selectedDeal && activityForDeal(selectedDeal).state === 'none' && <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warm/30 bg-warm/5 p-3 text-xs text-warm">
             <span><AlertTriangle size={13} className="mr-1 inline" />No next activity is scheduled. {company.requireNextActivityForStageChange ? 'Scheduling is required by Settings.' : 'You may continue without scheduling one.'}</span>
-            <button type="button" className="btn-ghost !px-2 !py-1" onClick={() => { setMoveStage(null); setActivityModal('schedule'); }}>Schedule next activity</button>
+            <button type="button" className="btn-ghost !px-2 !py-1" onClick={() => { setMoveStage(null); setMoveOutcome(null); setActivityModal('schedule'); }}>Schedule next activity</button>
           </div>}
           {requiresCommunicationChannels(moveStage?.name ?? '') && <>
             <p className="rounded-lg border border-warm/30 bg-warm/5 p-3 text-xs text-muted">Tender and quote-comparison stages require complete client details, validated contact channels, insurer assignment, and the product-specific intake listed below.</p>

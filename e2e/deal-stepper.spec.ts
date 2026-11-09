@@ -11,26 +11,11 @@ const viewports = [
 
 const screenshotsDirectory = path.resolve('e2e/screenshots');
 
-async function assertTerminalConnector(page: Page, state: 'open' | 'lost' | 'won') {
-  const connector = await page.locator('.deal-stage-stepper__step').nth(-2).evaluate((step) => {
-    const style = getComputedStyle(step, '::after');
-    return { backgroundImage: style.backgroundImage, backgroundColor: style.backgroundColor };
-  });
-  if (state === 'open') {
-    expect(connector.backgroundImage).toContain('repeating-linear-gradient');
-  } else if (state === 'lost') {
-    expect(connector.backgroundColor).toBe('rgb(217, 66, 94)');
-  } else {
-    expect(connector.backgroundColor).toBe('rgb(52, 60, 70)');
-  }
-}
-
 async function captureStepper(page: Page, state: 'open' | 'lost' | 'won', viewport: number, nodeCount: number) {
   const stepper = page.getByRole('list', { name: 'Deal pipeline stages' });
   await expect(stepper).toBeVisible();
   await expect(stepper.getByRole('listitem')).toHaveCount(nodeCount);
   await assertStepperGeometry(page);
-  await assertTerminalConnector(page, state);
   await stepper.scrollIntoViewIfNeeded();
   await page.screenshot({
     path: path.join(screenshotsDirectory, `deal-stepper-${state === 'open' ? '' : `${state}-`}${viewport}x${page.viewportSize()?.height}.png`),
@@ -120,41 +105,24 @@ for (const viewport of viewports) {
     await page.getByRole('tab', { name: 'List' }).click();
     await selectDealForInspection(page, 'Bonavista Maldives - Contractors All Risks');
 
-    const stepper = await captureStepper(page, 'open', viewport.width, 6);
-    await expect(stepper.getByText('Risk Survey', { exact: true })).toBeVisible();
-    await expect(stepper.getByText('Market Tender', { exact: true })).toBeVisible();
+    const stepper = await captureStepper(page, 'open', viewport.width, 9);
+    await expect(stepper.getByText('Identified', { exact: true })).toBeVisible();
+    await expect(stepper.getByText('Contact Made', { exact: true })).toBeVisible();
     expect(await stepper.getByRole('listitem').last().getByRole('button').getAttribute('aria-label'))
-      .toContain('Lost / Market Declined');
+      .toContain('Review and Follow up');
     await stepper.getByRole('listitem').last().getByRole('button').click();
     await expect(page.getByRole('heading', { name: 'Update deal stage' })).toBeVisible();
-    const lossReason = page.getByLabel('Loss reason (required)');
-    await expect(lossReason.locator('option')).toHaveText([
-      'Select a reason',
-      'Incumbent Retained',
-      'Market Capacity Declined',
-      'Uncompetitive Deductibles',
-      'Self-Insured',
-    ]);
-    await page.getByRole('button', { name: 'Save stage' }).click();
-    await expect(page.getByRole('alert')).toHaveText('A loss reason is mandatory.');
-    await page.getByRole('button', { name: 'Cancel' }).click();
-
-    await page.getByRole('button', { name: /Policy Bound \/ Won/ }).click();
-    await expect(page.getByRole('heading', { name: 'Update deal stage' })).toBeVisible();
-    await expect(page.getByText('Win reason (required)')).toBeVisible();
     await page.getByRole('button', { name: 'Cancel' }).click();
 
     await selectDealForInspection(page, 'Coral Construction Machinery Cover');
-    const lostStepper = await captureStepper(page, 'lost', viewport.width, 6);
-    await expect(lostStepper.locator('.deal-stage-stepper__step.is-dimmed')).toHaveCount(5);
-    await expect(lostStepper.locator('.deal-stage-stepper__step.is-lost-closed .deal-stage-stepper__button'))
-      .toBeDisabled();
+    const lostStepper = await captureStepper(page, 'lost', viewport.width, 9);
+    await expect(lostStepper.locator('.deal-stage-stepper__step.is-dimmed')).toHaveCount(9);
+    await expect(lostStepper.locator('.deal-stage-stepper__button:not(:disabled)')).toHaveCount(0);
     await expect(page.getByRole('status')).toContainText('Lost: Demo loss reason');
 
     await selectDealForInspection(page, 'Lagoon Resort Fire Cover');
-    const wonStepper = await captureStepper(page, 'won', viewport.width, 5);
-    await expect(wonStepper.locator('.deal-stage-stepper__step.is-complete')).toHaveCount(4);
-    await expect(wonStepper.locator('.deal-stage-stepper__step.is-lost-won .deal-stage-stepper__button'))
-      .toBeDisabled();
+    const wonStepper = await captureStepper(page, 'won', viewport.width, 9);
+    await expect(wonStepper.locator('.deal-stage-stepper__step.is-complete')).toHaveCount(9);
+    await expect(wonStepper.locator('.deal-stage-stepper__button:not(:disabled)')).toHaveCount(0);
   });
 }

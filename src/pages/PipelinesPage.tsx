@@ -18,23 +18,42 @@ import { linkDealToLead } from '../utils/dealFactory';
 import { getNextActivity } from '../utils/nextActivity';
 
 const legacyStageNames: Record<string, string> = {
-  'Lead Identified': 'Fact-Finding & Risk Survey',
-  'Contact Made': 'Market Placement / Outender',
-  'Key Person Identified': 'Market Placement / Outender',
-  Quoted: 'Quote Comparison & Presentation',
-  'Internal Slip': 'Underwriter Negotiation',
-  'Closed-Won': 'Policy Bound / Won',
-  'Policy Bound / Won': 'Policy Bound / Won',
-  'Closed-Lost': 'Lost / Declined',
-  'Policy Bound / won , Lost / Declined': 'Policy Bound / Won',
-  'Market Placement / Tender': 'Market Placement / Outender',
-  'Qualified (Discovery)': 'Fact-Finding & Risk Survey',
-  'Solution Alignment': 'Market Placement / Outender',
-  'Solution Alignment (Demo/Quote Request)': 'Market Placement / Outender',
-  'Proposal / Business Case': 'Quote Comparison & Presentation',
-  'Quote Comparison Presented': 'Quote Comparison & Presentation',
-  'Negotiation & Legal': 'Underwriter Negotiation',
-  'Negotiation & Legal (MIRA Compliance)': 'Underwriter Negotiation',
+  'Lead Identified': 'Identified',
+  'Qualified (Discovery)': 'Identified',
+  'Contact Made': 'Contact Made',
+  'Key Person Identified': 'Key Person Identified',
+  'Fact-Finding & Risk Survey': 'Requirements Identified',
+  'Market Tender & Placing Slip Submission': 'Quotation / Underwriting',
+  'Market Placement / Outender': 'Quotation / Underwriting',
+  'Market Placement / Tender': 'Quotation / Underwriting',
+  'Solution Alignment': 'Meetings',
+  'Solution Alignment (Demo/Quote Request)': 'Meetings',
+  'Underwriter Negotiation & Structuring': 'Quotation / Underwriting',
+  'Underwriter Negotiation': 'Quotation / Underwriting',
+  'Internal Slip': 'Quotation / Underwriting',
+  'Negotiation & Legal': 'Quotation / Underwriting',
+  'Negotiation & Legal (MIRA Compliance)': 'Quotation / Underwriting',
+  Quoted: 'Quoted / Proposed',
+  'Comparative Analysis & Presentation': 'Quoted / Proposed',
+  'Quote Comparison & Presentation': 'Quoted / Proposed',
+  'Quote Comparison Presented': 'Quoted / Proposed',
+  'Proposal / Business Case': 'Quoted / Proposed',
+  'Policy Bound / Won': 'Review and Follow up',
+  'Closed-Won': 'Review and Follow up',
+  'Closed-Lost': 'Review and Follow up',
+  'Lost / Declined': 'Review and Follow up',
+  'Lost / Market Declined': 'Review and Follow up',
+  'Lapsed / Lost to Competitor': 'Review and Follow up',
+  'Policy Bound / won , Lost / Declined': 'Review and Follow up',
+  'Intake & Rating': 'Requirements Identified',
+  'Intake & Automated Rating': 'Requirements Identified',
+  'Standard Package Quoted': 'Quoted / Proposed',
+  'Payment & Immediate Cover': 'Review and Follow up',
+  'Renewal Audit & Loss Review (T-90d)': 'Identified',
+  'Expiring Carrier Terms / Market Re-tender (T-60d)': 'Quotation / Underwriting',
+  'Renewal Terms Presentation (T-30d)': 'Quoted / Proposed',
+  'Client Renewal Sign-Off (T-15d)': 'Review and Follow up',
+  'Policy Renewed & Re-Invoiced': 'Review and Follow up',
 };
 
 function availableTemplateKey(pipelines: Pipeline[]) {
@@ -201,6 +220,7 @@ export default function PipelinesPage() {
   const [healthFilter, setHealthFilter] = useState<HealthState | ''>('');
   const [intentFilter, setIntentFilter] = useState<IntentTier | ''>('');
   const selectedPipeline = pipelines.find((pipeline) => pipeline.id === pipelineId);
+  const fixedStageSequence = Boolean(selectedPipeline?.isActive);
   const pendingMoveDeal = pendingMove
     ? deals.find((deal) => deal.id === pendingMove.dealId)
     : undefined;
@@ -462,7 +482,7 @@ export default function PipelinesPage() {
     setMoveOutcome('');
     setActivityWarningOnly(false);
     if (selectedPipeline?.code.toUpperCase() === 'COMMERCIAL'
-      && to.stageOrder === 2
+      && to.name === 'Quotation / Underwriting'
       && !quotationRequests.some((request) => request.dealId === dealId)) {
       promptQuotationRequestForDeal(dealId);
     }
@@ -504,7 +524,10 @@ export default function PipelinesPage() {
   const saveStage = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    const name = String(data.get('name')).trim();
+    if (fixedStageSequence && !editingStage) return;
+    const name = fixedStageSequence && editingStage
+      ? editingStage.name
+      : String(data.get('name')).trim();
     const winProbabilityPct = Number(data.get('winProbabilityPct'));
     const stagnationDaysThreshold = Number(data.get('stagnationDaysThreshold'));
     if (editingStage) {
@@ -590,6 +613,7 @@ export default function PipelinesPage() {
   };
 
   const reorderStage = (stage: PipelineStage, direction: -1 | 1) => {
+    if (fixedStageSequence) return;
     const index = stages.findIndex((item) => item.id === stage.id);
     const other = stages[index + direction];
     if (!other) return;
@@ -601,6 +625,7 @@ export default function PipelinesPage() {
   };
 
   const deleteStage = (stage: PipelineStage) => {
+    if (fixedStageSequence) return;
     const isUsed = pipelineDeals.some((deal) => stageForDeal(deal)?.id === stage.id);
     const isAudited = stageHistory.some((entry) => entry.fromStageId === stage.id || entry.toStageId === stage.id);
     if (isUsed || isAudited) {
@@ -666,7 +691,7 @@ export default function PipelinesPage() {
       {isRenewalPipeline(selectedPipeline) && (
         <div role="status" className="rounded-xl border border-brand-400/30 bg-brand-400/5 px-4 py-3 text-sm text-muted">
           <span className="font-medium text-white">Annual renewal workflow:</span>{' '}
-          eligible active policies expiring within the next three months are staged automatically at “Renewal Audit (90d out)”.
+          eligible active policies expiring within the next three months are staged automatically at “Identified”.
           {pipelineDeals.some((deal) => deal.renewalForClientId) && (
             <span> {pipelineDeals.filter((deal) => deal.renewalForClientId).length} renewal record(s) are tracked here.</span>
           )}
@@ -681,8 +706,8 @@ export default function PipelinesPage() {
       ) : configOpen && user.role === 'admin' ? (
         <div className="glass rounded-2xl p-5">
           <div className="flex items-center justify-between gap-3 mb-4">
-            <div><h3 className="font-semibold text-white">Stage Configuration</h3><p className="text-xs text-muted mt-1">Set order, win probability, and deal-rotting thresholds.</p></div>
-            <button className="btn-primary !py-1.5" onClick={() => { setEditingStage(null); setStageModalOpen(true); }}><Plus size={14} /> Add Stage</button>
+            <div><h3 className="font-semibold text-white">Stage Configuration</h3><p className="text-xs text-muted mt-1">{fixedStageSequence ? 'The active pipeline stage names and order are fixed; adjust probability and SLA targets.' : 'Set order, win probability, and deal-rotting thresholds.'}</p></div>
+            {!fixedStageSequence && <button className="btn-primary !py-1.5" onClick={() => { setEditingStage(null); setStageModalOpen(true); }}><Plus size={14} /> Add Stage</button>}
           </div>
           <div className="space-y-2">
             {stages.map((stage, index) => (
@@ -693,10 +718,12 @@ export default function PipelinesPage() {
                   <div className="text-xs text-muted">{stage.winProbabilityPct}% win probability · {stage.stagnationDaysThreshold ? `${stage.stagnationDaysThreshold}-day target SLA` : 'No target SLA'}</div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button aria-label={`Move ${stage.name} up`} disabled={index === 0} onClick={() => reorderStage(stage, -1)} className="p-2 rounded hover:bg-ink-700 disabled:opacity-30"><ArrowUp size={14} /></button>
-                  <button aria-label={`Move ${stage.name} down`} disabled={index === stages.length - 1} onClick={() => reorderStage(stage, 1)} className="p-2 rounded hover:bg-ink-700 disabled:opacity-30"><ArrowDown size={14} /></button>
+                  {!fixedStageSequence && <>
+                    <button aria-label={`Move ${stage.name} up`} disabled={index === 0} onClick={() => reorderStage(stage, -1)} className="p-2 rounded hover:bg-ink-700 disabled:opacity-30"><ArrowUp size={14} /></button>
+                    <button aria-label={`Move ${stage.name} down`} disabled={index === stages.length - 1} onClick={() => reorderStage(stage, 1)} className="p-2 rounded hover:bg-ink-700 disabled:opacity-30"><ArrowDown size={14} /></button>
+                  </>}
                   <button onClick={() => { setEditingStage(stage); setStageModalOpen(true); }} className="btn-ghost !px-2 !py-1">Edit</button>
-                  <button onClick={() => deleteStage(stage)} className="btn-ghost !px-2 !py-1 text-hot">Delete</button>
+                  {!fixedStageSequence && <button onClick={() => deleteStage(stage)} className="btn-ghost !px-2 !py-1 text-hot">Delete</button>}
                 </div>
               </div>
             ))}
@@ -833,7 +860,7 @@ export default function PipelinesPage() {
 
       <Modal open={stageModalOpen} onClose={() => { setStageModalOpen(false); setEditingStage(null); }} title={editingStage ? 'Edit Pipeline Stage' : 'Add Pipeline Stage'} subtitle={selectedPipeline?.name} size="sm" footer={<><button className="btn-ghost" onClick={() => { setStageModalOpen(false); setEditingStage(null); }}>Cancel</button><button type="submit" form="pipeline-stage-form" className="btn-primary"><Check size={14} /> Save Stage</button></>}>
         <form id="pipeline-stage-form" onSubmit={saveStage} className="space-y-3">
-          <Field label="Stage name"><input className="input" name="name" defaultValue={editingStage?.name ?? ''} required /></Field>
+          <Field label="Stage name"><input className="input" name="name" defaultValue={editingStage?.name ?? ''} readOnly={fixedStageSequence} required /></Field>
           <Field label="Win probability (%)"><input className="input" name="winProbabilityPct" type="number" min="0" max="100" step="1" defaultValue={editingStage?.winProbabilityPct ?? ''} required /></Field>
           <Field label="Target stage duration / SLA (days)"><input className="input" name="stagnationDaysThreshold" type="number" min="0" step="1" defaultValue={editingStage?.stagnationDaysThreshold ?? ''} required /></Field>
         </form>

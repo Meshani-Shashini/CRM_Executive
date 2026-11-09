@@ -102,7 +102,7 @@ for (const viewport of viewports) {
     await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
     await assertTableFields(page);
     await assertNoHorizontalOverflow(page);
-    const dealCells = page.locator('.deals-list-fit tbody tr[data-pipeline-id] td[data-label="Client"]');
+    const dealCells = page.locator('.deals-list-fit tbody tr[data-pipeline-id] td[data-label="Organization"]');
     await expect(dealCells.first()).toHaveCSS('font-size', leadCellStyle.fontSize);
     await expect(dealCells.first()).toHaveCSS('color', leadCellStyle.color);
     await expect(page.getByRole('columnheader', { name: 'Linked Lead' })).toHaveCount(0);
@@ -116,14 +116,17 @@ for (const viewport of viewports) {
         expect(height, `deal row height ${height}px exceeds lead row height ${maxLeadRowHeight}px + 8px`).toBeLessThanOrEqual(maxLeadRowHeight + 8);
       }
     }
-    const requiredNoWrapLabels = ['Pipeline', 'Stage', 'Insurance', 'Value', 'Expected close'];
+    const requiredNoWrapLabels = ['Pipeline', 'Stage', 'Value', 'Expected Close Date', 'Next Activity Date'];
     const noWrapResults = await page.locator('.deals-list-fit tbody tr[data-pipeline-id]').evaluateAll((rows, labels) =>
       rows.flatMap((row) => labels.map((label) => {
         const cell = row.querySelector<HTMLElement>(`td[data-label="${label}"]`);
         return { label, whiteSpace: cell ? getComputedStyle(cell).whiteSpace : 'missing' };
       })),
     requiredNoWrapLabels);
-    expect(noWrapResults.every(({ whiteSpace }) => whiteSpace === 'nowrap')).toBe(true);
+    expect(
+      noWrapResults.every(({ whiteSpace }) => whiteSpace === 'nowrap'),
+      `expected nowrap cells: ${JSON.stringify(noWrapResults)}`,
+    ).toBe(true);
     await takeViewportScreenshot(page, `deals-list-${sizeLabel}`);
 
     await tabs.nth(2).click();
@@ -239,7 +242,7 @@ for (const viewport of viewports) {
     await tabs.nth(0).click();
     const pipelineSelect = page.getByLabel('Filter deals by pipeline');
     await pipelineSelect.selectOption({ label: 'Commercial Lines Brokerage' });
-    await expect(page.locator('.deals-board > section')).toHaveCount(6);
+    await expect(page.locator('.deals-board > section')).toHaveCount(9);
     await expect(page.getByLabel('Show closed deals')).toHaveCount(0);
     for (const column of await page.locator('.deals-board > section').all()) {
       const { total, cardTotal } = await column.evaluate((element) => ({
@@ -250,12 +253,15 @@ for (const viewport of viewports) {
       expect(cardTotal).toBeCloseTo(total, 4);
     }
     for (const stage of [
-      'Fact-Finding & Risk Survey',
-      'Market Tender & Placing Slip Submission',
-      'Comparative Analysis & Presentation',
-      'Underwriter Negotiation & Structuring',
-      'Policy Bound / Won',
-      'Lost / Market Declined',
+      'Identified',
+      'Contact Made',
+      'Key Person Identified',
+      'Intro Mail',
+      'Meetings',
+      'Requirements Identified',
+      'Quotation / Underwriting',
+      'Quoted / Proposed',
+      'Review and Follow up',
     ]) await expect(page.locator('.deals-board')).toContainText(stage);
     await assertNoHorizontalOverflow(page);
     await takeViewportScreenshot(page, `deals-pipeline-closed-${sizeLabel}`);

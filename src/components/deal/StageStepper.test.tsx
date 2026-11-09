@@ -7,9 +7,39 @@ import { applyPipelineStagePresentation, getPipelineLossReasons } from '../../da
 import StageStepper from './StageStepper';
 
 const expectedLabels: Record<string, string[]> = {
-  COMMERCIAL: ['Risk Survey', 'Market Tender', 'Quote Comparison', 'Negotiation', 'Bound', 'Lost'],
-  SME_VELOCITY: ['Intake & Rating', 'Package Quoted', 'Confirmation', 'Paid & Covered', 'Lost'],
-  RENEWALS: ['Audit (T-90)', 'Re-tender (T-60)', 'Terms (T-30)', 'Sign-Off (T-15)', 'Renewed', 'Lapsed'],
+  COMMERCIAL: [
+    'Identified',
+    'Contact Made',
+    'Key Person Identified',
+    'Intro Mail',
+    'Meetings',
+    'Requirements Identified',
+    'Quotation / Underwriting',
+    'Quoted / Proposed',
+    'Review and Follow up',
+  ],
+  SME_VELOCITY: [
+    'Identified',
+    'Contact Made',
+    'Key Person Identified',
+    'Intro Mail',
+    'Meetings',
+    'Requirements Identified',
+    'Quotation / Underwriting',
+    'Quoted / Proposed',
+    'Review and Follow up',
+  ],
+  RENEWALS: [
+    'Identified',
+    'Contact Made',
+    'Key Person Identified',
+    'Intro Mail',
+    'Meetings',
+    'Requirements Identified',
+    'Quotation / Underwriting',
+    'Quoted / Proposed',
+    'Review and Follow up',
+  ],
 };
 
 describe('Deal stage stepper', () => {
@@ -28,7 +58,7 @@ describe('Deal stage stepper', () => {
     container.remove();
   });
 
-  it.each(Object.entries(expectedLabels))('%s renders closed-lost last with short labels', (code, labels) => {
+  it.each(Object.entries(expectedLabels))('%s renders the exact nine active stages', (code, labels) => {
     const seed = createDemoSeed(Date.parse('2026-01-01T00:00:00.000Z'));
     const pipeline = seed.pipelines.find((item) => item.code === code);
     expect(pipeline).toBeDefined();
@@ -55,66 +85,43 @@ describe('Deal stage stepper', () => {
     expect(container.querySelectorAll('.deal-stage-stepper__button')).toHaveLength(labels.length);
     expect(container.querySelector('.deal-stage-stepper__step:last-child .deal-stage-stepper__label')?.textContent)
       .toBe(labels[labels.length - 1]);
-    expect(container.querySelector('.deal-stage-stepper__step:last-child')?.classList.contains('is-lost-open')).toBe(true);
+    expect(container.querySelector('.deal-stage-stepper__step:last-child')?.classList.contains('is-current')).toBe(false);
+    expect(container.querySelector('.deal-stage-stepper__step.is-lost-open')).toBeNull();
     expect(container.querySelector('.deal-stage-stepper__summary')?.textContent).toContain('Win ');
   });
 
-  it('keeps the lost stage last even if it has an earlier configured order', () => {
-    const seed = createDemoSeed();
-    const pipeline = seed.pipelines.find((item) => item.code === 'COMMERCIAL');
-    const stages = seed.pipelineStages
-      .filter((stage) => stage.pipelineId === pipeline?.id)
-      .map((stage) => stage.isClosedLost ? { ...stage, stageOrder: 1 } : stage);
-    const currentStage = stages.find((stage) => !stage.isClosedLost);
-    if (!currentStage) throw new Error('Commercial pipeline has no open stages.');
-
-    act(() => root.render(
-      <StageStepper
-        pipelineStages={stages}
-        currentStageId={currentStage.id}
-        dealStatus="open"
-        canEdit
-        onSelect={vi.fn()}
-      />,
-    ));
-
-    expect(container.querySelector('.deal-stage-stepper__step:last-child .deal-stage-stepper__label')?.textContent)
-      .toBe('Lost');
-  });
-
-  it('shows a disabled muted lost node after a deal is won', () => {
+  it('shows every configured stage complete after a deal is won', () => {
     const seed = createDemoSeed();
     const pipeline = seed.pipelines.find((item) => item.code === 'COMMERCIAL');
     const stages = seed.pipelineStages.filter((stage) => stage.pipelineId === pipeline?.id);
-    const wonStage = stages.find((stage) => stage.isClosedWon);
-    if (!wonStage) throw new Error('Commercial pipeline has no closed-won stage.');
+    const finalStage = stages.find((stage) => stage.stageOrder === 9);
+    if (!finalStage) throw new Error('Commercial pipeline has no final active stage.');
 
     act(() => root.render(
       <StageStepper
         pipelineStages={stages}
-        currentStageId={wonStage.id}
+        currentStageId={finalStage.id}
         dealStatus="won"
         canEdit
         onSelect={vi.fn()}
       />,
     ));
 
-    expect(container.querySelectorAll('.deal-stage-stepper__step.is-complete')).toHaveLength(5);
-    expect(container.querySelector<HTMLButtonElement>('.deal-stage-stepper__step.is-lost-won .deal-stage-stepper__button')
-      ?.disabled).toBe(true);
+    expect(container.querySelectorAll('.deal-stage-stepper__step.is-complete')).toHaveLength(9);
+    expect(container.querySelector('.deal-stage-stepper__step.is-lost-won')).toBeNull();
   });
 
-  it('shows the red lost node and reason banner for a lost deal', () => {
+  it('shows the loss reason without adding a terminal pipeline stage', () => {
     const seed = createDemoSeed();
     const pipeline = seed.pipelines.find((item) => item.code === 'COMMERCIAL');
     const stages = seed.pipelineStages.filter((stage) => stage.pipelineId === pipeline?.id);
-    const lostStage = stages.find((stage) => stage.isClosedLost);
-    if (!lostStage) throw new Error('Commercial pipeline has no closed-lost stage.');
+    const finalStage = stages.find((stage) => stage.stageOrder === 9);
+    if (!finalStage) throw new Error('Commercial pipeline has no final active stage.');
 
     act(() => root.render(
       <StageStepper
         pipelineStages={stages}
-        currentStageId={lostStage.id}
+        currentStageId={finalStage.id}
         dealStatus="lost"
         lossReason="Self-Insured"
         canEdit
@@ -122,19 +129,18 @@ describe('Deal stage stepper', () => {
       />,
     ));
 
-    expect(container.querySelectorAll('.deal-stage-stepper__step.is-dimmed')).toHaveLength(5);
-    expect(container.querySelector<HTMLButtonElement>('.deal-stage-stepper__step.is-lost-closed .deal-stage-stepper__button')
-      ?.disabled).toBe(true);
+    expect(container.querySelectorAll('.deal-stage-stepper__step.is-dimmed')).toHaveLength(9);
+    expect(container.querySelector('.deal-stage-stepper__step.is-lost-closed')).toBeNull();
     expect(container.querySelector('[role="status"]')?.textContent).toBe('Lost: Self-Insured');
     expect(container.querySelector('.deal-stage-stepper__summary')?.textContent).toBe('Win 0%');
   });
 
-  it('routes clicks on the open deal lost node through the stage selection callback', () => {
+  it('routes clicks on active stages through the stage selection callback', () => {
     const seed = createDemoSeed();
     const pipeline = seed.pipelines.find((item) => item.code === 'COMMERCIAL');
     const stages = seed.pipelineStages.filter((stage) => stage.pipelineId === pipeline?.id);
-    const lostStage = stages.find((stage) => stage.isClosedLost);
-    if (!lostStage) throw new Error('Commercial pipeline has no closed-lost stage.');
+    const nextStage = stages.find((stage) => stage.stageOrder === 2);
+    if (!nextStage) throw new Error('Commercial pipeline has no second active stage.');
     const onSelect = vi.fn();
 
     act(() => root.render(
@@ -146,9 +152,9 @@ describe('Deal stage stepper', () => {
         onSelect={onSelect}
       />,
     ));
-    act(() => container.querySelector<HTMLButtonElement>('.is-lost-open .deal-stage-stepper__button')?.click());
+    act(() => container.querySelectorAll<HTMLButtonElement>('.deal-stage-stepper__button')[1]?.click());
 
-    expect(onSelect).toHaveBeenCalledWith(lostStage);
+    expect(onSelect).toHaveBeenCalledWith(nextStage);
   });
 
   it('migrates existing stage presentation by pipeline order, not display name', () => {
@@ -162,7 +168,7 @@ describe('Deal stage stepper', () => {
     }, 'COMMERCIAL');
 
     expect(migrated.name).toBe('Existing translated stage');
-    expect(migrated.shortLabel).toBe('Quote Comparison');
+    expect(migrated.shortLabel).toBe('Key Person Identified');
     expect(migrated.purpose).toBeTruthy();
   });
 

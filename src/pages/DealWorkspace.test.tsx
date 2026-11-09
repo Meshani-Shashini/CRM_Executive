@@ -50,6 +50,7 @@ describe('Deal list row accessibility', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.location.hash = '';
     mockUseApp.mockReset();
   });
 
@@ -85,5 +86,23 @@ describe('Deal list row accessibility', () => {
     expect(container.textContent).not.toContain('Deals & Leads');
     expect(container.textContent).not.toContain('Lead 360');
     expect(container.textContent).toContain('Go to List');
+  });
+
+  it('renders the requested Deals list fields in order', () => {
+    window.location.hash = '#/deals?view=list';
+    act(() => root.render(<DealWorkspace deals={[testDeal]} dealsPageMode />));
+
+    expect([...container.querySelectorAll('thead th')].map((cell) => cell.textContent?.trim().replace(/[↑↓]/g, ''))).toEqual([
+      'Title',
+      'Value',
+      'Organization',
+      'Contact Person',
+      'Expected Close Date',
+      'Next Activity Date',
+      'Owner',
+      'Stage',
+      'Pipeline',
+      'Actions',
+    ]);
   });
 });

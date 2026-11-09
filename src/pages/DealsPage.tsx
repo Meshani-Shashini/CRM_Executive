@@ -96,6 +96,11 @@ export default function DealsPage() {
   const availableStages = pipelineStages
     .filter((stage) => stage.pipelineId === createPipelineId)
     .sort((a, b) => a.stageOrder - b.stageOrder);
+  const stageFilterOptions = [...new Set(pipelineStages
+    .filter((stage) => activePipelines.some((pipeline) => pipeline.id === stage.pipelineId))
+    .filter((stage) => !pipelineFilter || stage.pipelineId === pipelineFilter)
+    .sort((left, right) => left.stageOrder - right.stageOrder)
+    .map((stage) => stage.name))];
   const parsedDealAmount = parseCurrencyInput(dealAmount);
   useEffect(() => {
     const firstStage = availableStages[0];
@@ -511,7 +516,7 @@ export default function DealsPage() {
       <Modal open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Deals" size="sm" footer={<><button type="button" className="btn-ghost" onClick={() => { setPipelineFilter(''); setStageFilter(''); setOwnerFilter(''); setVendorFilter(''); setStatusFilter(''); }}>Clear</button><button type="button" className="btn-primary" onClick={() => setFilterOpen(false)}>Apply Filter</button></>}>
         <div className="space-y-3">
           <Field label="Pipeline"><select className="input" value={pipelineFilter} onChange={(event) => { setPipelineFilter(event.target.value); setStageFilter(''); }}><option value="">All pipelines</option>{activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}</select></Field>
-          <Field label="Stage"><select className="input" value={stageFilter} onChange={(event) => setStageFilter(event.target.value)}><option value="">All stages</option>{[...new Set(deals.filter((deal) => !pipelineFilter || deal.pipelineId === pipelineFilter).map((deal) => deal.stage))].map((stage) => <option key={stage}>{stage}</option>)}</select></Field>
+          <Field label="Stage"><select className="input" value={stageFilter} onChange={(event) => setStageFilter(event.target.value)}><option value="">All stages</option>{stageFilterOptions.map((stage) => <option key={stage}>{stage}</option>)}</select></Field>
           <Field label="Owner"><select className="input" value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)}><option value="">All owners</option>{users.filter((member) => member.role === 'admin' || member.role === 'sales').map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></Field>
           <Field label="Vendor"><select className="input" value={vendorFilter} onChange={(event) => setVendorFilter(event.target.value)}><option value="">All vendors</option>{vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select></Field>
           <Field label="Status"><select className="input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option><option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option></select></Field>

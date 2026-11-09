@@ -2,7 +2,7 @@ import type {
   Activity, Client, Deal, Invoice, Lead, Pipeline, PipelineStage,
   QuotationRequest, StageHistoryAudit, Vendor,
 } from '../types';
-import { getPipelineStageTemplate } from '../data/pipelineStageTemplates';
+import { DEAL_PIPELINE_STAGES, getPipelineStageTemplate } from '../data/pipelineStageTemplates.ts';
 
 const TENANT_ID = 'demo-tenant';
 const OWNER_ID = 'local-development-admin';
@@ -11,45 +11,25 @@ const PIPELINE_DEFINITIONS: Array<{
   id: string;
   code: string;
   name: string;
-  stages: Array<Pick<PipelineStage, 'name' | 'winProbabilityPct' | 'stagnationDaysThreshold' | 'isClosedWon' | 'isClosedLost' | 'requiresApproval'>>;
+  stages: Array<Pick<PipelineStage, 'name' | 'shortLabel' | 'purpose' | 'winProbabilityPct' | 'stagnationDaysThreshold' | 'isClosedWon' | 'isClosedLost' | 'requiresApproval'>>;
 }> = [
   {
     id: 'demo-pipeline-commercial',
     code: 'COMMERCIAL',
     name: 'Commercial Lines Brokerage',
-    stages: [
-      { name: 'Fact-Finding & Risk Survey', winProbabilityPct: 20, stagnationDaysThreshold: 10, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Market Tender & Placing Slip Submission', winProbabilityPct: 40, stagnationDaysThreshold: 14, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Comparative Analysis & Presentation', winProbabilityPct: 60, stagnationDaysThreshold: 7, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Underwriter Negotiation & Structuring', winProbabilityPct: 80, stagnationDaysThreshold: 5, isClosedWon: false, isClosedLost: false, requiresApproval: true },
-      { name: 'Policy Bound / Won', winProbabilityPct: 100, stagnationDaysThreshold: 0, isClosedWon: true, isClosedLost: false, requiresApproval: false },
-      { name: 'Lost / Market Declined', winProbabilityPct: 0, stagnationDaysThreshold: 0, isClosedWon: false, isClosedLost: true, requiresApproval: false },
-    ],
+    stages: DEAL_PIPELINE_STAGES,
   },
   {
     id: 'demo-pipeline-sme',
     code: 'SME_VELOCITY',
     name: 'Retail, SME & Velocity Packages',
-    stages: [
-      { name: 'Intake & Automated Rating', winProbabilityPct: 25, stagnationDaysThreshold: 2, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Standard Package Quoted', winProbabilityPct: 50, stagnationDaysThreshold: 3, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Client Confirmation', winProbabilityPct: 80, stagnationDaysThreshold: 2, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Payment & Immediate Cover', winProbabilityPct: 100, stagnationDaysThreshold: 0, isClosedWon: true, isClosedLost: false, requiresApproval: false },
-      { name: 'Closed-Lost', winProbabilityPct: 0, stagnationDaysThreshold: 0, isClosedWon: false, isClosedLost: true, requiresApproval: false },
-    ],
+    stages: DEAL_PIPELINE_STAGES,
   },
   {
     id: 'demo-pipeline-renewals',
     code: 'RENEWALS',
     name: 'Annual Policy Renewals',
-    stages: [
-      { name: 'Renewal Audit & Loss Review (T-90d)', winProbabilityPct: 30, stagnationDaysThreshold: 10, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Expiring Carrier Terms / Market Re-tender (T-60d)', winProbabilityPct: 50, stagnationDaysThreshold: 14, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Renewal Terms Presentation (T-30d)', winProbabilityPct: 70, stagnationDaysThreshold: 7, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Client Renewal Sign-Off (T-15d)', winProbabilityPct: 90, stagnationDaysThreshold: 5, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Policy Renewed & Re-Invoiced', winProbabilityPct: 100, stagnationDaysThreshold: 0, isClosedWon: true, isClosedLost: false, requiresApproval: false },
-      { name: 'Lapsed / Lost to Competitor', winProbabilityPct: 0, stagnationDaysThreshold: 0, isClosedWon: false, isClosedLost: true, requiresApproval: false },
-    ],
+    stages: DEAL_PIPELINE_STAGES,
   },
 ];
 
@@ -179,7 +159,7 @@ export function createDemoSeed(now = Date.now()): DemoSeed {
       id: 'demo-deal-1', pipelineId: pipelines[0].id, createdAt: enteredDaysAgo(50),
       stageChangedAt: enteredDaysAgo(25), client: clients[0].name, clientId: clients[0].id,
       product: 'Contractors All Risks', productCode: 'NC', value: 500000, weighted: 200000,
-      currency: 'MVR', stage: 'Market Tender & Placing Slip Submission', probability: 40,
+      currency: 'MVR', stage: 'Quotation / Underwriting', probability: 70,
       ownerId: OWNER_ID, closeDate: day(30), insurer: vendors[0].name, vendorId: vendors[0].id,
       leadId: leads[0].id, contactName: leads[0].contact, contactEmail: leads[0].contactEmail,
       contactPhone: leads[0].contactPhone, whatsapp: leads[0].whatsapp, telegram: leads[0].telegram,
@@ -189,7 +169,7 @@ export function createDemoSeed(now = Date.now()): DemoSeed {
       id: 'demo-deal-2', pipelineId: pipelines[0].id, createdAt: enteredDaysAgo(9),
       stageChangedAt: enteredDaysAgo(3), client: clients[1].name, clientId: clients[1].id,
       product: 'Property All Risk', productCode: 'PR', value: 320000, weighted: 192000,
-      currency: 'USD', exchangeRate: 15.42, stage: 'Comparative Analysis & Presentation', probability: 60,
+      currency: 'USD', exchangeRate: 15.42, stage: 'Quoted / Proposed', probability: 80,
       ownerId: OWNER_ID, closeDate: day(40), insurer: vendors[1].name, vendorId: vendors[1].id,
       leadId: leads[1].id, contactName: leads[1].contact, contactEmail: leads[1].contactEmail,
       contactPhone: leads[1].contactPhone, whatsapp: leads[1].whatsapp, telegram: leads[1].telegram,
@@ -199,7 +179,7 @@ export function createDemoSeed(now = Date.now()): DemoSeed {
       id: 'demo-deal-3', pipelineId: pipelines[1].id, createdAt: enteredDaysAgo(60),
       stageChangedAt: enteredDaysAgo(18), client: clients[2].name, clientId: clients[2].id,
       product: 'Dwelling Fire', productCode: 'DF', value: 280000, weighted: 280000,
-      currency: 'MVR', stage: 'Payment & Immediate Cover', probability: 100,
+      currency: 'MVR', stage: 'Review and Follow up', probability: 100,
       ownerId: OWNER_ID, closeDate: day(-5), insurer: vendors[0].name, vendorId: vendors[0].id,
       leadId: leads[2].id, disposition: 'won', proposalSummary: leads[2].title, source: 'Demo seed',
     },
@@ -207,7 +187,7 @@ export function createDemoSeed(now = Date.now()): DemoSeed {
       id: 'demo-deal-4', pipelineId: pipelines[2].id, createdAt: enteredDaysAgo(55),
       stageChangedAt: enteredDaysAgo(35), client: clients[3].name, clientId: clients[3].id,
       product: 'Comprehensive Machinery', productCode: 'CM', value: 175000, weighted: 0,
-      currency: 'USD', exchangeRate: 15.42, stage: 'Lapsed / Lost to Competitor', probability: 0,
+      currency: 'USD', exchangeRate: 15.42, stage: 'Review and Follow up', probability: 0,
       ownerId: OWNER_ID, closeDate: day(-12), insurer: vendors[2].name, vendorId: vendors[2].id,
       leadId: leads[3].id, disposition: 'lost', lossReason: 'Demo loss reason',
       proposalSummary: leads[3].title, source: 'Demo seed',
@@ -216,7 +196,7 @@ export function createDemoSeed(now = Date.now()): DemoSeed {
       id: 'demo-deal-5', pipelineId: pipelines[1].id, createdAt: enteredDaysAgo(5),
       stageChangedAt: enteredDaysAgo(1), client: clients[2].name, clientId: clients[2].id,
       product: 'Dwelling Fire', productCode: 'DF', value: 90000, weighted: 45000,
-      currency: 'MVR', stage: 'Standard Package Quoted', probability: 50,
+      currency: 'MVR', stage: 'Quoted / Proposed', probability: 80,
       ownerId: OWNER_ID, closeDate: day(20), insurer: vendors[2].name, vendorId: vendors[2].id,
       leadId: leads[4].id, contactName: leads[4].contact, contactEmail: leads[4].contactEmail,
       contactPhone: leads[4].contactPhone, whatsapp: leads[4].whatsapp, telegram: leads[4].telegram,

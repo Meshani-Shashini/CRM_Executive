@@ -278,9 +278,9 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
 
 .fit-wrap.deals-list-fit td[data-label="Pipeline"],
 .fit-wrap.deals-list-fit td[data-label="Stage"],
-.fit-wrap.deals-list-fit td[data-label="Insurance"],
 .fit-wrap.deals-list-fit td[data-label="Value"],
-.fit-wrap.deals-list-fit td[data-label="Expected close"] {
+.fit-wrap.deals-list-fit td[data-label="Expected Close Date"],
+.fit-wrap.deals-list-fit td[data-label="Next Activity Date"] {
   white-space: nowrap;
 }
 
@@ -399,7 +399,7 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
 }
 
 @container (max-width: 639px) {
-  .fit-wrap.deals-list-fit tbody td[data-label="Deal"] {
+  .fit-wrap.deals-list-fit tbody td[data-label="Title"] {
     grid-column: 1 / -1;
     padding-right: 2.5rem;
     color: white;
@@ -407,7 +407,7 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
     font-weight: 700;
   }
 
-  .fit-wrap.deals-list-fit tbody td[data-label="Deal"]::before,
+  .fit-wrap.deals-list-fit tbody td[data-label="Title"]::before,
   .fit-wrap.deals-list-fit tbody td[data-label="Actions"]::before,
   .fit-wrap.deals-list-fit tbody tr.deals-list-empty td::before {
     display: none;
@@ -420,7 +420,7 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
     text-align: right;
   }
 
-  .fit-wrap.deals-list-fit tbody td[data-label="Client"] .truncate {
+  .fit-wrap.deals-list-fit tbody td[data-label="Organization"] .truncate {
     display: -webkit-box;
     overflow: hidden;
     white-space: normal;

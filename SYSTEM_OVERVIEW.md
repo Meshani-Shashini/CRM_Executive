@@ -345,8 +345,8 @@ The app includes pipeline abstractions for multiple operational workflows. The s
 - `lead-stage-history`
 
 The board logic is integrated with lead lifecycle stages and conversion value totals. Forecast-like summaries are used to show opportunity value and progression across board stages.
-Moving a commercial deal into stage 2 prompts the user to create a quotation request when none is linked.
-Commercial, SME Velocity, and Renewals stage templates store explicit won/lost and approval flags. Existing stages are normalized by pipeline code and stage order, while label-based terminal detection remains a compatibility fallback for older custom stages.
+Moving a commercial deal into Quotation / Underwriting prompts the user to create a quotation request when none is linked.
+Every active deal pipeline uses the same fixed nine-stage sequence: Identified, Contact Made, Key Person Identified, Intro Mail, Meetings, Requirements Identified, Quotation / Underwriting, Quoted / Proposed, and Review and Follow up. Stage names and order are normalized for active pipelines; win/loss outcomes are stored separately from this open-stage sequence.
 
 This makes the CRM useful both as a lead tracker and as a commercial pipeline performance tool.
 
@@ -472,7 +472,7 @@ Deals can be viewed in:
 - **Forecast:** open/won opportunity cards grouped by month or quarter; users can move an open deal to a different expected-close period.
 - **Archive:** closed deals with won/lost filtering and closed-stage context.
 
-Stage changes write stage history and activity/audit entries. Closing outcomes can require a win reason or a loss reason; configured stage flags identify won/lost stages, with compatibility handling for older stage names. Binding a deal may create related invoice/renewal side effects according to the configured business-line workflow. Deal deletion is restricted when invoices, leads, or quotation requests remain linked.
+Stage changes write stage history and activity/audit entries. Deals can be explicitly marked Won or Lost from the deal actions; these outcomes can require a win or loss reason and do not add terminal stages to the fixed sequence. Marking a deal Won may create related invoice/renewal records. Deal deletion is restricted when invoices, leads, or quotation requests remain linked.
 
 ### Client, vendor, and contact functions
 
@@ -494,7 +494,7 @@ Settings is admin-only and provides:
 - User profile/role management. Production user creation uses the `admin-create-user` Supabase Edge Function; registration through the login page creates client access.
 - System/configuration audit entries for settings changes.
 
-Pipeline configuration defines stages, order, win probability, target/SLA days, and terminal outcome flags. The Deals/Pipelines pages use those definitions for stage presentation, health, forecasting, and transition validation.
+Pipeline configuration defines the fixed stage names/order and adjustable win probability and target/SLA days. The Deals/Pipelines pages use those definitions for stage presentation, health, forecasting, and transition validation.
 
 ---
 
