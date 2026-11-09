@@ -9,7 +9,12 @@ export function linkDealToLead(
 ): { deal: Deal; lead: Lead } {
   const now = deal.createdAt ?? new Date().toISOString();
   const lead = existingLead
-    ? { ...existingLead, dealId: deal.id }
+    ? {
+      ...existingLead,
+      funnelStage: 'Converted to deal',
+      disposition: 'converted' as const,
+      dealId: deal.id,
+    }
     : {
       id: deal.leadId || `lead-${deal.id}`,
       clientId: deal.clientId ?? options.client?.id,
@@ -54,6 +59,13 @@ export function linkDealToLead(
     deal: { ...deal, leadId: lead.id },
     lead,
   };
+}
+
+export function convertedDealsOnly(deals: Deal[], leads: Lead[]) {
+  return deals.filter((deal) => leads.some((lead) =>
+    lead.id === deal.leadId
+    && lead.dealId === deal.id,
+  ));
 }
 
 export function migrateDealLeadLinks(deals: Deal[], leads: Lead[], clients: Client[]) {

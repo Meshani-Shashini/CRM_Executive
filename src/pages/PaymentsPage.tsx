@@ -110,8 +110,8 @@ export default function PaymentsPage() {
               <th className="text-left px-4 py-3 font-medium">Type</th>
               <th className="text-left px-4 py-3 font-medium">Method</th>
               <th className="text-left px-4 py-3 font-medium">Date</th>
-              <th className="text-right px-4 py-3 font-medium">Amount</th>
-              <th className="text-left px-4 py-3 font-medium">Status</th>
+              <th className="payment-amount-column text-right px-4 py-3 font-medium">Amount</th>
+              <th className="payment-status-column text-left px-4 py-3 font-medium">Status</th>
               <th></th>
             </tr>
           </thead>
@@ -124,8 +124,8 @@ export default function PaymentsPage() {
                 <td data-label="Type"><Badge variant={p.type === 'Commission' ? 'win' : 'brand'}>{p.type}</Badge></td>
                 <td data-label="Method" className="text-muted">{p.method}</td>
                 <td data-label="Date" className="text-muted text-xs">{formatDate(p.date)}</td>
-                <td data-label="Amount" className="text-white font-medium">MVR {p.amount.toLocaleString()}</td>
-                <td data-label="Status"><Badge variant={p.status === 'Completed' ? 'win' : 'warm'} dot>{p.status}</Badge></td>
+                <td data-label="Amount" className="payment-amount-column text-right text-white font-medium">MVR {p.amount.toLocaleString()}</td>
+                <td data-label="Status" className="payment-status-column"><Badge variant={p.status === 'Completed' ? 'win' : 'warm'} dot>{p.status}</Badge></td>
                 <td data-label="Actions" className="text-right">
                   <button onClick={() => downloadCsv(`${p.receiptNo}.csv`, ['Receipt #', 'Invoice #', 'Client', 'Amount', 'Type', 'Method', 'Date', 'Status'], [[p.receiptNo, p.invoiceNumber, p.clientName, p.amount, p.type, p.method, p.date, p.status]])} aria-label={`Download receipt ${p.receiptNo}`} className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white"><Download size={14} /></button>
                 </td>

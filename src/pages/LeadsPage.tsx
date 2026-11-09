@@ -24,7 +24,7 @@ import { isValidEmail, isValidPhoneNumber, isValidTelegramContact } from '../uti
 import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
 import DealWorkspace from './DealWorkspace';
 import {
-  appendLeadStageTransition, isLeadLifecycleStage, isTerminalLeadStage, LEAD_ACTIVE_STAGES,
+  activeUnconvertedLeads, appendLeadStageTransition, isLeadLifecycleStage, isTerminalLeadStage, LEAD_ACTIVE_STAGES,
   LEAD_LIFECYCLE_STAGES, lifecycleStageForLead,
   type LeadLifecycleStage,
 } from '../utils/leadLifecycle';
@@ -174,6 +174,7 @@ export default function LeadsPage() {
   const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
   const linkedDealIds = useMemo(() => new Set(deals.map((deal) => deal.id)), [deals]);
   const linkedLeadIds = useMemo(() => new Set(deals.flatMap((deal) => deal.leadId ? [deal.leadId] : [])), [deals]);
+  const activeLeads = useMemo(() => activeUnconvertedLeads(leads, deals), [deals, leads]);
   const selectedPipeline = activePipelines.find((pipeline) => pipeline.id === selectedPipelineId);
   const selectedOrganization = clients.find(
     (client) => client.name.trim().toLowerCase() === organizationQuery.trim().toLowerCase(),
@@ -251,7 +252,7 @@ export default function LeadsPage() {
     (!leadIdFilter || lead.id === leadIdFilter) &&
     (!insuranceClassFilter || lead.insuranceClass === insuranceClassFilter) &&
     (!statusFilter || (statusFilter === 'active' ? lead.status !== 'COMPLETED' : lead.status === statusFilter));
-  const visibleLeads = leads.filter(matchesLeadFilters);
+  const visibleLeads = activeLeads.filter(matchesLeadFilters);
   const searchedLeads = visibleLeads.filter((lead) => {
     const owner = staffOptions.find((candidate) => candidate.id === lead.ownerId)?.name ?? formatStaffIdentifier(lead.ownerId);
     const product = products.find((candidate) => candidate.code === lead.productCode);
@@ -272,6 +273,7 @@ export default function LeadsPage() {
     stage,
     leads: searchedLeads.filter((lead) => boardStageForLead(lead, linkedDealIds, linkedLeadIds) === stage),
   }));
+  const showingLeadInspection = Boolean(inspectedLeadId && searchedLeads.some((lead) => lead.id === inspectedLeadId));
   const moveLeadToStage = (lead: Lead, stage: LeadLifecycleStage) => {
     if (!isLeadLifecycleStage(stage)) {
       window.alert('Choose a valid Lead Telemetry stage.');
@@ -715,7 +717,7 @@ export default function LeadsPage() {
     <div className="w-full max-w-full min-w-0">
     <div className={inspectedLeadId ? 'space-y-0' : 'space-y-2'}>
       <h2 className="sr-only">All Leads</h2>
-      {!inspectedLeadId && <div className="flex flex-wrap items-center justify-between gap-2">
+      {!showingLeadInspection && <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-0.5" role="tablist" aria-label="Lead views">
             <button type="button" role="tab" aria-label="List view" title="List view" aria-selected={view === 'list'} onClick={() => setView('list')} className={`rounded-md p-1.5 transition ${view === 'list' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><List size={14} /></button>
@@ -735,7 +737,7 @@ export default function LeadsPage() {
         </div>
       </div>}
 
-      {inspectedLeadId ? (
+      {showingLeadInspection ? (
         <DealWorkspace
           deals={deals}
           initialSelectedKey={`lead:${inspectedLeadId}`}
@@ -980,7 +982,6 @@ export default function LeadsPage() {
                           setDeals((current) => [conversion.deal, ...current]);
                           setLeads((current) => current.map((item) => item.id === lead.id ? { ...item, ...conversion.leadUpdate, contacts: mergeContactProfiles(item.contacts, []), contactEmail: item.contactEmail || conversion.leadUpdate.contactEmail || '' } : item));
                           setStageHistory((current) => [...current, conversion.stageHistoryEntry]);
-                          setInspectedLeadId(lead.id);
                         }}><ArrowRight size={12} /> Convert to Deal</button>}
                       {activeRole === 'admin' && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs text-hot hover:bg-ink-700"
                         onClick={() => { setOpenLeadActionsId(''); setLeadActionsAnchor(null); deleteLead(lead); }}><X size={12} /> Delete lead</button>}

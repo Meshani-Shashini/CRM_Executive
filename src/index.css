@@ -576,15 +576,15 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
 .fit-wrap.invoice-list-fit col:nth-child(7) { width: 18%; }
 .fit-wrap.invoice-list-fit col:nth-child(8) { width: 7%; }
 
-.fit-wrap.payment-list-fit col:nth-child(1) { width: 12%; }
-.fit-wrap.payment-list-fit col:nth-child(2) { width: 10%; }
-.fit-wrap.payment-list-fit col:nth-child(3) { width: 14%; }
-.fit-wrap.payment-list-fit col:nth-child(4) { width: 9%; }
-.fit-wrap.payment-list-fit col:nth-child(5) { width: 12%; }
-.fit-wrap.payment-list-fit col:nth-child(6) { width: 10%; }
-.fit-wrap.payment-list-fit col:nth-child(7) { width: 14%; }
-.fit-wrap.payment-list-fit col:nth-child(8) { width: 12%; }
-.fit-wrap.payment-list-fit col:nth-child(9) { width: 7%; }
+.fit-wrap.payment-list-fit col:nth-child(1) { width: 11%; }
+.fit-wrap.payment-list-fit col:nth-child(2) { width: 9%; }
+.fit-wrap.payment-list-fit col:nth-child(3) { width: 13%; }
+.fit-wrap.payment-list-fit col:nth-child(4) { width: 8%; }
+.fit-wrap.payment-list-fit col:nth-child(5) { width: 11%; }
+.fit-wrap.payment-list-fit col:nth-child(6) { width: 9%; }
+.fit-wrap.payment-list-fit col:nth-child(7) { width: 16%; }
+.fit-wrap.payment-list-fit col:nth-child(8) { width: 14%; }
+.fit-wrap.payment-list-fit col:nth-child(9) { width: 9%; }
 
 .fit-wrap.product-list-fit col:nth-child(1) { width: 9%; }
 .fit-wrap.product-list-fit col:nth-child(2) { width: 9%; }
@@ -619,6 +619,15 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   vertical-align: top;
 }
 
+.fit-wrap.payment-list-fit .payment-amount-column {
+  padding-right: 0.75em;
+  white-space: nowrap;
+}
+
+.fit-wrap.payment-list-fit .payment-status-column {
+  padding-left: 0.75em;
+}
+
 .fit-wrap.invoice-list-fit td[data-label="Actions"],
 .fit-wrap.payment-list-fit td[data-label="Actions"],
 .fit-wrap.product-list-fit td[data-label="Actions"] {
@@ -648,14 +657,14 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   .fit-wrap.invoice-list-fit col:nth-child(8) { width: 10%; }
 
   .fit-wrap.payment-list-fit col:nth-child(1) { width: 12%; }
-  .fit-wrap.payment-list-fit col:nth-child(2) { width: 10%; }
-  .fit-wrap.payment-list-fit col:nth-child(3) { width: 13%; }
-  .fit-wrap.payment-list-fit col:nth-child(4) { width: 9%; }
-  .fit-wrap.payment-list-fit col:nth-child(5) { width: 12%; }
-  .fit-wrap.payment-list-fit col:nth-child(6) { width: 10%; }
-  .fit-wrap.payment-list-fit col:nth-child(7) { width: 14%; }
-  .fit-wrap.payment-list-fit col:nth-child(8) { width: 11%; }
-  .fit-wrap.payment-list-fit col:nth-child(9) { width: 8%; }
+  .fit-wrap.payment-list-fit col:nth-child(2) { width: 9%; }
+  .fit-wrap.payment-list-fit col:nth-child(3) { width: 12%; }
+  .fit-wrap.payment-list-fit col:nth-child(4) { width: 8%; }
+  .fit-wrap.payment-list-fit col:nth-child(5) { width: 11%; }
+  .fit-wrap.payment-list-fit col:nth-child(6) { width: 9%; }
+  .fit-wrap.payment-list-fit col:nth-child(7) { width: 16%; }
+  .fit-wrap.payment-list-fit col:nth-child(8) { width: 14%; }
+  .fit-wrap.payment-list-fit col:nth-child(9) { width: 9%; }
 
   .fit-wrap.product-list-fit col:nth-child(1) { width: 9%; }
   .fit-wrap.product-list-fit col:nth-child(2) { width: 9%; }
@@ -692,6 +701,15 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
 }
 
 @container (max-width: 639px) {
+  .fit-wrap.payment-list-fit .payment-amount-column,
+  .fit-wrap.payment-list-fit .payment-status-column {
+    padding: 0;
+  }
+
+  .fit-wrap.payment-list-fit .payment-amount-column {
+    white-space: normal;
+  }
+
   .fit-wrap.mira-list-fit tfoot {
     display: block;
   }

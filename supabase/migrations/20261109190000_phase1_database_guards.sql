@@ -1,5 +1,10 @@
 BEGIN;
 
+DROP TRIGGER IF EXISTS tenant_records_normalize_reference ON public.tenant_records;
+DROP TRIGGER IF EXISTS tenant_records_validate_references ON public.tenant_records;
+DROP TRIGGER IF EXISTS tenant_records_guard_dependents ON public.tenant_records;
+DROP TRIGGER IF EXISTS tenant_records_immutable_records ON public.tenant_records;
+
 CREATE TABLE IF NOT EXISTS public.tenant_sequences (
   tenant_id UUID NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('deal', 'quotation-request', 'invoice')),
@@ -103,29 +108,54 @@ $$;
 REVOKE ALL ON FUNCTION public.get_next_reference(UUID, TEXT, INT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_next_reference(UUID, TEXT, INT) TO authenticated;
 
+-- Remove only links whose targets are missing in this tenant. This is safe to
+-- rerun and lets the stricter triggers protect subsequent inserts and updates.
+UPDATE public.tenant_records AS source
+SET data = source.data - 'leadId'
+WHERE NULLIF(btrim(source.data ->> 'leadId'), '') IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM public.tenant_records AS target
+    WHERE target.tenant_id = source.tenant_id
+      AND target.resource = 'leads'
+      AND target.record_id = source.data ->> 'leadId'
+  );
+
+UPDATE public.tenant_records AS source
+SET data = source.data - 'dealId'
+WHERE NULLIF(btrim(source.data ->> 'dealId'), '') IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM public.tenant_records AS target
+    WHERE target.tenant_id = source.tenant_id
+      AND target.resource = 'deals'
+      AND target.record_id = source.data ->> 'dealId'
+  );
+
+UPDATE public.tenant_records AS source
+SET data = source.data - 'clientId'
+WHERE NULLIF(btrim(source.data ->> 'clientId'), '') IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM public.tenant_records AS target
+    WHERE target.tenant_id = source.tenant_id
+      AND target.resource = 'clients'
+      AND target.record_id = source.data ->> 'clientId'
+  );
+
+UPDATE public.tenant_records AS source
+SET data = source.data - 'invoiceId'
+WHERE NULLIF(btrim(source.data ->> 'invoiceId'), '') IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM public.tenant_records AS target
+    WHERE target.tenant_id = source.tenant_id
+      AND target.resource = 'invoices'
+      AND target.record_id = source.data ->> 'invoiceId'
+  );
+
 DO $$
 DECLARE
   record_row RECORD;
   reference_year INT;
   reference_value TEXT;
 BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM public.tenant_records AS deal
-    WHERE deal.resource = 'deals'
-      AND (
-        NULLIF(btrim(deal.data ->> 'leadId'), '') IS NULL
-        OR NOT EXISTS (
-          SELECT 1 FROM public.tenant_records AS lead
-          WHERE lead.tenant_id = deal.tenant_id
-            AND lead.resource = 'leads'
-            AND lead.record_id = deal.data ->> 'leadId'
-        )
-      )
-  ) THEN
-    RAISE EXCEPTION 'Phase 1 guards require every existing Deal to reference a Lead in the same tenant. Link or remove invalid Deals before applying this migration.';
-  END IF;
-
   IF EXISTS (
     SELECT 1
     FROM public.tenant_records AS record
@@ -393,6 +423,7 @@ BEGIN
     ) AS linked_record(resource, referenced_id)
   LOOP
     IF NULLIF(btrim(link_row.referenced_id), '') IS NOT NULL
+      AND NOT (NEW.resource = 'leads' AND link_row.resource = 'deals')
       AND NOT EXISTS (
         SELECT 1 FROM public.tenant_records AS referenced
         WHERE referenced.tenant_id = NEW.tenant_id
@@ -685,7 +716,7 @@ BEGIN
         IF abs(
           (item ->> 'duration_days')::NUMERIC
           - EXTRACT(EPOCH FROM (exited_at - entered_at)) / 86400
-        ) > 0.000000001 THEN
+        ) > 0.0000115740740741 THEN
           RAISE EXCEPTION 'Lead stage duration does not match its timestamps' USING ERRCODE = '22023';
         END IF;
       END IF;

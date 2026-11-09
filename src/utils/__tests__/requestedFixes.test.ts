@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { Client, Invoice, Lead, Pipeline, PipelineStage, ProductCode, StageHistoryAudit } from '../../types';
+import type { Client, Deal, Invoice, Lead, Pipeline, PipelineStage, ProductCode, StageHistoryAudit } from '../../types';
 import { isValidEmail } from '../communication';
+import { convertedDealsOnly } from '../dealFactory';
 import { invoiceTotalInMvr } from '../invoiceTotals';
 import { buildLeadConversion } from '../leadConversion';
+import { activeUnconvertedLeads } from '../leadLifecycle';
 import { canTransitionQuotationRequestStatus, quotationRequestStatusOptions } from '../quotationRequestStatus';
 import { isStageSlaOverdue } from '../stageSla';
 
@@ -55,7 +57,64 @@ describe('requested CRM fixes', () => {
     });
 
     expect(conversion?.deal.pipelineId).toBe(pipeline.id);
+    expect(conversion?.deal.id).not.toBe(lead.id);
+    expect(conversion?.deal.leadId).toBe(lead.id);
+    expect(conversion?.leadUpdate.dealId).toBe(conversion?.deal.id);
     expect(conversion?.leadUpdate.pipelineId).toBe(pipeline.id);
+  });
+
+  it('only includes deals linked back to a converted lead, including terminal deals', () => {
+    const makeDeal = (id: string, leadId: string): Deal => ({
+      id, leadId, client: 'Acme', product: 'Property', value: 1000, weighted: 100,
+      currency: 'MVR', stage: 'New', probability: 10, ownerId: 'user-1',
+      closeDate: '2025-12-01', insurer: 'Vendor',
+    });
+    const makeLead = (id: string, dealId?: string, disposition?: Lead['disposition']): Lead => ({
+      id, dealId, client: 'Acme', contact: 'Pat', country: 'Maldives',
+      insuranceClass: 'Engineering', productCode: 'PR', temperature: 'WARM',
+      status: 'IN-PROGRESS', funnelStage: dealId ? 'Converted to deal' : 'Lead Identified',
+      disposition, renewalDate: '2025-12-01', sumInsured: 1000, premium: 50,
+      ownerId: 'user-1', lastActivity: '2025-01-01',
+    });
+
+    const deals = [
+      makeDeal('deal-converted', 'lead-converted'),
+      makeDeal('deal-terminal', 'lead-terminal'),
+      makeDeal('deal-raw', 'lead-raw'),
+    ];
+    const leads = [
+      makeLead('lead-converted', 'deal-converted', 'converted'),
+      makeLead('lead-terminal', 'deal-terminal'),
+      makeLead('lead-raw'),
+    ];
+
+    expect(convertedDealsOnly(deals, leads).map((deal) => deal.id))
+      .toEqual(['deal-converted', 'deal-terminal']);
+  });
+
+  it('excludes closed, converted, and deal-linked records from active Leads', () => {
+    const makeLead = (id: string, updates: Partial<Lead> = {}): Lead => ({
+      id, client: 'Acme', contact: 'Pat', country: 'Maldives',
+      insuranceClass: 'Engineering', productCode: 'PR', temperature: 'WARM',
+      status: 'IN-PROGRESS', funnelStage: 'Lead Identified',
+      renewalDate: '2025-12-01', sumInsured: 1000, premium: 50,
+      ownerId: 'user-1', lastActivity: '2025-01-01', ...updates,
+    });
+    const leads = [
+      makeLead('active'),
+      makeLead('converted-status', { status: 'CONVERTED' as Lead['status'] }),
+      makeLead('closed-status', { status: 'CLOSED' as Lead['status'] }),
+      makeLead('converted-stage', { funnelStage: 'CONVERTED' }),
+      makeLead('closed-stage', { funnelStage: 'Lost' }),
+      makeLead('linked-by-lead', { dealId: 'deal-1' }),
+      makeLead('linked-by-deal'),
+      makeLead('same-id-as-deal'),
+    ];
+
+    expect(activeUnconvertedLeads(leads, [
+      { id: 'deal-2', leadId: 'linked-by-deal' },
+      { id: 'same-id-as-deal', leadId: 'another-lead' },
+    ]).map((lead) => lead.id)).toEqual(['active']);
   });
 
   it('enforces next-step and admin-only reopen transitions', () => {

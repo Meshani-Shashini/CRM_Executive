@@ -20,7 +20,7 @@ export interface LeadConversionInput {
 
 export function buildLeadConversion(input: LeadConversionInput) {
   const { lead, client, product, pipeline, firstStage, contactChannels, primaryContact } = input;
-  if (lead.disposition === 'lost') {
+  if (lead.disposition === 'lost' || lead.dealId) {
     return null;
   }
   if (!client || !hasCompleteClientProfile(client)) {

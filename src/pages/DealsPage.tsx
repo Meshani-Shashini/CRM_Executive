@@ -19,7 +19,7 @@ import {
 import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
 import DealWorkspace from './DealWorkspace';
 import { TENANT_ID } from '../lib/supabase';
-import { linkDealToLead } from '../utils/dealFactory';
+import { convertedDealsOnly, linkDealToLead } from '../utils/dealFactory';
 import { isTerminalDealStage, isWonPipelineStage } from '../utils/stageSla';
 
 export default function DealsPage() {
@@ -43,6 +43,7 @@ export default function DealsPage() {
   const [dealNextActivityTitle, setDealNextActivityTitle] = useState('');
   const [pendingLeadDeletion, setPendingLeadDeletion] = useState<Lead | null>(null);
   const [pendingDealDeletion, setPendingDealDeletion] = useState<Deal | null>(null);
+  const [deletionRestriction, setDeletionRestriction] = useState<{ title: string; message: string } | null>(null);
   const [dealSource, setDealSource] = useState('');
   const [dealNotes, setDealNotes] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
@@ -70,7 +71,7 @@ export default function DealsPage() {
     window.addEventListener('hashchange', applyHashFilters);
     return () => window.removeEventListener('hashchange', applyHashFilters);
   }, []);
-  const visibleDeals = deals.filter((deal) => {
+  const visibleDeals = convertedDealsOnly(deals, leads).filter((deal) => {
     if (pipelineFilter && deal.pipelineId !== pipelineFilter) return false;
     if (stageFilter && deal.stage !== stageFilter) return false;
     if (ownerFilter && deal.ownerId !== ownerFilter) return false;
@@ -203,11 +204,20 @@ export default function DealsPage() {
 
   const requestDeleteDeal = (deal: Deal) => {
     if ((viewAsRole ?? user.role) !== 'admin') return;
-    if (deal.linkedInvoiceId || invoices.some((invoice) => invoice.linkedDealId === deal.id)) return;
+    if (deal.linkedInvoiceId || invoices.some((invoice) => invoice.linkedDealId === deal.id)) {
+      setDeletionRestriction({
+        title: 'Cannot delete deal',
+        message: 'This Deal cannot be deleted while it is linked to an invoice.',
+      });
+      return;
+    }
     const hasLinkedRecord = leads.some((lead) => lead.id === deal.leadId || lead.dealId === deal.id)
       || quotationRequests.some((request) => request.dealId === deal.id);
     if (hasLinkedRecord) {
-      window.alert('This Deal cannot be deleted because it has a linked Lead or quotation request.');
+      setDeletionRestriction({
+        title: 'Cannot delete deal',
+        message: 'This Deal cannot be deleted because it has a linked Lead or quotation request.',
+      });
       return;
     }
     setPendingDealDeletion(deal);
@@ -221,9 +231,12 @@ export default function DealsPage() {
     if (lead.dealId) linkedDealIds.add(lead.dealId);
     const linkedRequest = quotationRequests.some((request) => request.leadId === lead.id || linkedDealIds.has(request.dealId));
     if (deals.some((deal) => deal.id === lead.dealId || deal.leadId === lead.id) || linkedRequest) {
-      window.alert(linkedRequest
-        ? 'This Lead cannot be deleted because it has a linked quotation request.'
-        : 'This Lead cannot be deleted because it has an associated Deal. Reassign or delete the associated Deal first.');
+      setDeletionRestriction({
+        title: 'Cannot delete lead',
+        message: linkedRequest
+          ? 'This Lead cannot be deleted because it has a linked quotation request.'
+          : 'This Lead cannot be deleted because it has an associated Deal. Reassign or delete the associated Deal first.',
+      });
       return;
     }
     setPendingLeadDeletion(lead);
@@ -236,7 +249,10 @@ export default function DealsPage() {
       .map((deal) => deal.id));
     if (pendingLeadDeletion.dealId) linkedDealIds.add(pendingLeadDeletion.dealId);
     if (quotationRequests.some((request) => request.leadId === pendingLeadDeletion.id || linkedDealIds.has(request.dealId))) {
-      window.alert('This Lead cannot be deleted while it is linked to a quotation request.');
+      setDeletionRestriction({
+        title: 'Cannot delete lead',
+        message: 'This Lead cannot be deleted while it is linked to a quotation request.',
+      });
       setPendingLeadDeletion(null);
       return;
     }
@@ -256,7 +272,10 @@ export default function DealsPage() {
     const dealId = pendingDealDeletion.id;
     if (leads.some((lead) => lead.id === pendingDealDeletion.leadId || lead.dealId === dealId)
       || quotationRequests.some((request) => request.dealId === dealId)) {
-      window.alert('This Deal cannot be deleted while it has a linked Lead or quotation request.');
+      setDeletionRestriction({
+        title: 'Cannot delete deal',
+        message: 'This Deal cannot be deleted while it has a linked Lead or quotation request.',
+      });
       setPendingDealDeletion(null);
       return;
     }
@@ -552,11 +571,20 @@ export default function DealsPage() {
         open={Boolean(pendingDealDeletion)}
         onClose={() => setPendingDealDeletion(null)}
         title="Delete deal?"
-        subtitle={`Delete “${pendingDealDeletion?.client ?? ''}”? This action cannot be undone.`}
+        subtitle={`Delete “${[pendingDealDeletion?.client, pendingDealDeletion?.product].filter(Boolean).join(' — ')}”? This action cannot be undone.`}
         size="sm"
         footer={<><button type="button" className="btn-ghost" onClick={() => setPendingDealDeletion(null)}>Cancel</button><button type="button" className="btn-danger" disabled={(viewAsRole ?? user.role) !== 'admin'} onClick={confirmDeleteDeal}>Delete Deal</button></>}
       >
         <p className="text-sm text-muted">The deal will be removed from its pipeline and unlinked from its lead. Deals with an associated invoice cannot be deleted.</p>
+      </Modal>
+      <Modal
+        open={Boolean(deletionRestriction)}
+        onClose={() => setDeletionRestriction(null)}
+        title={deletionRestriction?.title ?? 'Cannot delete record'}
+        size="sm"
+        footer={<button type="button" className="btn-primary" onClick={() => setDeletionRestriction(null)}>Close</button>}
+      >
+        <p role="alert" className="text-sm text-muted">{deletionRestriction?.message}</p>
       </Modal>
     </div>
   );

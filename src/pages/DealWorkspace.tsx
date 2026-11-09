@@ -362,7 +362,6 @@ export default function DealWorkspace({
   const selectedPipelineFilter = pipelineFilter ?? kanbanPipelineId;
   const changePipelineFilter = onPipelineFilterChange ?? setKanbanPipelineId;
   const [dealListSearch, setDealListSearch] = useState('');
-  const [dealOwnerFilter, setDealOwnerFilter] = useState('');
   const [filterConditions, setFilterConditions] = useState<DealFilterCondition[]>([]);
   const [conditionBuilderOpen, setConditionBuilderOpen] = useState(false);
   const [conditionDraft, setConditionDraft] = useState<DealFilterCondition>({
@@ -389,6 +388,7 @@ export default function DealWorkspace({
   const [winReason, setWinReason] = useState('');
   const [moveError, setMoveError] = useState('');
   const [stageChangeRemarks, setStageChangeRemarks] = useState('');
+  const [pendingLeadTelemetryStage, setPendingLeadTelemetryStage] = useState<LeadLifecycleStage | null>(null);
   const [stageContactName, setStageContactName] = useState('');
   const [stageContactEmail, setStageContactEmail] = useState('');
   const [stageContactPhone, setStageContactPhone] = useState('');
@@ -786,7 +786,6 @@ export default function DealWorkspace({
   };
   const listDeals = deals.filter((deal) => {
     if (selectedPipelineFilter && deal.pipelineId !== selectedPipelineFilter) return false;
-    if (dealOwnerFilter && deal.ownerId !== dealOwnerFilter) return false;
     if (filterConditions.some((condition) => !conditionMatches(deal, condition))) return false;
     const vendor = vendors.find((item) => item.id === deal.vendorId)?.name ?? deal.insurer;
     const title = dealTitle(deal);
@@ -1228,18 +1227,21 @@ export default function DealWorkspace({
     setSelectedKey(`deal:${conversion.deal.id}`);
   };
 
-  const changeLeadTelemetryStage = (target: LeadLifecycleStage) => {
+  const changeLeadTelemetryStage = (target: LeadLifecycleStage, confirmedWithoutActivity = false) => {
     if (!selectedLead || (activeRole !== 'admin' && activeRole !== 'sales')) return;
     const currentStage = lifecycleStageForLead(selectedLead, Boolean(progressDeal));
     if (target === currentStage || isTerminalLeadStage(currentStage)) return;
     const hasNextActivity = getNextActivity(activities, { leadId: selectedLead.id, dealId: progressDeal?.id }).state !== 'none';
-    if (!hasNextActivity) {
-      if (company.requireNextActivityForStageChange) {
-        window.alert('Schedule a next activity before moving this lead to another stage.');
-        return;
-      }
-      if (!window.confirm('No next activity is scheduled. Continue with this stage change?')) return;
+    if (!hasNextActivity && !confirmedWithoutActivity) {
+      setPendingLeadTelemetryStage(target);
+      return;
     }
+    if (!hasNextActivity && company.requireNextActivityForStageChange) {
+      setPendingLeadTelemetryStage(null);
+      setContactError('Schedule a next activity before moving this lead to another stage.');
+      return;
+    }
+    setPendingLeadTelemetryStage(null);
     if (target === 'Converted to deal') {
       convertLead();
       return;
@@ -1800,20 +1802,6 @@ export default function DealWorkspace({
               {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
             </select>
             <Badge variant="brand">{toolbarDealCount} {toolbarDealCount === 1 ? 'deal' : 'deals'}</Badge>
-            <select className="input !w-auto max-w-40 !py-1.5 !text-xs" value={dealOwnerFilter}
-              onChange={(event) => setDealOwnerFilter(event.target.value)} aria-label="Filter deals by owner">
-              <option value="">All owners</option>
-              {users.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
-            </select>
-            {dealOwnerFilter && <button type="button" className="rounded-full border border-ink-600 px-2 py-1 text-[10px] text-muted hover:text-white"
-              onClick={() => setDealOwnerFilter('')} aria-label="Clear owner filter">
-              {users.find((person) => person.id === dealOwnerFilter)?.name ?? formatStaffIdentifier(dealOwnerFilter)}<X size={11} className="ml-1 inline" />
-            </button>}
-            <label className="relative min-w-28 flex-1 md:max-w-56">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-              <input className="input !py-1.5 pl-9 !text-xs" type="search" value={dealListSearch} onChange={(event) => setDealListSearch(event.target.value)}
-                placeholder="Search deals" aria-label="Search deals" />
-            </label>
             <button type="button" className={`btn-ghost !px-3 !py-1.5 !text-xs ${conditionBuilderOpen ? 'border-brand-400 text-white' : ''}`}
               onClick={() => setConditionBuilderOpen((open) => !open)}><Plus size={13} /> Add condition</button>
             {onOpenFilters && <button type="button" className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={onOpenFilters}><Filter size={13} /> Filter</button>}
@@ -2729,6 +2717,25 @@ export default function DealWorkspace({
           </div>
           {addContactError && <p role="alert" className="sm:col-span-2 text-xs text-hot">{addContactError}</p>}
         </form>
+      </Modal>
+      <Modal open={Boolean(pendingLeadTelemetryStage)}
+        onClose={() => setPendingLeadTelemetryStage(null)}
+        title={company.requireNextActivityForStageChange ? 'Schedule an activity first' : 'Continue without an activity?'}
+        subtitle={selectedLead?.client}
+        footer={company.requireNextActivityForStageChange
+          ? <button type="button" className="btn-primary" onClick={() => setPendingLeadTelemetryStage(null)}>Got it</button>
+          : <>
+            <button type="button" className="btn-ghost" onClick={() => setPendingLeadTelemetryStage(null)}>Cancel</button>
+            <button type="button" className="btn-primary" onClick={() => {
+              if (pendingLeadTelemetryStage) changeLeadTelemetryStage(pendingLeadTelemetryStage, true);
+            }}>Continue</button>
+          </>}>
+        <div className="flex items-start gap-3 text-sm text-muted">
+          <AlertTriangle size={18} className="mt-0.5 shrink-0 text-warm" />
+          <p>{company.requireNextActivityForStageChange
+            ? 'Schedule a next activity before moving this lead to another stage.'
+            : 'No next activity is scheduled. Do you want to continue with this stage change?'}</p>
+        </div>
       </Modal>
       <Modal open={Boolean(activityModal)} onClose={() => setActivityModal(null)}
         title={activityModal === 'meeting' ? 'Schedule / Log Meeting'

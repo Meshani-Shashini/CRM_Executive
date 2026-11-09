@@ -229,3 +229,17 @@ export function lifecycleStageForLead(
 export function isTerminalLeadStage(stage: LeadLifecycleStage) {
   return (LEAD_TERMINAL_STAGES as readonly string[]).includes(stage);
 }
+
+export function activeUnconvertedLeads(leads: Lead[], deals: { id: string; leadId: string }[]) {
+  return leads.filter((lead) => {
+    const status = String(lead.status).trim().toUpperCase();
+    if (['CONVERTED', 'CLOSED', 'COMPLETED', 'LOST', 'ARCHIVED'].includes(status)) return false;
+    const funnelStage = String(lead.funnelStage).trim().toLowerCase();
+    if (['converted', 'closed', 'lost'].some((state) => funnelStage.includes(state))) return false;
+
+    const hasLinkedDeal = Boolean(lead.dealId?.trim()) || deals.some((deal) =>
+      deal.id === lead.id || deal.id === lead.dealId || deal.leadId === lead.id,
+    );
+    return !isTerminalLeadStage(lifecycleStageForLead(lead, hasLinkedDeal));
+  });
+}
