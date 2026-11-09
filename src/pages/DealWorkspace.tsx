@@ -335,6 +335,7 @@ export default function DealWorkspace({
   const [workspaceView, setWorkspaceView] = useState<'list' | 'kanban' | 'inspection' | DealsView>(() => {
     if (!dealsPageMode) return 'list';
     const view = hashParams().get('view');
+    if (view === 'inspection') return view;
     return view === 'list' || view === 'forecast' || view === 'archive' || view === 'pipeline' ? view : 'pipeline';
   });
   const [kanbanPipelineId, setKanbanPipelineId] = useState('');

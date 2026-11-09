@@ -13,6 +13,7 @@ import QSlipsPage from './pages/QSlipsPage';
 import MiraPage from './pages/MiraPage';
 import SettingsPage from './pages/SettingsPage';
 import CalendarPage from './pages/CalendarPage';
+import RenewalsPage from './pages/RenewalsPage';
 import Placeholder from './pages/Placeholder';
 import PipelinesPage from './pages/PipelinesPage';
 import FunnelsPage from './pages/FunnelsPage';
@@ -61,7 +62,6 @@ const placeholders: Partial<Record<NavKey, { title: string; subtitle: string }>>
   quotations: { title: 'Quotations', subtitle: 'Track quotations issued to clients and insurers.' },
   'internal-slips': { title: 'Internal Slips', subtitle: 'Internal underwriting slips and cover notes.' },
   'pay-requests': { title: 'Payment Requests', subtitle: 'Outbound payment requests to finance.' },
-  renewals: { title: 'Renewals', subtitle: 'Upcoming policy renewals with 30/60/90 day tracking.' },
   'info-requests': { title: 'Info Requests', subtitle: 'Requests for additional underwriting information.' },
   'rate-cards': { title: 'Commission Rate Cards', subtitle: 'Insurer commission and brokerage rate cards.' },
   targets: { title: 'Targets', subtitle: 'Monthly and annual targets for sales staff.' },
@@ -148,6 +148,7 @@ function Shell() {
       case 'settings': return <SettingsPage />;
       case 'audit-log': return <SettingsPage initialTab="audit" />;
       case 'calendar': return <CalendarPage />;
+      case 'renewals': return <RenewalsPage />;
       case 'pipelines': return <PipelinesPage />;
       case 'funnels': return <FunnelsPage />;
       default: {

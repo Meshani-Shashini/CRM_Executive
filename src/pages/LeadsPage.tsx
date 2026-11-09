@@ -101,7 +101,7 @@ export default function LeadsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [newLeadOpen, setNewLeadOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
-  const [inspectedLeadId, setInspectedLeadId] = useState('');
+  const [inspectedLeadId, setInspectedLeadId] = useState(() => hashParams().get('id') ?? '');
   const [pendingLeadStageChange, setPendingLeadStageChange] = useState<{ from: LeadLifecycleStage; to: LeadLifecycleStage } | null>(null);
   const [stageChangeRemarks, setStageChangeRemarks] = useState('');
   const [newOrganizationOpen, setNewOrganizationOpen] = useState(false);
@@ -205,6 +205,7 @@ export default function LeadsPage() {
       setStageFilter(params.get('stage') ?? '');
       setOwnerFilter(params.get('owner') ?? '');
       setLeadIdFilter(params.get('id') ?? '');
+      setInspectedLeadId(params.get('id') ?? '');
       setStatusFilter(params.get('status') ?? '');
       setInsuranceClassFilter(params.get('insuranceClass') ?? '');
     };
