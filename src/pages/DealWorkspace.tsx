@@ -6,8 +6,12 @@ import {
 import Badge from '../components/ui/Badge';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
 import LeadContactSlaBadge from '../components/LeadContactSlaBadge';
+import StageStepper from '../components/deal/StageStepper';
 import Modal from '../components/ui/Modal';
 import TableRowActionsMenu from '../components/ui/TableRowActionsMenu';
+import TableShell from '../components/table/TableShell';
+import StageMenu from '../components/table/StageMenu';
+import { OwnerCell, ProductCodePill, StagePill, TableDateCell } from '../components/table/TableCells';
 import ActivityTimelineItem from '../components/ActivityTimelineItem';
 import { useApp } from '../store/AppContext';
 import { TENANT_ID } from '../lib/supabase';
@@ -21,24 +25,16 @@ import {
 } from '../utils/stageSla';
 import { linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
 import { linkDealToLead } from '../utils/dealFactory';
+import { getPipelineLossReasons } from '../data/pipelineStageTemplates';
 import {
   appendLeadStageTransition, buildLeadTelemetryStages, LEAD_LIFECYCLE_STAGES,
   isLeadLifecycleStage, isTerminalLeadStage, lifecycleStageForLead,
   parseLeadStageTransition, type LeadLifecycleStage,
 } from '../utils/leadLifecycle';
 import { formatStaffIdentifier } from '../utils/staff';
-import { getLeadContactedAt } from '../utils/leadSla';
+import { calculateLeadContactSla, getContactMadeSlaTargetDays, getLeadContactedAt } from '../utils/leadSla';
 import { buildLeadConversion } from '../utils/leadConversion';
-import { dashboardHref, promptQuotationRequestForDeal } from '../utils/navigation';
-
-const LOSS_REASONS = [
-  'Price / premium',
-  'Competitor selected',
-  'Coverage not suitable',
-  'Client withdrew',
-  'Underwriting declined',
-  'Other',
-];
+import { promptQuotationRequestForDeal } from '../utils/navigation';
 
 interface TimelineEntry {
   key: string;
@@ -68,16 +64,14 @@ const EMPTY_CONTACT_DRAFT: ContactEditorDraft = {
 };
 
 const dealListColumns = [
-  { key: 'id', label: 'Deal ID' },
-  { key: 'title', label: 'Deal title' },
+  { key: 'deal', label: 'Deal' },
   { key: 'client', label: 'Client' },
   { key: 'lead', label: 'Linked Lead' },
   { key: 'pipeline', label: 'Pipeline' },
   { key: 'stage', label: 'Deal Stage' },
-  { key: 'product', label: 'Insurance type/product' },
+  { key: 'product', label: 'Insurance' },
   { key: 'vendor', label: 'Vendor' },
-  { key: 'value', label: 'Value + currency' },
-  { key: 'win', label: 'Win %' },
+  { key: 'value', label: 'Value' },
   { key: 'owner', label: 'Owner' },
   { key: 'close', label: 'Expected close' },
   { key: 'actions', label: 'Actions' },
@@ -251,8 +245,8 @@ export default function DealWorkspace({
   const [dealListSearch, setDealListSearch] = useState('');
   const [openDealActionsId, setOpenDealActionsId] = useState('');
   const [dealActionsAnchor, setDealActionsAnchor] = useState<HTMLButtonElement | null>(null);
-  const [query, setQuery] = useState('');
-  const [productFilter, setProductFilter] = useState('');
+  const [openStageMenuId, setOpenStageMenuId] = useState('');
+  const [stageMenuAnchor, setStageMenuAnchor] = useState<HTMLButtonElement | null>(null);
   const [activityModal, setActivityModal] = useState<'meeting' | 'note' | 'quote' | 'task' | null>(null);
   const [moveStage, setMoveStage] = useState<PipelineStage | null>(null);
   const [lossReason, setLossReason] = useState('');
@@ -281,15 +275,9 @@ export default function DealWorkspace({
   const records = useMemo(() => [
     ...deals.map((deal) => ({ kind: 'deal' as const, item: deal, key: `deal:${deal.id}` })),
     ...leads.map((lead) => ({ kind: 'lead' as const, item: lead, key: `lead:${lead.id}` })),
-  ].filter(({ item }) => {
-    const productLabel = 'product' in item ? item.product : item.productCode;
-    const stageLabel = 'stage' in item ? item.stage : item.funnelStage;
-    const searchable = `${item.client} ${productLabel} ${stageLabel} ${item.id}`.toLowerCase();
-    return searchable.includes(query.toLowerCase())
-      && (!productFilter || item.productCode === productFilter);
-  }), [deals, leads, productFilter, query]);
+  ], [deals, leads]);
 
-  const selected = records.find((record) => record.key === selectedKey) ?? records[0];
+  const selected = records.find((record) => record.key === selectedKey);
   const selectedDeal = selected?.kind === 'deal' ? selected.item as Deal : undefined;
   const selectedLead = selected?.kind === 'lead' ? selected.item as Lead : undefined;
   const selectedItem = selectedDeal ?? selectedLead;
@@ -355,6 +343,11 @@ export default function DealWorkspace({
       ?? (Number.isFinite(progressDeal.probability) ? progressDeal.probability : undefined)
     : undefined;
   const currentStage = stages.find((stage) => stage.name === progressDeal?.stage);
+  const dealStageStatus = progressDeal?.disposition === 'lost' || isLostStage(currentStage ?? progressDeal?.stage ?? '')
+    ? 'lost'
+    : progressDeal?.disposition === 'won' || isBoundStage(currentStage ?? progressDeal?.stage ?? '')
+      ? 'won'
+      : 'open';
   const relatedLeadId = selectedDeal?.leadId ?? selectedLead?.id;
   const relatedDealId = selectedDeal?.id ?? selectedLead?.dealId ?? progressDeal?.id;
   const selectedActivities = activities
@@ -563,6 +556,15 @@ export default function DealWorkspace({
       targetDays: recordStage.stagnationDaysThreshold,
     };
   };
+  const selectedSlaStatus = selected
+    ? selected.kind === 'lead' && !progressDeal
+      ? calculateLeadContactSla(
+        selected.item as Lead,
+        getContactMadeSlaTargetDays(selected.item as Lead, pipelineStages),
+        clockNow,
+      )
+      : recordSlaStatus(selected)
+    : undefined;
   const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
   const dealReferences = useMemo(() => {
     const sortedDeals = [...allDeals].sort((left, right) => {
@@ -624,15 +626,44 @@ export default function DealWorkspace({
       date: selectedDeal.nextActivityAt,
       category: 'task' as const,
     }] : []),
-    ...(selectedLead ? [] : selectedHistory).map((entry) => {
+    ...selectedHistory.map((entry) => {
+      const fromStage = pipelineStages.find((stage) => stage.id === entry.fromStageId)?.name ?? 'Start';
       const target = pipelineStages.find((stage) => stage.id === entry.toStageId)?.name ?? 'Pipeline stage';
+      const actor = entry.userName
+        ?? users.find((person) => person.id === entry.userId)?.name
+        ?? (entry.userId === user.id ? user.name : entry.userId ? formatStaffIdentifier(entry.userId) : '');
       return {
         key: entry.id,
-        title: `Stage: ${target}`,
-        description: entry.lossReason ? `Loss reason: ${entry.lossReason}` : entry.details ?? '',
+        title: `Stage changed: ${fromStage} → ${target}`,
+        description: [
+          entry.lossReason ? `Loss reason: ${entry.lossReason}` : '',
+          entry.details ?? '',
+          actor ? `By ${actor}` : '',
+        ].filter(Boolean).join(' · '),
         date: entry.enteredAt,
         category: 'stage' as const,
       };
+    }),
+    ...linkedQuotationRequests.flatMap((request) => {
+      const creator = users.find((person) => person.id === request.createdBy)?.name
+        ?? (request.createdBy === user.id ? user.name : formatStaffIdentifier(request.createdBy));
+      const created = [{
+        key: `quotation-created-${request.id}`,
+        title: `Quotation request created: ${request.ref}`,
+        description: `Status: ${request.status} · By ${creator}`,
+        date: request.createdAt,
+        category: 'proposal' as const,
+      }];
+      const updatedAt = Date.parse(request.updatedAt);
+      const createdAt = Date.parse(request.createdAt);
+      if (!Number.isFinite(updatedAt) || !Number.isFinite(createdAt) || updatedAt <= createdAt) return created;
+      return [...created, {
+        key: `quotation-status-${request.id}-${request.updatedAt}`,
+        title: `Quotation request status changed: ${request.ref}`,
+        description: `Current status: ${request.status}`,
+        date: request.updatedAt,
+        category: 'proposal' as const,
+      }];
     }),
     ...selectedActivities
       .filter((activity) => !(selectedLead && activity.id.startsWith('audit-') && activity.title === 'Lead created'))
@@ -667,7 +698,7 @@ export default function DealWorkspace({
           ...(activity.durationMinutes !== undefined ? { durationMinutes: activity.durationMinutes } : {}),
         };
       }),
-  ].sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
+  ].sort((left, right) => Date.parse(right.date) - Date.parse(left.date));
   const filteredTimelineEntries = timelineFilter === 'all'
     ? timelineEntries
     : timelineEntries.filter((entry) => entry.category === timelineFilter);
@@ -1328,11 +1359,15 @@ export default function DealWorkspace({
               {onOpenFilters && <button type="button" className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={onOpenFilters}><Filter size={13} /> Filters</button>}
             </div>
           </div>
-          <div className="fit-wrap deals-list-fit w-full max-w-full min-w-0 rounded-lg border border-[#1B1E22] bg-ink-950">
-            <table className="table-fixed w-full text-left">
+          <TableShell className="deals-list-fit">
+            <table className="table-fixed w-full leading-tight text-left">
               <colgroup>{dealListColumns.map((column) => <col key={column.key} />)}</colgroup>
-              <thead className="bg-ink-900/70 text-muted">
-                <tr>{dealListColumns.map((column) => <th key={column.key} scope="col" className="px-2 py-2 font-medium">{column.label}</th>)}</tr>
+              <thead className="bg-[#111214] text-[10px] font-semibold text-[#D0D3D9]">
+                <tr>{dealListColumns.map((column) => (
+                  <th key={column.key} scope="col" className="border-b border-[#1B1E22] px-1 py-2 text-left">
+                    {column.key === 'actions' ? <span className="sr-only">{column.label}</span> : column.label}
+                  </th>
+                ))}</tr>
               </thead>
               <tbody>
                 {listDeals.map((deal) => {
@@ -1347,7 +1382,7 @@ export default function DealWorkspace({
                   const isOverdue = stage ? isStageSlaOverdue(enteredAt, stage.stagnationDaysThreshold, clockNow) : false;
                   const vendorName = vendors.find((vendor) => vendor.id === deal.vendorId)?.name ?? deal.insurer ?? 'Not assigned';
                   const dealTitle = lead?.title ?? deal.proposalSummary ?? `${deal.product} placement`;
-                  const leadStage = lead ? lifecycleStageForLead(lead, true) : 'No linked lead';
+                  const linkedLeadTitle = lead?.title ?? (lead ? `${lead.client} lead` : '');
                   const ownerName = users.find((person) => person.id === deal.ownerId)?.name ?? formatStaffIdentifier(deal.ownerId);
                   const terminal = isTerminalDealStage(deal.stage, deal.disposition, stage);
                   const outcome = deal.disposition === 'won' || stage?.isClosedWon
@@ -1355,8 +1390,23 @@ export default function DealWorkspace({
                     : deal.disposition === 'lost' || stage?.isClosedLost
                       ? 'Lost'
                       : terminal ? 'Closed' : 'Open';
+                  const product = products.find((item) => item.code === deal.productCode)
+                    ?? products.find((item) => item.name.trim().toLowerCase() === deal.product.trim().toLowerCase());
+                  const productCode = product?.code ?? deal.productCode ?? deal.product.slice(0, 2).toUpperCase();
+                  const pipelineLabel = pipeline?.code.toUpperCase() === 'COMMERCIAL'
+                    ? 'Commercial'
+                    : pipeline?.code.toUpperCase() === 'SME_VELOCITY'
+                      ? 'SME'
+                      : pipeline?.code.toUpperCase() === 'RENEWALS'
+                        ? 'Renewals'
+                        : pipeline?.name ?? 'Unknown pipeline';
+                  const stageOutcome = stage && isLostStage(stage)
+                    ? 'lost'
+                    : stage && isBoundStage(stage)
+                      ? 'won'
+                      : 'neutral';
                   return (
-                    <tr key={deal.id} role="link" tabIndex={0} aria-label={`Open deal details for ${dealTitle}`}
+                    <tr key={deal.id} data-pipeline-id={deal.pipelineId} role="link" tabIndex={0} aria-label={`Open deal details for ${dealTitle}`}
                       onClick={() => { setSelectedKey(`deal:${deal.id}`); setWorkspaceView('inspection'); }}
                       onKeyDown={(event) => {
                         if (event.target !== event.currentTarget) return;
@@ -1366,40 +1416,74 @@ export default function DealWorkspace({
                           setWorkspaceView('inspection');
                         }
                       }}
-                      className="cursor-pointer border-t border-ink-700/80 hover:bg-ink-800/70 focus:bg-ink-800/70">
-                      <td data-label={dealListColumns[0].label} className="font-mono text-muted">{dealReferences.get(deal.id) ?? deal.id}</td>
-                      <td data-label={dealListColumns[1].label} className="font-semibold text-white">{dealTitle}</td>
-                      <td data-label={dealListColumns[2].label} className="text-white">{deal.client}</td>
-                      <td data-label={dealListColumns[3].label}>
-                        {lead ? <button type="button" className="text-left text-brand-300 hover:text-brand-200" onClick={(event) => {
+                      className="cursor-pointer border-b border-[#1B1E22] last:border-0 transition-colors hover:bg-[#111214] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-400">
+                      <td data-label={dealListColumns[0].label} className="px-2 py-2 font-semibold text-white">
+                        <span className="block truncate" title={dealTitle}>{dealTitle}</span>
+                        <span className="block truncate text-[10px] font-normal leading-none text-[#8E95A2]" title={dealReferences.get(deal.id) ?? deal.id}>{dealReferences.get(deal.id) ?? deal.id}</span>
+                      </td>
+                      <td data-label={dealListColumns[1].label} className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={deal.client}>{deal.client}</span></td>
+                      <td data-label={dealListColumns[2].label} className="min-w-0 overflow-hidden px-2 py-2 font-normal text-[#E1E2E5]">
+                        {lead ? <button type="button" className="block w-full min-w-0 truncate text-left text-[#E1E2E5] hover:text-white" title={`${linkedLeadTitle} · ${lead.id}`} aria-label={`Open linked lead ${linkedLeadTitle} (${lead.id})`} onClick={(event) => {
                           event.stopPropagation();
                           setSelectedKey(`lead:${lead.id}`);
                           setWorkspaceView('inspection');
-                        }}><span className="block font-mono">{lead.id}</span><span className="block text-muted">{leadStage}</span></button> : <span className="text-hot">Missing lead link</span>}
+                        }}>{linkedLeadTitle}</button> : <span className="block truncate" title="Missing lead link">Missing lead link</span>}
                       </td>
-                      <td data-label={dealListColumns[4].label} className="text-muted">{pipeline?.name ?? 'Unknown pipeline'}</td>
-                      <td data-label={dealListColumns[5].label}>
-                        <div className="deal-list-stage-cell">
-                          <select className="input deal-list-stage-select" title={stage?.name} value={stage?.id ?? ''} disabled={!stage || (activeRole !== 'admin' && activeRole !== 'sales')}
-                            aria-label={`Change stage for ${dealTitle}`} onClick={(event) => event.stopPropagation()} onChange={(event) => {
-                              const target = dealStages.find((item) => item.id === event.target.value);
-                              if (target) requestStageChange(target, deal);
-                            }}>
-                            {dealStages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                          </select>
-                          <Badge variant={isOverdue ? 'hot' : 'muted'}>{stage?.stagnationDaysThreshold ? `${elapsedDays ?? 0}/${stage.stagnationDaysThreshold}d` : 'No SLA'}</Badge>
+                      <td data-label={dealListColumns[3].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
+                        <span className="inline-flex max-w-full items-center rounded-full border border-[#2A2E35] bg-[#17191C] px-2 py-0.5 text-[10px] font-normal text-[#E1E2E5]" title={pipeline?.name ?? 'Unknown pipeline'}>{pipelineLabel}</span>
+                      </td>
+                      <td data-label={dealListColumns[4].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
+                        <div className="flex min-w-0 items-center gap-1">
+                          <button
+                            type="button"
+                            className="deal-stage-trigger"
+                            title={`${stage?.name ?? deal.stage} · ${deal.probability}% win probability`}
+                            aria-label={`Change stage for ${dealTitle}`}
+                            aria-haspopup="menu"
+                            aria-expanded={openStageMenuId === deal.id}
+                            disabled={!stage || (activeRole !== 'admin' && activeRole !== 'sales')}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (openStageMenuId === deal.id) {
+                                setOpenStageMenuId('');
+                                setStageMenuAnchor(null);
+                              } else {
+                                setOpenStageMenuId(deal.id);
+                                setStageMenuAnchor(event.currentTarget);
+                              }
+                            }}
+                          >
+                            <StagePill stage={stage?.name ?? deal.stage} outcome={stageOutcome} truncate />
+                            <span className={`deal-stage-sla ${isOverdue ? 'deal-stage-sla-overdue' : ''}`} title={stage?.stagnationDaysThreshold ? `Stage SLA: ${elapsedDays ?? 0} of ${stage.stagnationDaysThreshold} days` : 'No stage SLA configured'}>
+                              {stage?.stagnationDaysThreshold ? `${elapsedDays ?? 0}/${stage.stagnationDaysThreshold}d` : 'No SLA'}
+                            </span>
+                          </button>
+                          <StageMenu
+                            open={openStageMenuId === deal.id}
+                            anchor={stageMenuAnchor}
+                            label={`Stages for ${dealTitle}`}
+                            stages={dealStages}
+                            onClose={() => {
+                              setOpenStageMenuId('');
+                              setStageMenuAnchor(null);
+                            }}
+                            onSelect={(target) => {
+                              setOpenStageMenuId('');
+                              setStageMenuAnchor(null);
+                              requestStageChange(target, deal);
+                            }}
+                          />
                         </div>
                       </td>
-                      <td data-label={dealListColumns[6].label} className="text-muted">{deal.productCode ?? deal.product}</td>
-                      <td data-label={dealListColumns[7].label} className="text-muted">{vendorName}</td>
-                      <td data-label={dealListColumns[8].label} className="font-semibold text-brand-300">{formatAmount(deal.value, deal.currency ?? 'USD')}</td>
-                      <td data-label={dealListColumns[9].label} className="text-muted">{deal.probability}%</td>
-                      <td data-label={dealListColumns[10].label}>
-                        <span className="deal-list-owner-avatar" title={ownerName}>{avatarCode(ownerName)}</span>
-                        <span className="owner-name">{ownerName}</span>
+                      <td data-label={dealListColumns[5].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><ProductCodePill code={productCode} name={product?.name ?? deal.product} /></td>
+                      <td data-label={dealListColumns[6].label} className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={vendorName}>{vendorName}</span></td>
+                      <td data-label={dealListColumns[7].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
+                        <span className="block truncate font-semibold" title={formatAmount(deal.value, deal.currency ?? 'USD')}>{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
+                        <span className="block text-[10px] leading-none text-[#8E95A2]">{deal.probability}%</span>
                       </td>
-                      <td data-label={dealListColumns[11].label} className="whitespace-nowrap text-muted">{deal.closeDate ? formatDate(deal.closeDate) : '—'}</td>
-                      <td data-label={dealListColumns[12].label} className="relative text-right" onClick={(event) => event.stopPropagation()}>
+                      <td data-label={dealListColumns[8].label} className="px-2 py-2 font-normal text-[#E1E2E5]"><OwnerCell name={ownerName} /></td>
+                      <td data-label={dealListColumns[9].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><TableDateCell value={deal.closeDate} /></td>
+                      <td data-label={dealListColumns[10].label} className="relative px-1 py-2 text-right" onClick={(event) => event.stopPropagation()}>
                         <button type="button" className="rounded-md p-1.5 text-muted hover:bg-ink-700 hover:text-white" aria-label={`Actions for ${dealTitle}`} aria-haspopup="menu" aria-expanded={openDealActionsId === deal.id}
                           onClick={(event) => {
                             if (openDealActionsId === deal.id) {
@@ -1417,7 +1501,7 @@ export default function DealWorkspace({
                         >
                           {onEditDeal && <button type="button" role="menuitem" className="table-row-actions-item text-white hover:bg-ink-700" onClick={() => { setOpenDealActionsId(''); setDealActionsAnchor(null); onEditDeal(deal); }}><Pencil size={12} /> Edit deal</button>}
                           {onDeleteDeal && <button type="button" role="menuitem" className="table-row-actions-item text-hot hover:bg-ink-700" onClick={() => { setOpenDealActionsId(''); setDealActionsAnchor(null); onDeleteDeal(deal); }}><Trash2 size={12} /> Delete deal</button>}
-                          <span className="block px-3 py-2 text-[10px] text-muted">{outcome}</span>
+                          <span className="block whitespace-nowrap px-3 py-2 text-[10px] text-muted">{outcome}</span>
                         </TableRowActionsMenu>
                       </td>
                     </tr>
@@ -1426,7 +1510,7 @@ export default function DealWorkspace({
                 {!listDeals.length && <tr className="deals-list-empty"><td data-label={dealListColumns[0].label} colSpan={dealListColumns.length} className="px-4 py-8 text-center text-muted">No deals match these filters.</td></tr>}
               </tbody>
             </table>
-          </div>
+          </TableShell>
         </div>
       ) : workspaceView === 'kanban' ? (
         <div className="space-y-3">
@@ -1467,62 +1551,16 @@ export default function DealWorkspace({
           </div> : <div className="glass rounded-xl p-6 text-center text-sm text-muted">Choose a pipeline with configured stages to view its Kanban board.</div>}
         </div>
       ) : (
-    <div className={`grid min-h-[calc(100vh-8rem)] grid-cols-1 gap-3 xl:h-[calc(100vh-8rem)] xl:min-h-0 ${selectedLead ? 'xl:grid-cols-1' : 'xl:grid-cols-[280px_minmax(0,1fr)]'}`}>
-      {!selectedLead && <aside className="glass flex min-h-[320px] flex-col overflow-hidden rounded-2xl xl:min-h-0">
-        <div className="border-b border-ink-600 p-4">
-          <div className="flex items-center justify-between">
-            <div><h2 className="font-semibold text-white">Deals & Leads</h2><p className="mt-1 text-xs text-muted">{records.length} records</p></div>
-          </div>
-          <input className="input mt-3" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search client, product, stage…" aria-label="Search deals and leads" />
-          <select className="input mt-2" value={productFilter} onChange={(event) => setProductFilter(event.target.value)} aria-label="Filter by product">
-            <option value="">All products</option>
-            {products.map((product) => <option key={product.code} value={product.code}>{product.code} · {product.name}</option>)}
-          </select>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {records.map((record) => {
-            const { kind, item, key } = record;
-            const slaStatus = recordSlaStatus(record);
-            const itemStage = kind === 'deal'
-              ? (item as Deal).stage
-              : lifecycleStageForLead(item as Lead, Boolean(allDeals.some((deal) =>
-                deal.id === (item as Lead).dealId || deal.leadId === (item as Lead).id)));
-            return (
-            <button key={key} type="button" onClick={() => setSelectedKey(key)}
-              className={`w-full border-b border-ink-700/60 p-3 text-left transition ${selected?.key === key ? 'border-l-2 border-l-brand-400 bg-brand-500/10' : 'hover:bg-ink-750/40'}`}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="truncate text-[13px] font-semibold text-white">{item.client}</div>
-                  <div className="mt-1 truncate text-xs text-muted">{kind === 'deal' ? (item as Deal).product : (item as Lead).title}</div>
-                </div>
-                <Badge variant={kind === 'deal' ? 'brand' : 'muted'}>{kind}</Badge>
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-1">
-                <span className="pill border border-ink-600 bg-ink-800 text-muted !px-2 !py-0.5">{item.productCode ?? 'No product'}</span>
-                <Badge variant={stageBadgeTone(kind === 'deal'
-                  ? pipelineStages.find((stage) => stage.pipelineId === (item as Deal).pipelineId && stage.name === itemStage) ?? itemStage
-                  : itemStage)}>{itemStage}</Badge>
-                {slaStatus.overdue && <Badge variant="hot"><Clock3 size={11} /> SLA overdue</Badge>}
-              </div>
-              <div className="mt-2 text-xs text-brand-300">
-                {formatAmount(kind === 'deal' ? (item as Deal).value : (item as Lead).value ?? (item as Lead).premium, kind === 'deal' ? (item as Deal).currency : (item as Lead).currency ?? 'MVR')}
-              </div>
-            </button>
-            );
-          })}
-          {records.length === 0 && <div className="p-5 text-center text-sm text-muted">No matching deals or leads.</div>}
-        </div>
-      </aside>}
-
-      <main className={`glass min-h-[460px] min-w-0 overflow-y-auto rounded-2xl px-3 py-1.5 sm:px-4 sm:py-1.5 xl:min-h-0 ${selectedLead ? 'flex flex-col' : ''}`}>
+    <main className={`glass min-h-[460px] min-w-0 overflow-y-auto rounded-2xl px-3 py-1.5 sm:px-4 sm:py-1.5 xl:min-h-0 ${selectedLead ? 'flex flex-col' : ''}`}>
         {!selectedItem ? (
           <div className="flex h-full min-h-64 flex-col items-center justify-center text-center">
-            <ShieldCheck size={30} className="text-brand-400" /><h2 className="mt-3 font-semibold text-white">Your placement workspace</h2>
-            <p className="mt-1 text-sm text-muted">Select a lead or deal to see its complete lifecycle and activity.</p>
+            <ShieldCheck size={30} className="text-brand-400" /><h2 className="mt-3 font-semibold text-white">No record selected</h2>
+            <p className="mt-1 text-sm text-muted">Choose a deal from List or Kanban to open its workspace.</p>
+            <button type="button" className="btn-ghost mt-3 !py-1.5" onClick={() => setWorkspaceView('list')}>Go to List</button>
           </div>
         ) : <>
           <div className="order-0 flex flex-wrap items-center justify-between gap-2 border-b border-ink-600 pb-2">
-            <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               <Building2 size={17} className="shrink-0 text-brand-300" />
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-1.5"><h1 className="text-lg font-semibold text-white">{selectedItem.client}</h1><Badge variant={selectedDeal ? 'brand' : 'muted'}>{selectedDeal ? 'Deal' : 'Lead'}</Badge><Badge variant={stageBadgeTone(selectedDeal?.stage ?? (selectedLead ? lifecycleStageForLead(selectedLead, Boolean(progressDeal)) : ''))}>{selectedDeal?.stage ?? (selectedLead ? lifecycleStageForLead(selectedLead, Boolean(progressDeal)) : '')}</Badge>{selectedLead && <><LeadTemperatureControl
@@ -1543,12 +1581,20 @@ export default function DealWorkspace({
                 </div>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="ml-auto flex shrink-0 items-center gap-1.5">
               <div className="flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-1" role="tablist" aria-label="Deal workspace views">
                 <button type="button" role="tab" aria-label="Kanban view" title="Kanban view" aria-selected={false} onClick={() => setWorkspaceView('kanban')} className="rounded-md p-2 text-muted transition hover:text-white"><Columns3 size={14} /></button>
                 <button type="button" role="tab" aria-label="Inspection view" title="Inspection view" aria-selected={true} onClick={() => setWorkspaceView('inspection')} className="rounded-md bg-[#1B1E22] p-2 text-white transition"><List size={14} /></button>
               </div>
-              {onClose && <button type="button" aria-label="Back to leads" title="Back to leads" className="btn-ghost !px-2 !py-1.5" onClick={onClose}><ArrowLeft size={14} /></button>}
+              <button
+                type="button"
+                aria-label={onClose ? 'Back to leads' : 'Back to deals'}
+                title={onClose ? 'Back to leads' : 'Back to deals'}
+                className="btn-ghost !px-2 !py-1.5"
+                onClick={onClose ?? (() => setWorkspaceView('list'))}
+              >
+                <ArrowLeft size={14} />
+              </button>
               {(activeRole === 'admin' || activeRole === 'sales') && selectedLead && onEditLead && <button type="button" aria-label="Edit lead" title="Edit lead" className="btn-ghost !px-2 !py-1.5" onClick={() => onEditLead(selectedLead)}><Pencil size={14} /></button>}
               {selectedDeal && onEditDeal && <button type="button" aria-label="Edit deal" title="Edit deal" className="btn-ghost !px-2 !py-1.5" onClick={() => onEditDeal(selectedDeal)}><Pencil size={14} /></button>}
               {activeRole === 'admin' && selectedLead && onDeleteLead && <button type="button" aria-label="Delete lead" title="Delete lead" className="btn-ghost !px-2 !py-1.5 text-hot" onClick={() => onDeleteLead(selectedLead)}><Trash2 size={14} /></button>}
@@ -1556,7 +1602,7 @@ export default function DealWorkspace({
             </div>
           </div>
 
-          <section aria-label={selectedLead ? 'Lead telemetry stage tracker' : 'Placement telemetry stage tracker'} className={`telemetry-panel relative w-full ${selectedLead ? 'order-4' : 'order-1'} mt-2 min-w-0 rounded-xl px-2 py-3`}>
+          {selectedLead && <section aria-label="Lead telemetry stage tracker" className="telemetry-panel relative order-4 mt-2 w-full min-w-0 rounded-xl px-2 py-3">
             <h2 className="sr-only">{selectedLead ? 'Lead telemetry' : 'Placement telemetry'}</h2>
             {stageTimeline.length ? <>
               <div className="w-full min-w-0 overflow-x-auto py-1">
@@ -1610,8 +1656,8 @@ export default function DealWorkspace({
                           <button type="button" disabled={selectedLead
                             ? (activeRole !== 'admin' && activeRole !== 'sales') || isTerminalLeadStage(lifecycleStageForLead(selectedLead, Boolean(progressDeal)))
                             : !pipelineStage || !progressDeal || stage.active || isTerminalDealStage(
-                              selectedDeal?.stage ?? '',
-                              selectedDeal?.disposition,
+                              progressDeal.stage,
+                              progressDeal.disposition,
                               currentStage,
                             )}
                             onClick={() => {
@@ -1690,37 +1736,7 @@ export default function DealWorkspace({
                 </ol>}
                 {selectedLead && contactError && <p role="alert" className="mt-2 text-xs text-hot">{contactError}</p>}
               </div></> : <p className="py-1 text-[10px] text-muted">No stages are configured for this pipeline.</p>}
-          </section>
-
-          <section aria-label="Lead 360" className="order-2 mt-3 rounded-xl border border-ink-600 bg-ink-900/30 p-4">
-            <h2 className="mb-3 text-sm font-semibold text-white">Lead 360 · Lead → Deal → Quotation Requests</h2>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="min-w-0">
-                <div className="mb-1 text-[10px] uppercase tracking-wide text-muted">Lead</div>
-                {linkedLead
-                  ? <button type="button" className="block max-w-full truncate text-left text-sm text-brand-300 hover:text-white" onClick={() => setSelectedKey(`lead:${linkedLead.id}`)}>{linkedLead.title ?? linkedLead.client}</button>
-                  : <div className="text-sm text-muted">No linked lead</div>}
-              </div>
-              <div className="min-w-0">
-                <div className="mb-1 text-[10px] uppercase tracking-wide text-muted">Deal</div>
-                {progressDeal
-                  ? <button type="button" className="block max-w-full truncate text-left text-sm text-brand-300 hover:text-white" onClick={() => setSelectedKey(`deal:${progressDeal.id}`)}>{progressDeal.client} · {progressDeal.product}</button>
-                  : <div className="text-sm text-muted">No linked deal</div>}
-              </div>
-              <div className="min-w-0">
-                <div className="mb-1 text-[10px] uppercase tracking-wide text-muted">Quotation Requests</div>
-                {linkedQuotationRequests.length ? (
-                  <div className="space-y-1">
-                    {linkedQuotationRequests.map((request) => (
-                      <a key={request.id} href={dashboardHref('qslips', { requestId: request.id })} className="flex items-center justify-between gap-2 text-sm text-brand-300 hover:text-white">
-                        <span className="truncate">{request.ref}</span><Badge variant={request.status === 'Responses received' ? 'warm' : request.status === 'Closed' ? 'win' : request.status === 'Sent' ? 'brand' : 'muted'}>{request.status}</Badge>
-                      </a>
-                    ))}
-                  </div>
-                ) : <div className="text-sm text-muted">No quotation requests</div>}
-              </div>
-            </div>
-          </section>
+          </section>}
 
           {selectedLead ? (
             <>
@@ -1767,7 +1783,7 @@ export default function DealWorkspace({
             </section>
             </>
           ) : <>
-          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          <div data-testid="deal-detail-cards" className="mt-3 grid gap-3 lg:grid-cols-2">
             <section className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
               <h2 className="mb-3 text-sm font-semibold text-white">Client & Contact Details</h2>
             <div className="grid grid-cols-2 gap-x-4 gap-y-2">
@@ -1825,7 +1841,19 @@ export default function DealWorkspace({
             </section>
           </div>
           </>}
-          <section className={`${selectedLead ? 'order-5' : ''} mt-4 min-w-0 border-t border-ink-600 pt-3`}>
+          {selectedDeal && <section data-testid="deal-stage-stepper" aria-label="Deal stage tracker" className="mt-3 min-w-0 rounded-xl border border-ink-600 bg-ink-900/30 px-2 py-3 sm:px-4">
+            <StageStepper
+              pipelineStages={stages}
+              currentStageId={currentStage?.id}
+              dealStatus={dealStageStatus}
+              lossReason={selectedDeal.lossReason}
+              stageEnteredAt={enteredAt}
+              now={clockNow}
+              canEdit={activeRole === 'admin' || activeRole === 'sales'}
+              onSelect={(target) => requestStageChange(target, selectedDeal)}
+            />
+          </section>}
+          <section data-testid="workspace-activity" className={`${selectedLead ? 'order-5' : ''} mt-4 min-w-0 border-t border-ink-600 pt-3`}>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Clock3 size={15} className="text-brand-300" /> Activity</h2>
@@ -1837,6 +1865,22 @@ export default function DealWorkspace({
                 <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('note')}><Plus size={13} /> Note</button>
                 <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('task')}><Check size={13} /> Task</button>
               </div>
+            </div>
+            <div data-testid="activity-summary" aria-label="Record summary" className="mb-4 flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-ink-700 bg-ink-950/50 px-3 py-2 text-xs">
+              <Badge variant={selectedDeal ? 'brand' : 'muted'}>{selectedDeal ? 'Deal' : 'Lead'}</Badge>
+              <Badge variant={stageBadgeTone(selectedDeal?.stage ?? (selectedLead ? lifecycleStageForLead(selectedLead, Boolean(progressDeal)) : ''))}>
+                {selectedDeal?.stage ?? (selectedLead ? lifecycleStageForLead(selectedLead, Boolean(progressDeal)) : '')}
+              </Badge>
+              <span className="text-[#E1E2E5]">{selectedProduct?.name ?? selectedDeal?.product ?? selectedLead?.insuranceClass ?? selectedItem?.productCode ?? 'No insurance type'}</span>
+              <span className="font-semibold text-white">
+                {selectedDeal
+                  ? formatAmount(selectedDeal.value, selectedDeal.currency ?? 'USD')
+                  : formatAmount(selectedLead?.value ?? selectedLead?.premium ?? 0, selectedLead?.currency ?? 'MVR')}
+              </span>
+              <span className="text-muted">{users.find((person) => person.id === selectedItem?.ownerId)?.name ?? formatStaffIdentifier(selectedItem?.ownerId ?? '')}</span>
+              <Badge variant={selectedSlaStatus?.overdue ? 'hot' : 'muted'}>
+                <Clock3 size={11} /> {selectedSlaStatus?.overdue ? 'SLA overdue' : selectedSlaStatus ? 'SLA on track' : 'SLA unavailable'}
+              </Badge>
             </div>
             <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filter timeline entries">
               {([
@@ -1916,8 +1960,6 @@ export default function DealWorkspace({
           </section>}
         </>}
       </main>
-
-    </div>
       )}
       <Modal open={addContactOpen} onClose={() => { setAddContactOpen(false); setAddContactError(''); setEditingContactId(''); }}
         title={editingContactId ? 'Edit contact' : 'Add lead contact'} subtitle={selectedItem?.client}
@@ -1999,7 +2041,7 @@ export default function DealWorkspace({
               </label>
             </div>
           </>}
-          {moveStage && isLostStage(moveStage) && <Field label="Loss reason (required)"><select className="input" value={lossReason} onChange={(event) => setLossReason(event.target.value)}><option value="">Select a reason</option>{LOSS_REASONS.map((reason) => <option key={reason}>{reason}</option>)}</select></Field>}
+          {moveStage && isLostStage(moveStage) && <Field label="Loss reason (required)"><select className="input" value={lossReason} onChange={(event) => setLossReason(event.target.value)}><option value="">Select a reason</option>{getPipelineLossReasons(selectedPipeline?.code).map((reason) => <option key={reason}>{reason}</option>)}</select></Field>}
           {moveStage && isBoundStage(moveStage) && <>
             <p className="rounded-lg border border-win/30 bg-win/5 p-3 text-sm text-muted">Confirm that the policy is bound. A pending premium invoice will be created automatically.</p>
             <Field label="Win reason (required)"><textarea className="input min-h-20" value={winReason} onChange={(event) => { setWinReason(event.target.value); setMoveError(''); }} placeholder="Record why the client selected this placement." maxLength={2000} /></Field>

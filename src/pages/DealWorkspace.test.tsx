@@ -61,4 +61,28 @@ describe('Deal list row accessibility', () => {
     act(() => row?.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
     expect(container.querySelector('tr[role="link"]')).toBeNull();
   });
+
+  it('shows a back button in the detail toolbar and returns to the caller', () => {
+    const onClose = vi.fn();
+    act(() => root.render(<DealWorkspace deals={[testDeal]} onClose={onClose} />));
+    const row = container.querySelector<HTMLTableRowElement>('tr[role="link"]');
+    act(() => row?.click());
+
+    const backButton = container.querySelector<HTMLButtonElement>('button[aria-label="Back to leads"]');
+    expect(backButton).not.toBeNull();
+    act(() => backButton?.click());
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('shows an empty Inspection state without a record selector when nothing is selected', () => {
+    act(() => root.render(<DealWorkspace deals={[testDeal]} />));
+    const viewTabs = container.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+    act(() => viewTabs[2]?.click());
+
+    expect(container.textContent).toContain('No record selected');
+    expect(container.querySelector('button[aria-label="Search deals and leads"]')).toBeNull();
+    expect(container.textContent).not.toContain('Deals & Leads');
+    expect(container.textContent).not.toContain('Lead 360');
+    expect(container.textContent).toContain('Go to List');
+  });
 });

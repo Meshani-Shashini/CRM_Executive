@@ -365,6 +365,8 @@ export interface PipelineStage {
   id: string;
   pipelineId: string;
   name: string;
+  shortLabel?: string;
+  purpose?: string;
   stageOrder: number;
   winProbabilityPct: number;
   stagnationDaysThreshold: number;

@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import TableRowActionsMenu from '../components/ui/TableRowActionsMenu';
+import TableShell from '../components/table/TableShell';
+import { OwnerCell, ProductCodePill, StagePill, TableDateCell } from '../components/table/TableCells';
+import { avatarCode } from '../components/table/avatar';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
 import { useApp } from '../store/AppContext';
 import { AlertTriangle, ArrowRight, CalendarDays, CheckCircle2, CircleDot, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, TrendingUp, UserRound, X } from 'lucide-react';
@@ -745,7 +748,7 @@ export default function LeadsPage() {
                     <div className="truncate text-xs text-muted">{lead.client}</div>
                     <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#1E2024] text-[9px] font-semibold text-[#8E95A2]">{avatarCode(ownerName)}</span><span className="truncate">Rep: {ownerName}</span></div>
                     <div className="mt-2 flex flex-wrap gap-1">
-                      <InsuranceBadge code={product?.code ?? lead.productCode} />
+                      <ProductCodePill code={product?.code ?? lead.productCode} name={product?.name} />
                       <LeadTemperatureControl
                         leadName={lead.title ?? lead.client}
                         temperature={lead.temperature ?? 'WARM'}
@@ -793,7 +796,7 @@ export default function LeadsPage() {
           </div>
         </div>
       ) : (
-        <div className="fit-wrap w-full max-w-full min-w-0 rounded-lg border border-[#1B1E22] bg-ink-950">
+        <TableShell>
           <table className="w-full table-fixed leading-tight" aria-label="Leads">
             <colgroup>{leadTableColumns.map((column) => <col key={column.key} />)}</colgroup>
             <thead className="bg-[#111214] font-semibold text-[#D0D3D9]">
@@ -834,13 +837,11 @@ export default function LeadsPage() {
                   <td data-label={leadTableColumns[2].label} className="min-w-0 overflow-hidden px-2 py-2 font-normal text-[#E1E2E5]">
                     <span className="flex min-w-0 flex-nowrap items-center gap-1" title={stage} aria-label={`Stage: ${stage}`}>
                       {isTerminalLeadStage(stage)
-                        ? <span className={`pill inline-flex w-fit max-w-full shrink-0 whitespace-nowrap border !px-2 !py-0.5 text-[10px] leading-none uppercase ${stage === 'Lost' ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]' : 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]'}`} title={stage}>
-                          {stage === 'Converted to deal' ? 'CONVERTED' : stage}
-                        </span>
+                        ? <StagePill stage={stage} outcome={stage === 'Lost' ? 'lost' : 'won'} uppercase />
                         : <span className="min-w-0 flex-1 truncate">{stage}</span>}
                     </span>
                   </td>
-                  <td data-label={leadTableColumns[3].label} className="whitespace-nowrap px-2 py-2 font-normal"><InsuranceBadge code={lead.productCode} /></td>
+                  <td data-label={leadTableColumns[3].label} className="whitespace-nowrap px-2 py-2 font-normal"><ProductCodePill code={lead.productCode} name={products.find((product) => product.code === lead.productCode)?.name} /></td>
                   <td data-label={leadTableColumns[4].label} className="whitespace-nowrap px-1 py-2 font-normal" onClick={(event) => event.stopPropagation()}>
                     <LeadTemperatureControl
                       leadName={lead.title ?? lead.client}
@@ -855,13 +856,10 @@ export default function LeadsPage() {
                     </span>
                   </td>
                   <td data-label={leadTableColumns[6].label} className="px-2 py-2 font-normal">
-                    <span className="flex min-w-0 items-center gap-1.5" title={ownerName}>
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#292B30] text-[9px] font-semibold text-[#A4A6AE]">{avatarCode(ownerName)}</span>
-                      <span className="owner-name truncate text-[10px] text-[#E1E2E5]">{ownerName}</span>
-                    </span>
+                    <OwnerCell name={ownerName} />
                   </td>
-                  <td data-label={leadTableColumns[7].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={tableDate(lead.renewalDate)}>{tableDate(lead.renewalDate)}</span></td>
-                  <td data-label={leadTableColumns[8].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={tableDate(lead.closeDate ?? lead.renewalDate)}>{tableDate(lead.closeDate ?? lead.renewalDate)}</span></td>
+                  <td data-label={leadTableColumns[7].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><TableDateCell value={lead.renewalDate} /></td>
+                  <td data-label={leadTableColumns[8].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><TableDateCell value={lead.closeDate ?? lead.renewalDate} /></td>
                   <td data-label={leadTableColumns[9].label} className="relative px-1 py-2 text-right" onClick={(event) => event.stopPropagation()}>
                     <button type="button" className="rounded-md p-1.5 text-muted transition hover:bg-ink-700 hover:text-white" aria-label={`Actions for ${lead.title ?? lead.client}`} aria-haspopup="menu" aria-expanded={openLeadActionsId === lead.id}
                       onClick={(event) => {
@@ -928,7 +926,7 @@ export default function LeadsPage() {
               {searchedLeads.length === 0 && <tr className="lead-table-empty"><td data-label={leadTableColumns[0].label} colSpan={leadTableColumns.length} className="px-4 py-8 text-center text-muted">No leads found.</td></tr>}
             </tbody>
           </table>
-        </div>
+        </TableShell>
       )}
 
       <Modal
@@ -1251,25 +1249,4 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function SectionHeading({ title }: { title: string }) {
   return <div className="sm:col-span-2 border-b border-ink-700 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-brand-300">{title}</div>;
-}
-
-function InsuranceBadge({ code }: { code: string }) {
-  const normalizedCode = code.slice(0, 2).toUpperCase();
-  const colors = normalizedCode === 'CF' || normalizedCode === 'FY'
-    ? { backgroundColor: '#261414', color: '#D84C4C' }
-    : normalizedCode === 'SH'
-      ? { backgroundColor: '#0E2336', color: '#389FD6' }
-      : normalizedCode === 'TL'
-        ? { backgroundColor: '#10261A', color: '#3AA76D' }
-        : { backgroundColor: '#1A1D21', color: '#8E95A2' };
-  return <span className="pill border border-transparent !px-1.5 !py-0.5" style={colors}>{normalizedCode}</span>;
-}
-
-function avatarCode(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  return (parts.length > 1 ? parts.map((part) => part[0]).slice(0, 2).join('') : (parts[0] ?? '').slice(0, 2)).toUpperCase();
-}
-
-function tableDate(value?: string) {
-  return value ? normalizeDateInput(value) : '';
 }

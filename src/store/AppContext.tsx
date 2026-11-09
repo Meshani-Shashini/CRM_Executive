@@ -7,6 +7,7 @@ import type {
   QuotationRequest, Role, StageHistoryAudit, TaxRate, User, ProductCode, Vendor,
 } from '../types';
 import { COMPANY, PRODUCT_CODES } from '../data/catalogs';
+import { applyPipelineStagePresentation, PIPELINE_STAGE_SEEDS } from '../data/pipelineStageTemplates';
 import { migrateVendorData } from '../data/vendors';
 import {
   createDefaultCustomerLookups,
@@ -222,46 +223,6 @@ const normalizeProduct = (product: ProductCode): ProductCode => {
   };
 };
 
-const PIPELINE_TEMPLATE_STAGE_SEEDS: Record<string, Array<{
-  name: string;
-  winProbabilityPct: number;
-  stagnationDaysThreshold: number;
-  isClosedWon?: boolean;
-  isClosedLost?: boolean;
-  requiresApproval?: boolean;
-}>> = {
-  COMMERCIAL: [
-    { name: 'Fact-Finding & Risk Survey', winProbabilityPct: 20, stagnationDaysThreshold: 10, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-    { name: 'Market Tender & Placing Slip Submission', winProbabilityPct: 40, stagnationDaysThreshold: 14, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-    { name: 'Comparative Analysis & Presentation', winProbabilityPct: 60, stagnationDaysThreshold: 7, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-    { name: 'Underwriter Negotiation & Structuring', winProbabilityPct: 80, stagnationDaysThreshold: 5, isClosedWon: false, isClosedLost: false, requiresApproval: true },
-    { name: 'Policy Bound / Won', winProbabilityPct: 100, stagnationDaysThreshold: 0, isClosedWon: true, isClosedLost: false, requiresApproval: false },
-    { name: 'Lost / Market Declined', winProbabilityPct: 0, stagnationDaysThreshold: 0, isClosedWon: false, isClosedLost: true, requiresApproval: false },
-  ],
-  SME_VELOCITY: [
-    { name: 'Intake & Automated Rating', winProbabilityPct: 25, stagnationDaysThreshold: 2, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-    { name: 'Standard Package Quoted', winProbabilityPct: 50, stagnationDaysThreshold: 3, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-    { name: 'Client Confirmation', winProbabilityPct: 80, stagnationDaysThreshold: 2, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-    { name: 'Payment & Immediate Cover', winProbabilityPct: 100, stagnationDaysThreshold: 0, isClosedWon: true, isClosedLost: false, requiresApproval: false },
-    { name: 'Closed-Lost', winProbabilityPct: 0, stagnationDaysThreshold: 0, isClosedWon: false, isClosedLost: true, requiresApproval: false },
-  ],
-  RENEWALS: [
-    { name: 'Renewal Audit & Loss Review (T-90d)', winProbabilityPct: 30, stagnationDaysThreshold: 10, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-    { name: 'Expiring Carrier Terms / Market Re-tender (T-60d)', winProbabilityPct: 50, stagnationDaysThreshold: 14, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-    { name: 'Renewal Terms Presentation (T-30d)', winProbabilityPct: 70, stagnationDaysThreshold: 7, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-    { name: 'Client Renewal Sign-Off (T-15d)', winProbabilityPct: 90, stagnationDaysThreshold: 5, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-    { name: 'Policy Renewed & Re-Invoiced', winProbabilityPct: 100, stagnationDaysThreshold: 0, isClosedWon: true, isClosedLost: false, requiresApproval: false },
-    { name: 'Lapsed / Lost to Competitor', winProbabilityPct: 0, stagnationDaysThreshold: 0, isClosedWon: false, isClosedLost: true, requiresApproval: false },
-  ],
-  CLAIMS: [
-    { name: 'Claim Notified', winProbabilityPct: 20, stagnationDaysThreshold: 7 },
-    { name: 'Surveyor Assigned', winProbabilityPct: 40, stagnationDaysThreshold: 14 },
-    { name: 'Adjuster Assessment', winProbabilityPct: 60, stagnationDaysThreshold: 30 },
-    { name: 'Underwriter Settlement', winProbabilityPct: 80, stagnationDaysThreshold: 30 },
-    { name: 'Cheque Dispatched', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
-  ],
-};
-
 const LEGACY_STAGE_ALIASES: Record<string, Record<string, string>> = {
   COMMERCIAL: {
     'Lead Identified': 'Fact-Finding & Risk Survey',
@@ -319,15 +280,12 @@ function migratePipelineStageData(pipelines: Pipeline[], pipelineStages: Pipelin
 
   for (const pipeline of pipelines) {
     const code = pipeline.code.toUpperCase();
-    const seed = PIPELINE_TEMPLATE_STAGE_SEEDS[code];
+    const seed = PIPELINE_STAGE_SEEDS[code];
     if (!seed) continue;
     const pipelineStagesForPipeline = dedupedStages.filter((stage) => stage.pipelineId === pipeline.id);
     for (let index = 0; index < seed.length; index += 1) {
       const templateStage = seed[index];
-      const match = pipelineStagesForPipeline.find((stage) => {
-        const migratedName = canonicalStageName(code, stage.name);
-        return migratedName === templateStage.name;
-      });
+      const match = pipelineStagesForPipeline.find((stage) => stage.stageOrder === index + 1);
       if (!match) {
         dedupedStages.push({
           id: `stage-${crypto.randomUUID()}`,
@@ -360,11 +318,9 @@ function migratePipelineStageData(pipelines: Pipeline[], pipelineStages: Pipelin
   }
   const normalizedStages = cleanedStages.map((stage) => {
     const pipelineCode = pipelines.find((pipeline) => pipeline.id === stage.pipelineId)?.code.toUpperCase();
-    const templateStage = pipelineCode
-      ? PIPELINE_TEMPLATE_STAGE_SEEDS[pipelineCode]?.[stage.stageOrder - 1]
-      : undefined;
+    const templateStage = PIPELINE_STAGE_SEEDS[pipelineCode ?? '']?.[stage.stageOrder - 1];
     return templateStage ? {
-      ...stage,
+      ...applyPipelineStagePresentation(stage, pipelineCode),
       isClosedWon: templateStage.isClosedWon,
       isClosedLost: templateStage.isClosedLost,
       requiresApproval: templateStage.requiresApproval,

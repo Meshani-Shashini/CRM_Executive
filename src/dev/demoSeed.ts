@@ -2,6 +2,7 @@ import type {
   Activity, Client, Deal, Invoice, Lead, Pipeline, PipelineStage,
   QuotationRequest, StageHistoryAudit, Vendor,
 } from '../types';
+import { getPipelineStageTemplate } from '../data/pipelineStageTemplates';
 
 const TENANT_ID = 'demo-tenant';
 const OWNER_ID = 'local-development-admin';
@@ -73,12 +74,17 @@ export function createDemoSeed(now = Date.now()): DemoSeed {
     id, code, name, tenantId: TENANT_ID, isActive: true,
   }));
   const pipelineStages: PipelineStage[] = PIPELINE_DEFINITIONS.flatMap((pipeline) =>
-    pipeline.stages.map((stage, index) => ({
-      ...stage,
-      id: `${pipeline.id}-stage-${index + 1}`,
-      pipelineId: pipeline.id,
-      stageOrder: index + 1,
-    })),
+    pipeline.stages.map((stage, index) => {
+      const presentation = getPipelineStageTemplate(pipeline.code, index + 1);
+      return {
+        ...stage,
+        shortLabel: presentation?.shortLabel,
+        purpose: presentation?.purpose,
+        id: `${pipeline.id}-stage-${index + 1}`,
+        pipelineId: pipeline.id,
+        stageOrder: index + 1,
+      };
+    }),
   );
   const vendors: Vendor[] = [
     { id: 'demo-vendor-allied', name: 'Allied Insurance', vendorType: 'Insurer', country: 'Maldives', currency: 'MVR', address: 'Male', email: 'allied@example.test', phone: '+960 7770001', status: 'active', createdAt: timestamp, contacts: [] },

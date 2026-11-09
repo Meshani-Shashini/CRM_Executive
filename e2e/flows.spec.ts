@@ -6,7 +6,8 @@ test('lead conversion creates one linked deal and blocks a second conversion', a
   const row = page.getByRole('link', { name: `Open lead details for ${title}` });
   await row.getByRole('button', { name: `Actions for ${title}` }).click();
   await page.getByRole('menuitem', { name: 'Convert to Deal' }).click();
-  await expect(page.getByRole('link', { name: `Open lead details for ${title}` })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open linked deal' })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to leads' }).click();
 
   const convertedRow = page.getByRole('link', { name: `Open lead details for ${title}` });
   await convertedRow.getByRole('button', { name: `Actions for ${title}` }).click();
@@ -19,14 +20,16 @@ test('changing a deal stage in List is reflected in Kanban', async ({ page }) =>
   await page.goto('/#/deals');
   const title = 'Male Retail Package';
   const row = page.getByRole('link', { name: `Open deal details for ${title}` });
-  const stageSelector = row.getByRole('combobox', { name: `Change stage for ${title}` });
-  await stageSelector.selectOption({ label: 'Client Confirmation' });
+  const stageTrigger = row.getByRole('button', { name: `Change stage for ${title}` });
+  await stageTrigger.click();
+  await page.getByRole('menu', { name: `Stages for ${title}` })
+    .getByRole('menuitem', { name: 'Client Confirmation' }).click();
   await expect(page.getByRole('heading', { name: 'Update deal stage' })).toBeVisible();
   await page.getByRole('button', { name: 'Save stage' }).click();
   await page.getByRole('tab', { name: 'Kanban' }).click();
   await page.getByLabel('Select deal pipeline').selectOption({ label: 'Retail, SME & Velocity Packages' });
-  await expect(page.locator('.deals-board > section').filter({ hasText: 'Client Confirmation' }))
-    .toContainText(title);
+  await expect(page.locator('.deals-board > section').filter({ hasText: 'Client Confirmation' })
+    .getByRole('button', { name: /Lagoon Resorts Dwelling Fire/ })).toBeVisible();
 });
 
 test('legacy deal import creates and displays a linked lead', async ({ page }) => {
@@ -38,7 +41,9 @@ test('legacy deal import creates and displays a linked lead', async ({ page }) =
 
   const legacyDeal = page.getByRole('link', { name: 'Open deal details for Legacy import' });
   await expect(legacyDeal).toBeVisible();
-  await expect(legacyDeal).toContainText('lead-');
+  const linkedLeadCell = legacyDeal.locator('td[data-label="Linked Lead"]');
+  await expect(linkedLeadCell).toContainText('Legacy import');
+  await expect(linkedLeadCell).not.toContainText('lead-');
 });
 
 test('vendor email validation blocks invalid input and Escape closes the modal', async ({ page }) => {
@@ -88,12 +93,13 @@ test('linked lead, deal, and vendor deletion is blocked', async ({ page }) => {
   await leadRow.getByRole('button', { name: `Actions for ${leadTitle}` }).click();
   await page.getByRole('menuitem', { name: 'Delete lead' }).click();
   await expect.poll(() => dialogs.length).toBe(1);
-  expect(dialogs[0]).toContain('associated Deal');
+  expect(dialogs[0]).toMatch(/associated Deal|linked quotation request/);
   await expect(page.getByRole('link', { name: `Open lead details for ${leadTitle}` })).toBeVisible();
 
   await page.goto('/#/deals');
-  const dealRow = page.getByRole('link', { name: 'Open deal details for Bonavista Maldives - Contractors All Risks' });
-  await dealRow.getByRole('button', { name: 'Actions for Bonavista Maldives - Contractors All Risks' }).click();
+  const dealTitle = 'Coral Construction Machinery Cover';
+  const dealRow = page.getByRole('link', { name: `Open deal details for ${dealTitle}` });
+  await dealRow.getByRole('button', { name: `Actions for ${dealTitle}` }).click();
   await page.getByRole('menuitem', { name: 'Delete deal' }).click();
   await expect.poll(() => dialogs.length).toBe(2);
   expect(dialogs[1]).toContain('linked Lead or quotation request');

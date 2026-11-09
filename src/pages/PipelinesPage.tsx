@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { ArrowDown, ArrowUp, CalendarClock, Check, Clock3, Plus, Settings2, Zap } from 'lucide-react';
 import { useApp } from '../store/AppContext';
+import { getPipelineLossReasons, PIPELINE_TEMPLATES } from '../data/pipelineStageTemplates';
 import { TENANT_ID } from '../lib/supabase';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
@@ -14,15 +15,6 @@ import {
 } from '../utils/stageSla';
 import { promptQuotationRequestForDeal } from '../utils/navigation';
 import { linkDealToLead } from '../utils/dealFactory';
-
-const LOSS_REASONS = [
-  'Price / premium',
-  'Competitor selected',
-  'Coverage not suitable',
-  'Client withdrew',
-  'Underwriting declined',
-  'Other',
-];
 
 const legacyStageNames: Record<string, string> = {
   'Lead Identified': 'Fact-Finding & Risk Survey',
@@ -42,70 +34,6 @@ const legacyStageNames: Record<string, string> = {
   'Quote Comparison Presented': 'Quote Comparison & Presentation',
   'Negotiation & Legal': 'Underwriter Negotiation',
   'Negotiation & Legal (MIRA Compliance)': 'Underwriter Negotiation',
-};
-
-interface PipelineTemplateStage {
-  name: string;
-  winProbabilityPct: number;
-  stagnationDaysThreshold: number;
-  isClosedWon?: boolean;
-  isClosedLost?: boolean;
-  requiresApproval?: boolean;
-}
-
-interface PipelineTemplate {
-  code: string;
-  name: string;
-  stages: PipelineTemplateStage[];
-}
-
-const PIPELINE_TEMPLATES: Record<string, PipelineTemplate> = {
-  commercialDefault: {
-    code: 'COMMERCIAL',
-    name: 'Commercial Lines Brokerage',
-    stages: [
-      { name: 'Fact-Finding & Risk Survey', winProbabilityPct: 20, stagnationDaysThreshold: 10, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Market Tender & Placing Slip Submission', winProbabilityPct: 40, stagnationDaysThreshold: 14, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Comparative Analysis & Presentation', winProbabilityPct: 60, stagnationDaysThreshold: 7, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Underwriter Negotiation & Structuring', winProbabilityPct: 80, stagnationDaysThreshold: 5, isClosedWon: false, isClosedLost: false, requiresApproval: true },
-      { name: 'Policy Bound / Won', winProbabilityPct: 100, stagnationDaysThreshold: 0, isClosedWon: true, isClosedLost: false, requiresApproval: false },
-      { name: 'Lost / Market Declined', winProbabilityPct: 0, stagnationDaysThreshold: 0, isClosedWon: false, isClosedLost: true, requiresApproval: false },
-    ],
-  },
-  smeRetailFastTrack: {
-    code: 'SME_VELOCITY',
-    name: 'Retail, SME & Velocity Packages',
-    stages: [
-      { name: 'Intake & Automated Rating', winProbabilityPct: 25, stagnationDaysThreshold: 2, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Standard Package Quoted', winProbabilityPct: 50, stagnationDaysThreshold: 3, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Client Confirmation', winProbabilityPct: 80, stagnationDaysThreshold: 2, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Payment & Immediate Cover', winProbabilityPct: 100, stagnationDaysThreshold: 0, isClosedWon: true, isClosedLost: false, requiresApproval: false },
-      { name: 'Closed-Lost', winProbabilityPct: 0, stagnationDaysThreshold: 0, isClosedWon: false, isClosedLost: true, requiresApproval: false },
-    ],
-  },
-  annualRenewals: {
-    code: 'RENEWALS',
-    name: 'Annual Policy Renewals',
-    stages: [
-      { name: 'Renewal Audit & Loss Review (T-90d)', winProbabilityPct: 30, stagnationDaysThreshold: 10, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Expiring Carrier Terms / Market Re-tender (T-60d)', winProbabilityPct: 50, stagnationDaysThreshold: 14, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Renewal Terms Presentation (T-30d)', winProbabilityPct: 70, stagnationDaysThreshold: 7, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Client Renewal Sign-Off (T-15d)', winProbabilityPct: 90, stagnationDaysThreshold: 5, isClosedWon: false, isClosedLost: false, requiresApproval: false },
-      { name: 'Policy Renewed & Re-Invoiced', winProbabilityPct: 100, stagnationDaysThreshold: 0, isClosedWon: true, isClosedLost: false, requiresApproval: false },
-      { name: 'Lapsed / Lost to Competitor', winProbabilityPct: 0, stagnationDaysThreshold: 0, isClosedWon: false, isClosedLost: true, requiresApproval: false },
-    ],
-  },
-  claims: {
-    code: 'CLAIMS',
-    name: 'Claims Management',
-    stages: [
-      { name: 'Claim Notified', winProbabilityPct: 20, stagnationDaysThreshold: 7 },
-      { name: 'Surveyor Assigned', winProbabilityPct: 40, stagnationDaysThreshold: 14 },
-      { name: 'Adjuster Assessment', winProbabilityPct: 60, stagnationDaysThreshold: 30 },
-      { name: 'Underwriter Settlement', winProbabilityPct: 80, stagnationDaysThreshold: 30 },
-      { name: 'Cheque Dispatched', winProbabilityPct: 100, stagnationDaysThreshold: 0 },
-    ],
-  },
 };
 
 function availableTemplateKey(pipelines: Pipeline[]) {
@@ -269,6 +197,10 @@ export default function PipelinesPage() {
   const [healthFilter, setHealthFilter] = useState<HealthState | ''>('');
   const [intentFilter, setIntentFilter] = useState<IntentTier | ''>('');
   const selectedPipeline = pipelines.find((pipeline) => pipeline.id === pipelineId);
+  const pendingMoveDeal = pendingMove
+    ? deals.find((deal) => deal.id === pendingMove.dealId)
+    : undefined;
+  const pendingMovePipelineCode = pipelines.find((pipeline) => pipeline.id === pendingMoveDeal?.pipelineId)?.code;
   const stages = useMemo(
     () => pipelineStages.filter((stage) => stage.pipelineId === pipelineId).sort((a, b) => a.stageOrder - b.stageOrder),
     [pipelineStages, pipelineId],
@@ -595,6 +527,8 @@ export default function PipelinesPage() {
       id: makeId(),
       pipelineId: pipeline.id,
       name: stage.name,
+      shortLabel: stage.shortLabel,
+      purpose: stage.purpose,
       stageOrder: index + 1,
       winProbabilityPct: stage.winProbabilityPct,
       stagnationDaysThreshold: stage.stagnationDaysThreshold,
@@ -917,7 +851,7 @@ export default function PipelinesPage() {
           )}
           {pendingMove && isLostStage(pendingMove.stage) ? (
             <>
-              <Field label="Loss reason (required)"><select className="input" name="lossReason" required defaultValue=""><option value="" disabled>Select a reason</option>{LOSS_REASONS.map((reason) => <option key={reason}>{reason}</option>)}</select></Field>
+              <Field label="Loss reason (required)"><select className="input" name="lossReason" required defaultValue=""><option value="" disabled>Select a reason</option>{getPipelineLossReasons(pendingMovePipelineCode).map((reason) => <option key={reason}>{reason}</option>)}</select></Field>
               <Field label="Additional notes"><textarea className="input min-h-20" name="notes" /></Field>
             </>
           ) : pendingMove

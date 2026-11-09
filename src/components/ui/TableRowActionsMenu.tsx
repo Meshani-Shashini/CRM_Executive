@@ -52,6 +52,7 @@ export default function TableRowActionsMenu({ open, anchor, label, children }: T
       role="menu"
       aria-label={label}
       className="table-row-actions-menu rounded-lg border border-ink-600 bg-ink-900 p-1 text-left shadow-xl"
+      onClick={(event) => event.stopPropagation()}
       style={{ top: position?.top ?? 0, left: position?.left ?? 0, visibility: position ? 'visible' : 'hidden' }}
     >
       {children}
