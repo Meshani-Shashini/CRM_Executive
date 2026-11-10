@@ -7,7 +7,7 @@ import { OwnerCell, ProductCodePill, StagePill, TableDateCell } from '../compone
 import { avatarCode } from '../components/table/avatar';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
 import { useApp } from '../store/AppContext';
-import { AlertTriangle, ArrowRight, CalendarDays, CheckCircle2, CircleDot, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, TrendingUp, UserRound, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, CalendarDays, CheckCircle2, CircleDot, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, TrendingUp, UserRound, X } from 'lucide-react';
 import type { Client, CompanyContactProfile, Lead, LeadTemperature } from '../types';
 import {
   DEFAULT_USD_TO_MVR_RATE, formatAmount, formatCurrencyInput, formatCurrencyInputForDisplay,
@@ -840,13 +840,14 @@ export default function LeadsPage() {
         </div>
       ) : view === 'forecast' ? (
         <div className="glass rounded-2xl p-5">
-          <div className="mb-4 flex items-start justify-between gap-3"><div><h2 className="font-semibold text-white">Lead Forecast</h2><p className="mt-1 text-xs text-muted">Open lead exposure converted to MVR, grouped by funnel stage. Forecast values are unweighted estimates.</p></div><button type="button" className="text-xs text-muted hover:text-white" onClick={() => setView('funnel')}>Back to Funnels</button></div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="mb-4 flex items-start justify-between gap-3"><div><h2 className="font-semibold text-white">Lead Forecast</h2><p className="mt-1 text-xs text-muted">Open lead exposure converted to MVR, grouped by funnel stage. Forecast values are unweighted estimates.</p></div><button type="button" title="Back to Funnels" aria-label="Back to Funnels" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-ink-800 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400" onClick={() => setView('funnel')}><ArrowLeft size={16} /></button></div>
+          <div className="overflow-x-auto pb-2">
+            <div className="flex w-max min-w-full gap-3">
             {leadsByBoardStage.map(({ stage, leads: stageLeads }) => {
               const total = stageLeads.reduce((sum, lead) => sum + (lead.valueMvr ?? toMvr(lead.value ?? lead.premium, lead.currency ?? 'MVR', lead.exchangeRate)), 0);
-              return <div key={stage} className="rounded-xl border border-ink-700 bg-ink-900/50 p-4">
-                <div className="flex items-center justify-between text-sm text-white"><span>{stage}</span><Badge variant="muted">{stageLeads.length}</Badge></div>
-                <div className="mt-3 text-xl font-semibold text-brand-200">{formatAmount(total, 'MVR')}</div>
+              return <div key={stage} className="w-56 shrink-0 rounded-xl border border-ink-700 bg-ink-900/50 p-4">
+                <div className="flex items-center justify-between gap-2 text-sm text-white"><span className="min-w-0">{stage}</span><Badge variant="muted">{stageLeads.length}</Badge></div>
+                <div className="mt-3 text-sm font-semibold text-brand-200">{formatAmount(total, 'MVR')}</div>
                 <div className="mt-1 text-xs text-muted">Unweighted pipeline value</div>
                 <div className="mt-3 max-h-36 space-y-2 overflow-y-auto border-t border-ink-700 pt-2">
                   {stageLeads.map((lead) => {
@@ -860,6 +861,7 @@ export default function LeadsPage() {
                 </div>
               </div>;
             })}
+            </div>
           </div>
         </div>
       ) : (
