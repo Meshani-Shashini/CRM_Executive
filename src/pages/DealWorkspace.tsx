@@ -373,6 +373,7 @@ export default function DealWorkspace({
   });
   const [sortKey, setSortKey] = useState<'deal' | 'client' | 'contact' | 'pipeline' | 'stage' | 'product' | 'vendor' | 'value' | 'owner' | 'activity' | 'close'>('close');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [sortTouched, setSortTouched] = useState(false);
   const [pipelineSort, setPipelineSort] = useState<'activity' | 'value' | 'close' | 'created'>('activity');
   const [archiveFilter, setArchiveFilter] = useState<'all' | 'won' | 'lost'>('all');
   const [forecastMode, setForecastMode] = useState<'month' | 'quarter'>('month');
@@ -1864,20 +1865,48 @@ export default function DealWorkspace({
             : `deals-list-fit${dealsPageMode ? ' deals-page-list-fit' : ''}`}>
             <table className="table-fixed w-full leading-tight text-left">
               <colgroup>{tableColumns.map((column) => <col key={column.key} />)}</colgroup>
-              <thead className="bg-[#111214] text-[10px] font-semibold text-[#D0D3D9]">
+              <thead className={dealsPageMode && workspaceView === 'list'
+                ? 'bg-[#111214] font-semibold text-[#D0D3D9]'
+                : 'bg-[#111214] text-[10px] font-semibold text-[#D0D3D9]'}>
                 <tr>{tableColumns.map((column) => (
-                  <th key={column.key} scope="col" className="border-b border-[#1B1E22] px-2 py-2 text-left">
+                  <th key={column.key} scope="col"
+                    aria-sort={dealsPageMode && workspaceView === 'list' && sortKey === column.key
+                      ? (sortDirection === 'asc' ? 'ascending' : 'descending')
+                      : undefined}
+                    className={`border-b border-[#1B1E22] text-left ${dealsPageMode && workspaceView === 'list'
+                      ? 'align-middle whitespace-nowrap px-1 py-2'
+                      : 'px-2 py-2'}`}>
                     {column.key === 'actions' ? <span className="sr-only">{column.label}</span> : (
-                      ['closedDate', 'lossReason'].includes(column.key) ? column.label : <button type="button" className="inline-flex items-center gap-1 whitespace-nowrap" onClick={() => {
-                        const nextKey = column.key as typeof sortKey;
-                        if (sortKey === nextKey) setSortDirection((direction) => direction === 'asc' ? 'desc' : 'asc');
-                        else {
-                          setSortKey(nextKey);
-                          setSortDirection('asc');
-                        }
-                      }}>
-                        {column.label}{sortKey === column.key && <span aria-hidden="true">{sortDirection === 'asc' ? '↑' : '↓'}</span>}
-                      </button>
+                      ['closedDate', 'lossReason'].includes(column.key)
+                        ? column.label
+                        : <button
+                          type="button"
+                          title={dealsPageMode && workspaceView === 'list' ? column.label : undefined}
+                          aria-label={dealsPageMode && workspaceView === 'list' ? `Sort by ${column.label}` : undefined}
+                          className={`inline-flex items-center gap-1 ${dealsPageMode && workspaceView === 'list' ? '' : 'whitespace-nowrap'}`}
+                          onClick={() => {
+                            const nextKey = column.key as typeof sortKey;
+                            setSortTouched(true);
+                            if (sortKey === nextKey) setSortDirection((direction) => direction === 'asc' ? 'desc' : 'asc');
+                            else {
+                              setSortKey(nextKey);
+                              setSortDirection('asc');
+                            }
+                          }}
+                        >
+                          {dealsPageMode && workspaceView === 'list'
+                            ? ({
+                              deal: 'Deal',
+                              client: 'Client',
+                              contact: 'Contact',
+                              close: 'Expected Close',
+                              activity: 'Next Activity',
+                            }[column.key] ?? column.label)
+                            : column.label}
+                          {(!(dealsPageMode && workspaceView === 'list') || sortTouched) && sortKey === column.key && <span
+                            className={dealsPageMode && workspaceView === 'list' ? 'inline-flex shrink-0 text-[10px] leading-none' : undefined}
+                            aria-hidden="true">{sortDirection === 'asc' ? '↑' : '↓'}</span>}
+                        </button>
                     )}
                   </th>
                 ))}</tr>

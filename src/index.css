@@ -273,16 +273,6 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
 .fit-wrap.deals-page-list-fit col:nth-child(9) { width: 8%; }
 .fit-wrap.deals-page-list-fit col:nth-child(10) { width: 6%; }
 
-.fit-wrap.deals-page-list-fit th {
-  overflow-wrap: normal;
-  vertical-align: bottom;
-}
-
-.fit-wrap.deals-page-list-fit th button {
-  flex-wrap: wrap;
-  white-space: normal;
-}
-
 .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(1) { width: 12%; }
 .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(2) { width: 8%; }
 .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(3) { width: 7%; }

@@ -93,17 +93,31 @@ describe('Deal list row accessibility', () => {
     act(() => root.render(<DealWorkspace deals={[testDeal]} dealsPageMode />));
 
     expect([...container.querySelectorAll('thead th')].map((cell) => cell.textContent?.trim().replace(/[↑↓]/g, ''))).toEqual([
-      'Title',
+      'Deal',
       'Value',
-      'Organization',
-      'Contact Person',
-      'Expected Close Date',
-      'Next Activity Date',
+      'Client',
+      'Contact',
+      'Expected Close',
+      'Next Activity',
       'Owner',
       'Stage',
       'Pipeline',
       'Actions',
     ]);
+    expect(container.querySelector('thead th[aria-sort="ascending"]')?.textContent).toContain('Expected Close');
+    expect(container.querySelector('thead th[aria-sort="ascending"] [aria-hidden="true"]')).toBeNull();
+    expect(container.querySelector('thead th[aria-sort="ascending"] button')?.getAttribute('aria-label')).toBe('Sort by Expected Close Date');
+  });
+
+  it('shows a sort arrow only after sorting is changed by the user', () => {
+    window.location.hash = '#/deals?view=list';
+    act(() => root.render(<DealWorkspace deals={[testDeal]} dealsPageMode />));
+
+    expect(container.querySelectorAll('thead th [aria-hidden="true"]')).toHaveLength(0);
+    act(() => container.querySelector<HTMLButtonElement>('thead th button[aria-label="Sort by Expected Close Date"]')?.click());
+
+    expect(container.querySelector('thead th[aria-sort="descending"] [aria-hidden="true"]')?.textContent).toBe('↓');
+    expect(container.querySelectorAll('thead th [aria-hidden="true"]')).toHaveLength(1);
   });
 
   it('omits the Open status from the deal action menu', () => {

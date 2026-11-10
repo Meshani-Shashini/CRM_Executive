@@ -119,12 +119,12 @@ test('Deals list shows the exact stage filter and required table fields', async 
   await page.goto('/#/deals?view=list');
   expect(await page.locator('thead th').evaluateAll((cells) =>
     cells.map((cell) => cell.textContent?.replace(/[↑↓]/g, '').trim()))).toEqual([
-    'Title',
+    'Deal',
     'Value',
-    'Organization',
-    'Contact Person',
-    'Expected Close Date',
-    'Next Activity Date',
+    'Client',
+    'Contact',
+    'Expected Close',
+    'Next Activity',
     'Owner',
     'Stage',
     'Pipeline',
