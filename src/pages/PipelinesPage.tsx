@@ -774,7 +774,7 @@ export default function PipelinesPage() {
         <>
         <div
           data-testid="pipelines-board"
-          className="grid min-w-0 grid-flow-col grid-rows-1 auto-cols-[minmax(130px,1fr)] gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain [contain:layout] lg:min-h-0 lg:flex-1"
+          className="grid min-w-0 grid-flow-col grid-rows-1 auto-cols-[minmax(160px,1fr)] gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain [contain:layout] lg:min-h-0 lg:flex-1"
         >
           {stages.map((stage) => {
             const stageDeals = visibleDealsForStage(stage);
@@ -819,11 +819,15 @@ export default function PipelinesPage() {
                       legacyTitle: deal.nextActivityTitle,
                     }));
                     return (
-                      <article key={deal.id} className={`rounded-xl border bg-ink-800/80 p-3 ${health === 'Rotting' ? 'border-hot/70 shadow-[0_0_0_1px_rgba(255,70,70,0.15)]' : health === 'At Risk' ? 'border-warm/60' : 'border-ink-600'}`}>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 text-sm font-semibold text-white">{deal.client}</div>
+                      <article
+                        key={deal.id}
+                        data-testid="pipeline-deal-card"
+                        className={`min-w-0 rounded-xl border bg-ink-800/80 p-2.5 ${health === 'Rotting' ? 'border-hot/70 shadow-[0_0_0_1px_rgba(255,70,70,0.15)]' : health === 'At Risk' ? 'border-warm/60' : 'border-ink-600'}`}
+                      >
+                        <div className="flex min-w-0 items-start justify-between gap-1.5">
+                          <div className="line-clamp-2 min-w-0 flex-1 text-[13px] font-semibold leading-snug text-white" title={deal.client}>{deal.client}</div>
                           <div
-                            className={`pill shrink-0 !gap-1 border ${
+                            className={`pill shrink-0 !gap-1 border !px-1.5 !py-0.5 ${
                               score >= 75 ? 'border-win/40 bg-win/10 text-win' : score >= 45 ? 'border-warm/40 bg-warm/10 text-warm' : 'border-hot/40 bg-hot/10 text-hot'
                             }`}
                             title="Rule-based health estimate from win probability and stage-age threshold; not an AI-generated prediction."
@@ -832,27 +836,39 @@ export default function PipelinesPage() {
                             <Zap size={11} /> {score}
                           </div>
                         </div>
-                        <div className="mt-1 text-xs text-muted">{deal.product} · {deal.insurer}</div>
-                        {deal.renewalExpiry && <div className="mt-1 text-[11px] text-warm">Renewal due {formatDate(deal.renewalExpiry)}</div>}
-                        <div className="mt-2 flex flex-wrap gap-1.5">
+                        <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted" title={`${deal.product} · ${deal.insurer}`}>{deal.product} · {deal.insurer}</div>
+                        {deal.renewalExpiry && <div className="mt-1 text-[10px] leading-tight text-warm">Renewal due {formatDate(deal.renewalExpiry)}</div>}
+                        <div
+                          data-testid="pipeline-deal-card-badges"
+                          className="mt-2 flex min-w-0 flex-wrap items-start gap-1 [&_.pill]:max-w-full [&_.pill]:min-w-0 [&_.pill]:!whitespace-normal [&_.pill]:!px-1.5 [&_.pill]:!py-0.5 [&_.pill]:!text-[9px] [&_.pill]:!leading-tight [&_.pill]:[overflow-wrap:anywhere]"
+                        >
                           <Badge variant={momentumVariants[momentum]} dot>{momentum}</Badge>
                           <Badge variant={intentVariants[intent]}>{intent}: {intentLabels[intent]}</Badge>
                           <Badge variant={healthVariants[health]}>{health === 'At Risk' ? 'At Risk' : health}</Badge>
-                          {slaOverdue && <Badge variant="hot"><Clock3 size={11} /> SLA overdue</Badge>}
-                          <Badge variant={nextActivity.tone} dot><CalendarClock size={11} /> {nextActivity.label}</Badge>
+                          {slaOverdue && <Badge variant="hot"><Clock3 size={10} className="shrink-0" /> SLA overdue</Badge>}
+                          <Badge variant={nextActivity.tone} dot><CalendarClock size={10} className="shrink-0" /> {nextActivity.label}</Badge>
                         </div>
-                        <div className="mt-3 flex justify-between text-xs">
-                          <span className="text-white">{formatAmount(deal.value, deal.currency)}</span>
-                          {deal.currency === 'USD' && <span className="text-muted">{formatAmount(toMvr(deal.value, deal.currency, deal.exchangeRate), 'MVR')}</span>}
-                          <span className="text-brand-400">{deal.probability}%</span>
+                        <div data-testid="pipeline-deal-card-value" className="mt-2 min-w-0 border-t border-ink-700/80 pt-2">
+                          <div className="min-w-0 whitespace-nowrap text-[11px] font-semibold leading-tight tabular-nums text-white" title={formatAmount(deal.value, deal.currency)}>
+                            {formatAmount(deal.value, deal.currency)}
+                          </div>
+                          {deal.currency === 'USD' && (
+                            <div
+                              className="mt-1 whitespace-nowrap text-[9px] leading-tight tabular-nums text-muted"
+                              title={formatAmount(toMvr(deal.value, deal.currency, deal.exchangeRate), 'MVR')}
+                            >
+                              {formatAmount(toMvr(deal.value, deal.currency, deal.exchangeRate), 'MVR')}
+                            </div>
+                          )}
+                          <div className="mt-1 text-right text-[10px] font-medium leading-tight text-brand-400">{deal.probability}% win chance</div>
                         </div>
-                        <div className="mt-2 flex items-center justify-between text-[10px] text-muted">
-                          <span>{elapsed === null ? 'Stage age unavailable' : `${elapsed} day${elapsed === 1 ? '' : 's'} in stage`}</span>
-                          {recentHistory?.lossReason && <span className="text-hot">{recentHistory.lossReason}</span>}
+                        <div data-testid="pipeline-deal-card-stage-age" className="mt-2 flex min-w-0 items-center justify-between gap-2 text-[9px] leading-tight text-muted">
+                          <span className="min-w-0 flex-1">{elapsed === null ? 'Stage age unavailable' : `${elapsed} day${elapsed === 1 ? '' : 's'} in stage`}</span>
+                          {recentHistory?.lossReason && <span className="min-w-0 max-w-[50%] truncate text-right text-hot" title={recentHistory.lossReason}>{recentHistory.lossReason}</span>}
                         </div>
-                        <label className="block mt-3">
+                        <label data-testid="pipeline-deal-card-action" className="mt-2 block min-w-0">
                           <span className="sr-only">Move {deal.client} to stage</span>
-                          <select className="input !py-1.5 !text-xs" value={stage.id} onChange={(event) => {
+                          <select className="input !min-w-0 !w-full !py-1.5 !text-[10px]" value={stage.id} onChange={(event) => {
                             const target = dealStages.find((item) => item.id === event.target.value);
                             if (target) moveDeal(deal.id, target);
                           }}>

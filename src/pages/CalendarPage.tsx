@@ -125,7 +125,8 @@ export default function CalendarPage() {
       return date;
     })
     : [];
-  const monthCells = Array.from({ length: 42 }, (_, index) => {
+  const monthWeekCount = Math.ceil((monthStart.getDay() + monthEnd.getDate()) / 7);
+  const monthCells = Array.from({ length: monthWeekCount * 7 }, (_, index) => {
     const day = index - monthStart.getDay() + 1;
     return day > 0 && day <= monthEnd.getDate() ? new Date(cursorYear, cursorMonth, day) : null;
   });
@@ -179,19 +180,28 @@ export default function CalendarPage() {
               <div className="mb-1 grid shrink-0 grid-cols-7 gap-1 text-center text-[10px] text-muted sm:text-xs">
                 {weekdays.map((day) => <div key={day} className="py-1">{day}</div>)}
               </div>
-              <div data-testid="calendar-month-grid" className="calendar-month-grid grid grid-cols-7 grid-rows-6 gap-1 lg:min-h-0 lg:flex-1">
+              <div
+                data-testid="calendar-month-grid"
+                data-week-count={monthWeekCount}
+                className="calendar-month-grid grid min-h-0 flex-1 grid-cols-7 gap-1"
+                style={{ gridTemplateRows: `repeat(${monthWeekCount}, minmax(0, 1fr))` }}
+              >
                 {monthCells.map((date, index) => {
                   if (!date) return <div key={`blank-${index}`} className="min-h-16 min-w-0 overflow-hidden rounded-lg bg-ink-900/20 lg:min-h-0" />;
                   const key = localDate(date);
                   const dayEvents = eventsByDate.get(key) ?? [];
                   return (
-                    <div key={key} className={`flex min-h-16 min-w-0 flex-col overflow-hidden rounded-lg border p-1 sm:p-1.5 lg:min-h-0 ${
-                      key === todayKey ? 'border-brand-400 bg-brand-500/10' : 'border-ink-700/50 bg-ink-900/40'
-                    }`}>
+                    <div
+                      key={key}
+                      data-testid="calendar-month-day"
+                      data-event-count={dayEvents.length}
+                      className={`flex min-h-16 min-w-0 flex-col overflow-hidden rounded-lg border p-1 sm:p-1.5 lg:min-h-0 ${
+                        key === todayKey ? 'border-brand-400 bg-brand-500/10' : 'border-ink-700/50 bg-ink-900/40'
+                      }`}
+                    >
                       <div className={`mb-0.5 shrink-0 text-[10px] sm:text-xs ${key === todayKey ? 'font-bold text-brand-300' : 'text-muted'}`}>{date.getDate()}</div>
-                      <div className="min-h-0 space-y-0.5 overflow-hidden">
-                        {dayEvents.slice(0, 2).map((event) => eventButton(event, true))}
-                        {dayEvents.length > 2 && <div className="truncate whitespace-nowrap text-[9px] leading-tight text-muted">+{dayEvents.length - 2} more</div>}
+                      <div data-testid="calendar-day-events" className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
+                        {dayEvents.map((event) => eventButton(event, true))}
                       </div>
                     </div>
                   );

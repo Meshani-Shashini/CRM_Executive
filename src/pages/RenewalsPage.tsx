@@ -42,9 +42,11 @@ export default function RenewalsPage() {
           if (!groupRows.length) return null;
           return (
             <section key={group.key} className="space-y-2">
-              <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
-                {group.label}<Badge variant={group.key === 'Overdue' ? 'hot' : 'warm'}>{groupRows.length}</Badge>
-              </h2>
+              {group.key !== 'Overdue' && (
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
+                  {group.label}<Badge variant="warm">{groupRows.length}</Badge>
+                </h2>
+              )}
               <TableShell className="renewals-table-fit">
                 <table className="w-full table-fixed text-left text-xs" aria-label={`${group.label} renewals`}>
                   <thead className="border-b border-ink-700 bg-ink-900/70 text-[10px] uppercase tracking-wide text-muted">

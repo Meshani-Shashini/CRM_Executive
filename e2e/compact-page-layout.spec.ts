@@ -67,7 +67,8 @@ test('compact page toolbars fit responsively and Calendar stays in the viewport'
         const rowTops = await monthGrid.locator(':scope > *').evaluateAll((cells) =>
           [...new Set(cells.map((cell) => Math.round(cell.getBoundingClientRect().top)))],
         );
-        expect(rowTops, `Calendar month rows at ${size}`).toHaveLength(6);
+        const monthWeekCount = await monthGrid.getAttribute('data-week-count');
+        expect(rowTops, `Calendar month rows at ${size}`).toHaveLength(Number(monthWeekCount));
 
         for (const view of ['week', 'agenda']) {
           await page.getByRole('button', { name: view, exact: true }).click();
