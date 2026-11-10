@@ -4,6 +4,8 @@ import { useApp } from '../store/AppContext';
 import { buildCalendarEvents, type CalendarEvent, type CalendarEventKind } from '../utils/calendarData';
 import { dashboardHref } from '../utils/navigation';
 import { formatDate } from '../utils/date';
+import PageToolbar from '../components/ui/PageToolbar';
+import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 
 type CalendarView = 'month' | 'week' | 'agenda';
 
@@ -141,15 +143,10 @@ export default function CalendarPage() {
 
   return (
     <div className="calendar-page flex min-w-0 flex-col gap-2 lg:h-[calc(100dvh-3.5rem)] lg:overflow-hidden">
-      <div data-page-toolbar="calendar" className="flex min-w-0 flex-wrap items-center gap-2">
-        <div className="hidden items-center gap-1 rounded-lg border border-ink-700 bg-ink-900/70 p-1 sm:inline-flex" role="group" aria-label="Calendar view">
-          {(['month', 'week', 'agenda'] as const).map((option) => (
-            <button key={option} type="button" aria-pressed={view === option} onClick={() => setView(option)}
-              className={`rounded-md px-3 py-1.5 text-xs capitalize ${view === option ? 'bg-brand-500 text-white' : 'text-muted hover:text-white'}`}>
-              {option}
-            </button>
-          ))}
-        </div>
+      <PageToolbar name="calendar">
+        <ViewModeSwitcher label="Calendar view" role="group" value={view} onChange={setView}
+          className="hidden sm:inline-flex"
+          options={(['month', 'week', 'agenda'] as const).map((option) => ({ value: option, label: option }))} />
         <label className="sr-only" htmlFor="calendar-ownership">Show</label>
         <select id="calendar-ownership" aria-label="Show calendar events" className="input !w-auto !py-1.5 !text-xs" value={ownership} onChange={(event) => setOwnership(event.target.value as 'all' | 'mine')}>
             <option value="all">All events</option>
@@ -170,8 +167,8 @@ export default function CalendarPage() {
           <button type="button" aria-label="Previous period" onClick={() => shiftCursor(-1)} className="rounded-lg p-2 text-muted hover:bg-ink-700 hover:text-white"><ChevronLeft size={16} /></button>
           <button type="button" onClick={goToday} className="btn-ghost !px-2.5 !py-1.5 text-[11px]">Today</button>
           <button type="button" aria-label="Next period" onClick={() => shiftCursor(1)} className="rounded-lg p-2 text-muted hover:bg-ink-700 hover:text-white"><ChevronRight size={16} /></button>
-        </div>
       </div>
+      </PageToolbar>
 
       <div data-page-content="calendar" className="calendar-layout grid min-w-0 gap-2 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_280px] lg:grid-rows-[minmax(0,1fr)]">
         <section className="calendar-view-panel glass min-w-0 rounded-2xl p-3 sm:p-4 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden" aria-label={`${effectiveView} calendar`}>

@@ -4,6 +4,8 @@ import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
 import TableShell from '../components/table/TableShell';
 import TableRowActionsMenu from '../components/ui/TableRowActionsMenu';
+import PageToolbar from '../components/ui/PageToolbar';
+import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 import { avatarCode } from '../components/table/avatar';
 import { VENDOR_TYPES, normalizeVendorName } from '../data/vendors';
 import { useApp } from '../store/AppContext';
@@ -295,12 +297,12 @@ export default function VendorsPage() {
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div data-page-toolbar="vendors" className="flex flex-wrap items-center justify-between gap-2">
+      <PageToolbar name="vendors" className="justify-between">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-0.5" role="tablist" aria-label="Vendor views">
-            <button type="button" role="tab" aria-label="List view" title="List view" aria-selected={view === 'list'} onClick={() => setView('list')} className={`rounded-md p-1.5 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400 ${view === 'list' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><List size={14} /></button>
-            <button type="button" role="tab" aria-label="Board view" title="Board view" aria-selected={view === 'kanban'} onClick={() => setView('kanban')} className={`rounded-md p-1.5 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400 ${view === 'kanban' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><Columns3 size={14} /></button>
-          </div>
+          <ViewModeSwitcher label="Vendor views" value={view} onChange={setView} options={[
+            { value: 'list', label: 'List view', Icon: List },
+            { value: 'kanban', label: 'Board view', Icon: Columns3 },
+          ]} />
           {activeRole !== 'finance' && <button type="button" className="btn-primary !px-3 !py-1.5 !text-xs" onClick={openNewVendor}><Plus size={13} /> Vendor</button>}
         </div>
         <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
@@ -341,7 +343,7 @@ export default function VendorsPage() {
             </div>}
           </div>
         </div>
-      </div>
+      </PageToolbar>
 
       {filterActiveCount > 0 && <div className="flex flex-wrap items-center gap-1.5" aria-label="Active vendor filters">
         {typeFilter !== 'all' && <button type="button" onClick={() => setTypeFilter('all')}><Badge variant="cold">Type: {typeFilter} <X size={10} /></Badge></button>}
@@ -356,8 +358,8 @@ export default function VendorsPage() {
           {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-10 animate-pulse rounded-md bg-ink-800/80" />)}
         </div> : <table aria-label="Vendors" className="vendors-table w-full leading-tight">
           <colgroup>
-            <col style={{ width: '20%' }} /><col style={{ width: '9%' }} /><col style={{ width: '10%' }} />
-            <col style={{ width: '6%' }} /><col style={{ width: '16%' }} /><col style={{ width: '11%' }} />
+            <col style={{ width: '18%' }} /><col style={{ width: '8%' }} /><col style={{ width: '9%' }} />
+            <col style={{ width: '8%' }} /><col style={{ width: '18%' }} /><col style={{ width: '11%' }} />
             <col style={{ width: '13%' }} /><col style={{ width: '10%' }} /><col style={{ width: '5%' }} />
           </colgroup>
           <thead className="sticky top-0 z-10 bg-[#111214] font-semibold text-[#D0D3D9]">
@@ -365,7 +367,7 @@ export default function VendorsPage() {
               {([
                 ['name', 'Vendor Name'], ['vendorType', 'Type'], ['country', 'Country'], ['currency', 'Currency'],
                 ['contact', 'Contact'], ['linkedDeals', 'Linked Deals'], ['quotationRequests', 'Quotation Requests'], ['status', 'Status'],
-              ] as const).map(([key, label]) => <th key={key} scope="col" aria-sort={sortKey === key ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="border-b border-[#1B1E22] px-1.5 py-2 text-left">
+              ] as const).map(([key, label]) => <th key={key} scope="col" aria-sort={sortKey === key ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className={`border-b border-[#1B1E22] ${key === 'currency' || key === 'contact' ? 'px-2.5' : 'px-1.5'} py-2 text-left`}>
                 <button type="button" className="inline-flex items-center gap-1 text-left hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400" onClick={() => {
                   if (sortKey === key) setSortDirection((direction) => direction === 'asc' ? 'desc' : 'asc');
                   else { setSortKey(key); setSortDirection('asc'); }
@@ -399,8 +401,8 @@ export default function VendorsPage() {
                 </span></td>
                 <td data-label="Type" className="px-1.5 py-2"><Badge variant="cold" compact><span className="truncate uppercase">{vendor.vendorType}</span></Badge></td>
                 <td data-label="Country" className="px-1.5 py-2"><span className="block truncate" title={vendor.country}>{vendor.country || '—'}</span></td>
-                <td data-label="Currency" className="px-1.5 py-2">{vendor.currency || '—'}</td>
-                <td data-label="Contact" className="px-1.5 py-2"><span className="block min-w-0 truncate" title={[contact.name, contact.phone, contact.email].filter(Boolean).join(' · ')}>
+                <td data-label="Currency" className="px-2.5 py-2">{vendor.currency || '—'}</td>
+                <td data-label="Contact" className="px-2.5 py-2"><span className="block min-w-0 truncate" title={[contact.name, contact.phone, contact.email].filter(Boolean).join(' · ')}>
                   {contact.name && <span className="block truncate text-white">{contact.name}</span>}
                   {!contact.name && !contact.phone && !contact.email ? '—' : <span className="block truncate text-[10px] text-muted">{[contact.phone, contact.email].filter(Boolean).join(' · ')}</span>}
                 </span></td>

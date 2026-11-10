@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { ArrowUpRight, Plus, Search, Send, X } from 'lucide-react';
 import Badge from '../components/ui/Badge';
+import PageToolbar from '../components/ui/PageToolbar';
 import DateInput from '../components/ui/DateInput';
 import Modal from '../components/ui/Modal';
 import { useApp } from '../store/AppContext';
@@ -191,7 +192,7 @@ export default function QSlipsPage() {
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <div data-page-toolbar="qslips" className="flex min-w-0 flex-wrap items-center gap-2">
+      <PageToolbar name="qslips">
         <Badge compact variant="warm">Draft <span className="font-semibold">{quotationRequests.filter((request) => request.status === 'Draft').length}</span></Badge>
         <Badge compact variant="cold">Awaiting Insurer <span className="font-semibold">{quotationRequests.filter((request) => request.status === 'Sent').length}</span></Badge>
         <Badge compact variant="win">Responses Received <span className="font-semibold">{quotationRequests.filter((request) => request.status === 'Responses received').length}</span></Badge>
@@ -218,7 +219,7 @@ export default function QSlipsPage() {
           }}>Clear linked-request filter</button>
         )}
         <button className="btn-primary !px-2 !py-1.5 !text-xs" onClick={() => openNew()}><Plus size={14} /> New QRS</button>
-      </div>
+      </PageToolbar>
 
       <div data-page-content="qslips" className="glass min-w-0 overflow-hidden rounded-2xl">
         <div className="fit-wrap qrs-list-fit w-full max-w-full min-w-0">

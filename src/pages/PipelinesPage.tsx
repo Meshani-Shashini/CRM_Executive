@@ -5,6 +5,7 @@ import { DEAL_PIPELINE_STAGES, getPipelineLossReasons, PIPELINE_TEMPLATES } from
 import { AUTH_BYPASS, TENANT_ID } from '../lib/supabase';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
+import PageToolbar from '../components/ui/PageToolbar';
 import type { Client, Deal, Pipeline, PipelineStage, StageHistoryAudit } from '../types';
 import { formatAmount, toMvr } from '../utils/currency';
 import { formatDate } from '../utils/date';
@@ -701,7 +702,7 @@ export default function PipelinesPage() {
 
   return (
     <div className="flex min-w-0 flex-col gap-2 overflow-x-hidden lg:h-[calc(100dvh-3.5rem)] lg:min-h-0 lg:overflow-hidden lg:px-6 lg:pt-2 lg:pb-6">
-      <div data-page-toolbar="pipelines" className="flex min-w-0 flex-wrap items-center gap-2">
+      <PageToolbar name="pipelines">
           <select className="input !w-auto min-w-48 max-w-64 !py-1.5 !text-xs" value={pipelineId} onChange={(event) => setPipelineId(event.target.value)} aria-label="Select pipeline">
             {activePipelines.length === 0 && <option value="">No active pipelines</option>}
             {activePipelines.length > 0 && <option value="">All pipelines</option>}
@@ -748,7 +749,7 @@ export default function PipelinesPage() {
               </button>
             )}
           </div>}
-      </div>
+      </PageToolbar>
 
       <div
         data-page-content="pipelines"

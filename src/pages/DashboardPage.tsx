@@ -4,6 +4,8 @@ import {
 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import Badge from '../components/ui/Badge';
+import PageToolbar from '../components/ui/PageToolbar';
+import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 import { formatAmount, toMvr } from '../utils/currency';
 import { dashboardHref } from '../utils/navigation';
 import { formatDate } from '../utils/date';
@@ -52,20 +54,11 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex gap-1 bg-ink-800/60 border border-ink-600 rounded-lg p-1 w-fit">
-        {tabs.map((item) => (
-          <button
-            key={item}
-            onClick={() => setTab(item)}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
-              tab === item ? 'bg-brand-500 text-white shadow-glow' : 'text-muted hover:text-white hover:bg-ink-700'
-            }`}
-            aria-pressed={tab === item}
-          >
-            {item}
-          </button>
-        ))}
-      </div>
+      <PageToolbar name="dashboard">
+        <ViewModeSwitcher label="Dashboard sections" role="group" value={tab} onChange={setTab}
+          className="w-fit"
+          options={tabs.map((item) => ({ value: item, label: item }))} />
+      </PageToolbar>
 
       {tab === 'Leads' && <LeadsDashboard />}
       {tab === 'Deals' && <DealsDashboard />}

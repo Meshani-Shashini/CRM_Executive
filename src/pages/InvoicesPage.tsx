@@ -3,6 +3,8 @@ import { BANK_DETAILS } from '../data/catalogs';
 import { useApp } from '../store/AppContext';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
+import PageToolbar from '../components/ui/PageToolbar';
+import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 import { Download, Eye, Plus, Printer, X } from 'lucide-react';
 import type { Invoice } from '../types';
 import { downloadCsv } from '../utils/downloadCsv';
@@ -94,22 +96,17 @@ export default function InvoicesPage() {
 
   return (
     <div className="w-full max-w-full min-w-0 space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-1 bg-ink-800/60 border border-ink-600 rounded-lg p-1">
-          {(['all', 'outstanding', 'Pending', 'Paid', 'Overdue', 'Archived'] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
-                tab === t ? 'bg-brand-500 text-white' : 'text-muted hover:text-white'
-              }`}
-            >
-                {t === 'all' ? 'All' : t === 'outstanding' ? 'Outstanding' : t}
-            </button>
-          ))}
-        </div>
+      <PageToolbar name="invoices" className="justify-between gap-3">
+        <ViewModeSwitcher label="Invoice filters" role="group" value={tab} onChange={setTab} options={[
+          { value: 'all', label: 'All' },
+          { value: 'outstanding', label: 'Outstanding' },
+          { value: 'Pending', label: 'Pending' },
+          { value: 'Paid', label: 'Paid' },
+          { value: 'Overdue', label: 'Overdue' },
+          { value: 'Archived', label: 'Archived' },
+        ]} />
         <button className="btn-primary !py-1.5" onClick={() => { setCreateError(''); setCreateOpen(true); }}><Plus size={14} /> New Invoice</button>
-      </div>
+      </PageToolbar>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Stat label="Outstanding" value={`MVR ${invoices.filter((i) => i.status !== 'Paid').reduce((s, i) => s + invoiceTotalInMvr(i), 0).toLocaleString()}`} variant="warm" />
@@ -130,7 +127,7 @@ export default function InvoicesPage() {
               <th className="text-left px-4 py-3 font-medium">Policy</th>
               <th className="text-left px-4 py-3 font-medium">Issue Date</th>
               <th className="text-left px-4 py-3 font-medium">Status</th>
-              <th className="text-right px-4 py-3 font-medium">Amount</th>
+              <th className="invoice-amount-column text-right px-4 py-3 font-medium">Amount</th>
               <th className="text-right px-4 py-3 font-medium">Actions</th>
             </tr>
           </thead>
@@ -145,7 +142,7 @@ export default function InvoicesPage() {
                   <td data-label="Policy" className="text-muted text-xs">{inv.policyNo}</td>
                   <td data-label="Issue Date" className="text-muted text-xs">{formatDate(inv.issueDate)}</td>
                   <td data-label="Status"><Badge variant={statusVariant[inv.status]} dot>{inv.status}</Badge></td>
-                  <td data-label="Amount" className="text-white font-medium">{inv.currency} {t.total.toLocaleString()}</td>
+                  <td data-label="Amount" className="invoice-amount-column text-right px-4 py-3 text-white font-medium whitespace-nowrap">{inv.currency} {t.total.toLocaleString()}</td>
                   <td data-label="Actions">
                     <div className="flex justify-end gap-1">
                       <button onClick={() => setSelected(inv)} className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white" title="View"><Eye size={14} /></button>

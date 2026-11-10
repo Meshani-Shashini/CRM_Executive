@@ -2,6 +2,8 @@ import { useEffect, useState, type Dispatch, type FormEvent, type SetStateAction
 import { useApp } from '../store/AppContext';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
+import PageToolbar from '../components/ui/PageToolbar';
+import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 import {
   Settings as SettingsIcon, Percent, Mail, Users as UsersIcon, ShieldAlert,
   Save, Plus, Pencil, Trash2, Check, Lock, Package, ClipboardList,
@@ -161,22 +163,11 @@ export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) 
         </div>
       </div>
 
-      <div className="flex gap-1 bg-ink-800/60 border border-ink-600 rounded-lg p-1 w-fit overflow-x-auto no-scrollbar">
-        {tabs.map((t) => {
-          const Icon = t.icon;
-          return (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition whitespace-nowrap ${
-                tab === t.key ? 'bg-brand-500 text-white' : 'text-muted hover:text-white'
-              }`}
-            >
-              <Icon size={14} /> {t.label}
-            </button>
-          );
-        })}
-      </div>
+      <PageToolbar name="settings">
+        <ViewModeSwitcher label="Settings sections" role="group" value={tab} onChange={setTab}
+          className="w-fit overflow-x-auto no-scrollbar"
+          options={tabs.map((item) => ({ value: item.key, label: item.label, Icon: item.icon, showLabel: true }))} />
+      </PageToolbar>
 
       {tab === 'general' && (
         <div className="glass rounded-2xl p-5 space-y-4">

@@ -3,6 +3,7 @@ import { useApp } from '../store/AppContext';
 import TableShell from '../components/table/TableShell';
 import { OwnerCell, StagePill, TableDateCell } from '../components/table/TableCells';
 import Badge from '../components/ui/Badge';
+import PageToolbar from '../components/ui/PageToolbar';
 import { formatAmount } from '../utils/currency';
 import { formatStaffIdentifier } from '../utils/staff';
 import { buildRenewalRows, type RenewalBucket } from '../utils/renewalsData';
@@ -31,9 +32,9 @@ export default function RenewalsPage() {
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <div data-page-toolbar="renewals" className="flex min-w-0 flex-wrap items-center gap-2">
+      <PageToolbar name="renewals">
         {renewalCounts.map((item) => <Badge key={item.label} variant={item.variant}>{item.label} <span className="font-semibold">{item.count}</span></Badge>)}
-      </div>
+      </PageToolbar>
 
       <div data-page-content="renewals" className="space-y-4">
         {rows.length === 0 && <div className="glass rounded-xl p-6 text-sm text-muted">No renewals are due within the next 120 days.</div>}

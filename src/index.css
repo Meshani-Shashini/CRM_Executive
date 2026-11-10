@@ -835,6 +835,12 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   white-space: nowrap;
 }
 
+.fit-wrap.invoice-list-fit .invoice-amount-column {
+  padding-right: 0.75em;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .fit-wrap.payment-list-fit .payment-status-column {
   padding-left: 0.75em;
 }

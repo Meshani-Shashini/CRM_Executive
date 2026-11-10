@@ -22,6 +22,8 @@ import TableShell from '../components/table/TableShell';
 import { OwnerCell, ProductCodePill } from '../components/table/TableCells';
 import { avatarCode } from '../components/table/avatar';
 import TableRowActionsMenu from '../components/ui/TableRowActionsMenu';
+import PageToolbar from '../components/ui/PageToolbar';
+import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 
 type ClientStatus = 'Active' | 'Draft' | 'Renewal Due' | 'Info incomplete';
 type ClientSortKey = 'name' | 'tin' | 'country' | 'class' | 'contactPerson' | 'phone' | 'email' | 'address' | 'owner' | 'activity' | 'status';
@@ -529,12 +531,12 @@ export default function ClientsPage() {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <PageToolbar name="clients" className="justify-between">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-0.5" role="tablist" aria-label="Client views">
-            <button type="button" role="tab" aria-label="List view" title="List view" aria-selected={view === 'list'} onClick={() => setView('list')} className={`rounded-md p-1.5 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400 ${view === 'list' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><List size={14} /></button>
-            <button type="button" role="tab" aria-label="Board view" title="Board view" aria-selected={view === 'kanban'} onClick={() => setView('kanban')} className={`rounded-md p-1.5 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400 ${view === 'kanban' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><Columns3 size={14} /></button>
-          </div>
+          <ViewModeSwitcher label="Client views" value={view} onChange={setView} options={[
+            { value: 'list', label: 'List view', Icon: List },
+            { value: 'kanban', label: 'Board view', Icon: Columns3 },
+          ]} />
           {(user.role === 'admin' || user.role === 'sales') && <>
             <button type="button" className="btn-primary !py-2" onClick={() => setCreateOpen(true)}><Plus size={14} /> Client</button>
             <a className="btn-ghost !py-2 no-underline" href="#/leads"><Plus size={14} /> Add through Lead</a>
@@ -550,9 +552,9 @@ export default function ClientsPage() {
             <Filter size={14} /> Filter{filterActiveCount > 0 && <Badge variant="brand" compact>{filterActiveCount}</Badge>}
           </button>
         </div>
-      </div>
+        </PageToolbar>
 
-      {view === 'list' ? (
+        {view === 'list' ? (
         <>
         <TableShell className="clients-table-fit hidden max-h-[calc(100vh-12rem)] overflow-auto md:block">
           {!dataReady ? <div aria-label="Loading clients" role="status" className="space-y-2 p-3">

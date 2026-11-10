@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import TableRowActionsMenu from '../components/ui/TableRowActionsMenu';
+import PageToolbar from '../components/ui/PageToolbar';
+import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 import TableShell from '../components/table/TableShell';
 import { OwnerCell, ProductCodePill, StagePill, TableDateCell } from '../components/table/TableCells';
 import { avatarCode } from '../components/table/avatar';
@@ -718,13 +720,13 @@ export default function LeadsPage() {
     <div className="w-full max-w-full min-w-0">
     <div className={inspectedLeadId ? 'space-y-0' : 'space-y-2'}>
       <h2 className="sr-only">All Leads</h2>
-      {!showingLeadInspection && <div className="flex flex-wrap items-center justify-between gap-2">
+      {!showingLeadInspection && <PageToolbar name="leads" className="justify-between">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-0.5" role="tablist" aria-label="Lead views">
-            <button type="button" role="tab" aria-label="List view" title="List view" aria-selected={view === 'list'} onClick={() => setView('list')} className={`rounded-md p-1.5 transition ${view === 'list' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><List size={14} /></button>
-            <button type="button" role="tab" aria-label="Funnel view" title="Funnel view" aria-selected={view === 'funnel'} onClick={() => setView('funnel')} className={`rounded-md p-1.5 transition ${view === 'funnel' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><Columns3 size={14} /></button>
-            <button type="button" role="tab" aria-label="Forecast view" title="Forecast view" aria-selected={view === 'forecast'} onClick={() => setView('forecast')} className={`rounded-md p-1.5 transition ${view === 'forecast' ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><TrendingUp size={14} /></button>
-          </div>
+          <ViewModeSwitcher label="Lead views" value={view} onChange={setView} options={[
+            { value: 'list', label: 'List view', Icon: List },
+            { value: 'funnel', label: 'Funnel view', Icon: Columns3 },
+            { value: 'forecast', label: 'Forecast view', Icon: TrendingUp },
+          ]} />
           <button type="button" className="btn-primary !px-3 !py-1.5 !text-xs" onClick={openLeadForm} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding a lead' : undefined}><Plus size={13} /> Lead</button>
         </div>
         <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
@@ -736,7 +738,7 @@ export default function LeadsPage() {
           </label>
           <button type="button" className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={() => setFilterOpen(true)}><Filter size={13} /> Filter</button>
         </div>
-      </div>}
+      </PageToolbar>}
 
       {showingLeadInspection ? (
         <DealWorkspace

@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useApp } from '../store/AppContext';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
+import PageToolbar from '../components/ui/PageToolbar';
+import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 import { Plus, CreditCard, Download, TrendingUp, X } from 'lucide-react';
 import type { Payment } from '../types';
 import { downloadCsv } from '../utils/downloadCsv';
@@ -81,22 +83,15 @@ export default function PaymentsPage() {
         </div>
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="flex gap-1 bg-ink-800/60 border border-ink-600 rounded-lg p-1">
-          {(['all', 'Premium', 'Commission', 'Fee'] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
-                tab === t ? 'bg-brand-500 text-white' : 'text-muted hover:text-white'
-              }`}
-            >
-              {t === 'all' ? 'All' : t}
-            </button>
-          ))}
-        </div>
+      <PageToolbar name="payments" className="justify-between">
+        <ViewModeSwitcher label="Payment filters" role="group" value={tab} onChange={setTab} options={[
+          { value: 'all', label: 'All' },
+          { value: 'Premium', label: 'Premium' },
+          { value: 'Commission', label: 'Commission' },
+          { value: 'Fee', label: 'Fee' },
+        ]} />
         <button className="btn-primary !py-1.5" onClick={() => setCreateOpen(true)} disabled={!invoices.some((invoice) => invoice.status !== 'Paid')} title={invoices.some((invoice) => invoice.status !== 'Paid') ? undefined : 'All invoices are paid'}><Plus size={14} /> Record Payment</button>
-      </div>
+      </PageToolbar>
 
       <div className="glass min-w-0 rounded-2xl">
         <div className="fit-wrap payment-list-fit w-full max-w-full min-w-0">

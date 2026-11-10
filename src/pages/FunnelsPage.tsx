@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BarChart3, TrendingDown } from 'lucide-react';
 import Badge from '../components/ui/Badge';
+import PageToolbar from '../components/ui/PageToolbar';
 import { useApp } from '../store/AppContext';
 import { isLostPipelineStage } from '../utils/stageSla';
 import { resolveLeadStageSlaDays } from '../utils/leadStageSla';
@@ -125,12 +126,12 @@ export default function FunnelsPage() {
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <div data-page-toolbar="funnels" className="flex min-w-0 flex-wrap items-center gap-2">
+      <PageToolbar name="funnels">
         <select className="input !w-auto min-w-64 !py-1.5 !text-xs" value={pipelineId} onChange={(event) => setPipelineId(event.target.value)} aria-label="Select pipeline">
           {pipelines.filter((pipeline) => pipeline.isActive).length === 0 && <option value="">No active pipelines</option>}
           {pipelines.filter((pipeline) => pipeline.isActive).map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
         </select>
-      </div>
+      </PageToolbar>
 
       <div data-page-content="funnels" className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Metric label="Deals tracked in funnel" value={totalTracked} icon={<BarChart3 size={16} className="text-brand-400" />} />

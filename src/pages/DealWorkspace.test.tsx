@@ -136,8 +136,8 @@ describe('Deal list row accessibility', () => {
     window.location.hash = '#/deals';
     act(() => root.render(<DealWorkspace deals={[testDeal]} dealsPageMode />));
 
-    const viewTabs = [...container.querySelectorAll<HTMLButtonElement>('[data-deals-view]')];
-    expect(viewTabs.map((tab) => tab.getAttribute('data-deals-view'))).toEqual([
+    const viewTabs = [...container.querySelectorAll<HTMLButtonElement>('[data-view-option]')];
+    expect(viewTabs.map((tab) => tab.getAttribute('data-view-option'))).toEqual([
       'list',
       'pipeline',
       'forecast',

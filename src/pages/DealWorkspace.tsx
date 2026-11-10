@@ -9,6 +9,8 @@ import LeadTemperatureControl from '../components/LeadTemperatureControl';
 import LeadContactSlaBadge from '../components/LeadContactSlaBadge';
 import StageStepper from '../components/deal/StageStepper';
 import Modal from '../components/ui/Modal';
+import PageToolbar from '../components/ui/PageToolbar';
+import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 import TableRowActionsMenu from '../components/ui/TableRowActionsMenu';
 import TableShell from '../components/table/TableShell';
 import StageMenu from '../components/table/StageMenu';
@@ -1771,34 +1773,38 @@ export default function DealWorkspace({
   return (
     <div className="space-y-2">
       {(dealsPageMode ? !selectedItem : workspaceView === 'list' || workspaceView === 'kanban' || !selectedItem) && <div className="space-y-2">
-        <div data-testid={dealsPageMode ? 'deals-toolbar' : undefined} className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <PageToolbar name={dealsPageMode ? 'deals' : undefined} testId={dealsPageMode ? 'deals-toolbar' : undefined} className="justify-between">
           <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-0.5" role="tablist" aria-label={dealsPageMode ? 'Deal views' : 'Deal workspace views'}
+          {dealsPageMode ? <ViewModeSwitcher<DealsView>
+            label="Deal views"
+            value={workspaceView === 'pipeline' || workspaceView === 'list' || workspaceView === 'forecast' || workspaceView === 'archive' ? workspaceView : 'list'}
+            options={[
+              { value: 'list', label: 'List', Icon: List },
+              { value: 'pipeline', label: 'Pipeline', Icon: Columns3 },
+              { value: 'forecast', label: 'Forecast', Icon: TrendingUp },
+              { value: 'archive', label: 'Archive', Icon: Archive },
+            ]}
+            onChange={changeDealsView}
             onKeyDown={(event) => {
               const names: DealsView[] = ['list', 'pipeline', 'forecast', 'archive'];
-              if (!dealsPageMode || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+              if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
               event.preventDefault();
-              const current = names.indexOf(workspaceView as DealsView);
+              const selectedView = names.includes(workspaceView as DealsView) ? workspaceView as DealsView : 'list';
+              const current = names.indexOf(selectedView);
               const next = (current + (event.key === 'ArrowRight' ? 1 : -1) + names.length) % names.length;
               changeDealsView(names[next]);
-              requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-deals-view="${names[next]}"]`)?.focus());
-            }}>
-            {dealsPageMode ? ([
-              { key: 'list' as const, label: 'List', Icon: List },
-              { key: 'pipeline' as const, label: 'Pipeline', Icon: Columns3 },
-              { key: 'forecast' as const, label: 'Forecast', Icon: TrendingUp },
-              { key: 'archive' as const, label: 'Archive', Icon: Archive },
-            ]).map(({ key, label, Icon }) => <button key={key} type="button" role="tab" data-deals-view={key}
-              aria-label={label} title={label} aria-selected={workspaceView === key}
-              onClick={() => changeDealsView(key)}
-              className={`rounded-md p-1.5 transition ${workspaceView === key ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}>
-              <Icon size={14} />
-            </button>) : <>
-              <button type="button" role="tab" aria-selected={workspaceView === 'list'} onClick={() => setWorkspaceView('list')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'list' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>List</button>
-              <button type="button" role="tab" aria-selected={workspaceView === 'kanban'} onClick={() => setWorkspaceView('kanban')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'kanban' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>Kanban</button>
-              <button type="button" role="tab" aria-selected={workspaceView === 'inspection'} onClick={() => setWorkspaceView('inspection')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'inspection' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>Inspection</button>
-            </>}
-          </div>
+              requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-view-option="${names[next]}"]`)?.focus());
+            }}
+          /> : <ViewModeSwitcher<'list' | 'kanban' | 'inspection'>
+            label="Deal workspace views"
+            value={workspaceView === 'list' || workspaceView === 'kanban' ? workspaceView : 'inspection'}
+            options={[
+              { value: 'list', label: 'List' },
+              { value: 'kanban', label: 'Kanban' },
+              { value: 'inspection', label: 'Inspection' },
+            ]}
+            onChange={setWorkspaceView}
+          />}
           {dealsPageMode && onLegacyImport && <button type="button" className="btn-primary !px-3 !py-1.5 !text-xs" onClick={onLegacyImport}><Plus size={13} /> Legacy deal</button>}
           {!dealsPageMode && onClose && <button type="button" className="btn-ghost !py-1.5" onClick={onClose}>Back to leads</button>}
           </div>
@@ -1817,7 +1823,7 @@ export default function DealWorkspace({
               onClick={() => setConditionBuilderOpen((open) => !open)}><Plus size={13} /> Add condition</button>
             {onOpenFilters && <button type="button" className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={onOpenFilters}><Filter size={13} /> Filter</button>}
           </div>}
-        </div>
+        </PageToolbar>
         {dealsPageMode && (conditionBuilderOpen || filterConditions.length > 0) && <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-ink-700 bg-ink-900/40 p-2">
           {conditionBuilderOpen && <>
             <select className="input !w-auto !py-1.5 !text-xs" aria-label="Condition field" value={conditionDraft.field}
@@ -2333,29 +2339,35 @@ export default function DealWorkspace({
               </div>
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
-              <div className="flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-1" role="tablist" aria-label="Deal workspace views"
+              {dealsPageMode ? <ViewModeSwitcher<DealsView>
+                label="Deal workspace views"
+                value={workspaceView === 'pipeline' || workspaceView === 'list' || workspaceView === 'forecast' || workspaceView === 'archive' ? workspaceView : 'list'}
+                options={[
+                  { value: 'list', label: 'List', Icon: List },
+                  { value: 'pipeline', label: 'Pipeline', Icon: Columns3 },
+                  { value: 'forecast', label: 'Forecast', Icon: TrendingUp },
+                  { value: 'archive', label: 'Archive', Icon: Archive },
+                ]}
+                onChange={changeDealsView}
                 onKeyDown={(event) => {
-                  if (!dealsPageMode || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
-                  event.preventDefault();
                   const names: DealsView[] = ['list', 'pipeline', 'forecast', 'archive'];
-                  const current = names.indexOf(workspaceView as DealsView);
+                  if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+                  event.preventDefault();
+                  const selectedView = names.includes(workspaceView as DealsView) ? workspaceView as DealsView : 'list';
+                  const current = names.indexOf(selectedView);
                   const next = (current + (event.key === 'ArrowRight' ? 1 : -1) + names.length) % names.length;
                   changeDealsView(names[next]);
-                  requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-deals-view="${names[next]}"]`)?.focus());
-                }}>
-                {dealsPageMode ? ([
-                  { key: 'list' as const, label: 'List', Icon: List },
-                  { key: 'pipeline' as const, label: 'Pipeline', Icon: Columns3 },
-                  { key: 'forecast' as const, label: 'Forecast', Icon: TrendingUp },
-                  { key: 'archive' as const, label: 'Archive', Icon: Archive },
-                ]).map(({ key, label, Icon }) => <button key={key} type="button" role="tab" data-deals-view={key} aria-label={label} title={label}
-                  aria-selected={workspaceView === key} onClick={() => changeDealsView(key)}
-                  className={`rounded-md p-1.5 transition ${workspaceView === key ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><Icon size={14} /></button>)
-                  : <>
-                    <button type="button" role="tab" aria-label="Kanban view" title="Kanban view" aria-selected={false} onClick={() => setWorkspaceView('kanban')} className="rounded-md p-2 text-muted transition hover:text-white"><Columns3 size={14} /></button>
-                    <button type="button" role="tab" aria-label="Inspection view" title="Inspection view" aria-selected={true} onClick={() => setWorkspaceView('inspection')} className="rounded-md bg-[#1B1E22] p-2 text-white transition"><List size={14} /></button>
-                  </>}
-              </div>
+                  requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-view-option="${names[next]}"]`)?.focus());
+                }}
+              /> : <ViewModeSwitcher<'kanban' | 'inspection'>
+                label="Deal workspace views"
+                value={workspaceView === 'kanban' ? 'kanban' : 'inspection'}
+                options={[
+                  { value: 'kanban', label: 'Kanban view', Icon: Columns3 },
+                  { value: 'inspection', label: 'Inspection view', Icon: List },
+                ]}
+                onChange={setWorkspaceView}
+              />}
               <button
                 type="button"
                 aria-label={onClose ? 'Back to leads' : 'Back to deals'}
