@@ -163,39 +163,31 @@ export default function VendorsPage() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p className="text-xs text-muted">Insurers, reinsurers, surveyors, and loss adjusters managed as active broker-side vendor records.</p>
+    <div className="flex min-w-0 flex-col gap-2">
+      <div data-page-toolbar="vendors" className="flex min-w-0 flex-wrap items-center gap-2">
+        <div className="relative min-w-40 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-2.5 text-muted" size={14} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search vendors, country or contact" aria-label="Search vendors" className="input w-full !py-1.5 !pl-9 !text-xs" />
         </div>
+        <select aria-label="Filter vendors by type" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="input !w-auto max-w-[150px] !py-1.5 !text-xs">
+            <option value="all">All types</option>
+            {VENDOR_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+        </select>
+        <select aria-label="Filter vendors by country" value={countryFilter} onChange={(event) => setCountryFilter(event.target.value)} className="input !w-auto max-w-[150px] !py-1.5 !text-xs">
+            <option value="all">All countries</option>
+            {uniqueCountries.map((country) => <option key={country} value={country}>{country}</option>)}
+        </select>
+        <select aria-label="Filter vendors by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="input !w-auto max-w-[130px] !py-1.5 !text-xs">
+            <option value="all">All status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+        </select>
         {activeRole !== 'finance' && (
           <button type="button" className="btn-primary !py-1.5 !text-xs" onClick={openNewVendor}><Plus size={14} /> Add Vendor</button>
         )}
       </div>
 
-      <div className="glass rounded-2xl p-3">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-2.5 text-muted" size={14} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search vendors, country or contact" className="input w-full !pl-9" />
-          </div>
-          <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="input max-w-[150px]">
-            <option value="all">All types</option>
-            {VENDOR_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
-          </select>
-          <select value={countryFilter} onChange={(event) => setCountryFilter(event.target.value)} className="input max-w-[150px]">
-            <option value="all">All countries</option>
-            {uniqueCountries.map((country) => <option key={country} value={country}>{country}</option>)}
-          </select>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="input max-w-[130px]">
-            <option value="all">All status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[1.7fr_1fr]">
+      <div data-page-content="vendors" className="grid gap-4 xl:grid-cols-[1.7fr_1fr]">
         <div className="vendor-card-grid grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
           {visibleVendors.length === 0 ? (
             <div className="glass flex w-full min-h-[220px] items-center justify-center rounded-2xl text-sm text-muted">No vendors match the current filters.</div>

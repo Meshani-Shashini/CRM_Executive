@@ -676,21 +676,56 @@ export default function PipelinesPage() {
       : 'Proposal readiness';
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-sm text-muted">Move opportunities through configured insurance stages.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <select className="input w-auto min-w-64" value={pipelineId} onChange={(event) => setPipelineId(event.target.value)} aria-label="Select pipeline">
+    <div className="flex min-w-0 flex-col gap-2">
+      <div data-page-toolbar="pipelines" className="flex min-w-0 flex-wrap items-center gap-2">
+          <select className="input !w-auto min-w-48 max-w-64 !py-1.5 !text-xs" value={pipelineId} onChange={(event) => setPipelineId(event.target.value)} aria-label="Select pipeline">
             {pipelines.filter((pipeline) => pipeline.isActive).length === 0 && <option value="">No active pipelines</option>}
             {pipelines.filter((pipeline) => pipeline.isActive).map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
           </select>
-          {user.role === 'admin' && <button className="btn-primary" onClick={openPipelineModal}><Plus size={15} /> New Pipeline</button>}
-          {user.role === 'admin' && <button className="btn-ghost" onClick={() => setConfigOpen((open) => !open)}><Settings2 size={15} /> {configOpen ? 'Back to Board' : 'Configure Stages'}</button>}
-        </div>
+          {user.role === 'admin' && <button className="btn-primary !py-1.5 !text-xs" onClick={openPipelineModal}><Plus size={14} /> New Pipeline</button>}
+          {user.role === 'admin' && <button className="btn-ghost !py-1.5 !text-xs" onClick={() => setConfigOpen((open) => !open)}><Settings2 size={14} /> {configOpen ? 'Back to Board' : 'Configure Stages'}</button>}
+          {selectedPipeline && !configOpen && <div role="group" className="flex flex-wrap items-center gap-1.5" aria-label="Deal health and intent filters">
+            <span className="text-xs text-muted">Health</span>
+            {(['Healthy', 'At Risk', 'Rotting'] as const).map((health) => (
+              <button
+                key={health}
+                type="button"
+                aria-pressed={healthFilter === health}
+                onClick={() => setHealthFilter((current) => current === health ? '' : health)}
+                className={`rounded-full border px-2.5 py-1 text-[11px] transition ${healthFilter === health ? healthFilterClasses[health] : 'border-ink-600 text-muted hover:bg-ink-700 hover:text-white'}`}
+              >
+                {health}
+              </button>
+            ))}
+            <span className="ml-1 text-xs text-muted">Intent</span>
+            {(['P1', 'P2', 'P3'] as const).map((tier) => (
+              <button
+                key={tier}
+                type="button"
+                aria-pressed={intentFilter === tier}
+                onClick={() => setIntentFilter((current) => current === tier ? '' : tier)}
+                className={`rounded-full border px-2.5 py-1 text-[11px] transition ${
+                  intentFilter === tier
+                    ? 'border-brand-400/50 bg-brand-400/15 text-brand-300'
+                    : 'border-ink-600 text-muted hover:bg-ink-700 hover:text-white'
+                }`}
+              >
+                {tier}
+              </button>
+            ))}
+            {(healthFilter || intentFilter) && (
+              <button
+                type="button"
+                className="px-2 py-1 text-[11px] text-muted hover:text-white"
+                onClick={() => { setHealthFilter(''); setIntentFilter(''); }}
+              >
+                Clear
+              </button>
+            )}
+          </div>}
       </div>
 
+      <div data-page-content="pipelines" className="flex min-w-0 flex-col gap-2">
       {isRenewalPipeline(selectedPipeline) && (
         <div role="status" className="rounded-xl border border-brand-400/30 bg-brand-400/5 px-4 py-3 text-sm text-muted">
           <span className="font-medium text-white">Annual renewal workflow:</span>{' '}
@@ -734,51 +769,11 @@ export default function PipelinesPage() {
         </div>
       ) : (
         <>
-        <div className="space-y-3">
-          <div role="group" className="flex flex-wrap items-center gap-2" aria-label="Deal health and intent filters">
-            <span className="text-xs text-muted">Health</span>
-            {(['Healthy', 'At Risk', 'Rotting'] as const).map((health) => (
-              <button
-                key={health}
-                type="button"
-                aria-pressed={healthFilter === health}
-                onClick={() => setHealthFilter((current) => current === health ? '' : health)}
-                className={`rounded-full border px-3 py-1 text-xs transition ${healthFilter === health ? healthFilterClasses[health] : 'border-ink-600 text-muted hover:bg-ink-700 hover:text-white'}`}
-              >
-                {health}
-              </button>
-            ))}
-            <span className="ml-2 text-xs text-muted">Intent</span>
-            {(['P1', 'P2', 'P3'] as const).map((tier) => (
-              <button
-                key={tier}
-                type="button"
-                aria-pressed={intentFilter === tier}
-                onClick={() => setIntentFilter((current) => current === tier ? '' : tier)}
-                className={`rounded-full border px-3 py-1 text-xs transition ${
-                  intentFilter === tier
-                    ? 'border-brand-400/50 bg-brand-400/15 text-brand-300'
-                    : 'border-ink-600 text-muted hover:bg-ink-700 hover:text-white'
-                }`}
-              >
-                {tier}
-              </button>
-            ))}
-            {(healthFilter || intentFilter) && (
-              <button
-                type="button"
-                className="px-2 py-1 text-xs text-muted hover:text-white"
-                onClick={() => { setHealthFilter(''); setIntentFilter(''); }}
-              >
-                Clear
-              </button>
-            )}
-          </div>
-          <div className="flex gap-3 overflow-x-auto pb-3">
+        <div className="grid min-w-0 gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(18rem,100%),1fr))]">
           {stages.map((stage) => {
             const stageDeals = visibleDealsForStage(stage);
             return (
-              <section key={stage.id} className="w-72 shrink-0 rounded-xl bg-ink-900/50 p-2">
+              <section key={stage.id} className="min-w-0 rounded-xl bg-ink-900/50 p-2">
                 <div className="flex items-start justify-between gap-2 px-2 py-2">
                   <div>
                     <h3 className="text-sm font-semibold text-white">{stage.name}</h3>
@@ -856,10 +851,10 @@ export default function PipelinesPage() {
               </section>
             );
           })}
-          </div>
         </div>
         </>
       )}
+      </div>
 
       <Modal open={stageModalOpen} onClose={() => { setStageModalOpen(false); setEditingStage(null); }} title={editingStage ? 'Edit Pipeline Stage' : 'Add Pipeline Stage'} subtitle={selectedPipeline?.name} size="sm" footer={<><button className="btn-ghost" onClick={() => { setStageModalOpen(false); setEditingStage(null); }}>Cancel</button><button type="submit" form="pipeline-stage-form" className="btn-primary"><Check size={14} /> Save Stage</button></>}>
         <form id="pipeline-stage-form" onSubmit={saveStage} className="space-y-3">

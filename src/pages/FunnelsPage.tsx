@@ -124,18 +124,15 @@ export default function FunnelsPage() {
   const leadDurationSummary = summarizeStageVisits(leadStageVisits);
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-sm text-muted">Stage entries and conversion rates calculated from deal stage history.</p>
-        </div>
-        <select className="input w-auto min-w-64" value={pipelineId} onChange={(event) => setPipelineId(event.target.value)} aria-label="Select pipeline">
+    <div className="flex min-w-0 flex-col gap-2">
+      <div data-page-toolbar="funnels" className="flex min-w-0 flex-wrap items-center gap-2">
+        <select className="input !w-auto min-w-64 !py-1.5 !text-xs" value={pipelineId} onChange={(event) => setPipelineId(event.target.value)} aria-label="Select pipeline">
           {pipelines.filter((pipeline) => pipeline.isActive).length === 0 && <option value="">No active pipelines</option>}
           {pipelines.filter((pipeline) => pipeline.isActive).map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
         </select>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div data-page-content="funnels" className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Metric label="Deals tracked in funnel" value={totalTracked} icon={<BarChart3 size={16} className="text-brand-400" />} />
         <Metric label="Closed won" value={wonCount} icon={<Badge variant="win">Won</Badge>} />
         <Metric label="Closed lost" value={lostCount} icon={<TrendingDown size={16} className="text-hot" />} />

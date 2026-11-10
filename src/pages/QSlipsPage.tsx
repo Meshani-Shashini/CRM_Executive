@@ -190,56 +190,37 @@ export default function QSlipsPage() {
   };
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm text-muted">Track market requests linked to open deals.</p>
+    <div className="flex min-w-0 flex-col gap-2">
+      <div data-page-toolbar="qslips" className="flex min-w-0 flex-wrap items-center gap-2">
+        <Badge compact variant="warm">Draft <span className="font-semibold">{quotationRequests.filter((request) => request.status === 'Draft').length}</span></Badge>
+        <Badge compact variant="cold">Awaiting Insurer <span className="font-semibold">{quotationRequests.filter((request) => request.status === 'Sent').length}</span></Badge>
+        <Badge compact variant="win">Responses Received <span className="font-semibold">{quotationRequests.filter((request) => request.status === 'Responses received').length}</span></Badge>
+        <div className="relative min-w-32 flex-1">
+          <Search size={14} className="pointer-events-none absolute left-3 top-2.5 text-muted" />
+          <input className="input w-full !py-1.5 !pl-9 !text-xs" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search quotation requests" aria-label="Search quotation requests" />
         </div>
-        <button className="btn-primary !py-1.5" onClick={() => openNew()}><Plus size={14} /> New QRS</button>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <SlipCount label="Draft" value={quotationRequests.filter((request) => request.status === 'Draft').length} color="text-warm" />
-        <SlipCount label="Awaiting Insurer" value={quotationRequests.filter((request) => request.status === 'Sent').length} color="text-cold" />
-        <SlipCount label="Responses Received" value={quotationRequests.filter((request) => request.status === 'Responses received').length} color="text-win" />
-      </div>
-
-      <section className="glass space-y-3 rounded-2xl p-4">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <FilterField label="Search">
-            <div className="relative">
-              <Search size={14} className="pointer-events-none absolute left-3 top-2.5 text-muted" />
-              <input className="input !pl-9" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Reference, deal, lead, client, vendor" aria-label="Search quotation requests" />
-            </div>
-          </FilterField>
-          <FilterField label="Status">
-            <select className="input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+        <select className="input !w-auto max-w-24 !py-1.5 !text-[10px]" aria-label="Filter quotation requests by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
               <option value="">All statuses</option>
               {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-            </select>
-          </FilterField>
-          <FilterField label="Vendor">
-            <select className="input" value={vendorFilter} onChange={(event) => setVendorFilter(event.target.value)}>
+        </select>
+        <select className="input !w-auto max-w-28 !py-1.5 !text-[10px]" aria-label="Filter quotation requests by vendor" value={vendorFilter} onChange={(event) => setVendorFilter(event.target.value)}>
               <option value="">All vendors</option>
               {vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
-            </select>
-          </FilterField>
-          <FilterField label="Client">
-            <select className="input" value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}>
+        </select>
+        <select className="input !w-auto max-w-28 !py-1.5 !text-[10px]" aria-label="Filter quotation requests by client" value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}>
               <option value="">All clients</option>
               {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-            </select>
-          </FilterField>
-        </div>
+        </select>
         {requestFilter && (
-          <button type="button" className="text-xs text-brand-300 hover:text-white" onClick={() => {
+          <button type="button" className="btn-ghost !px-2 !py-1.5 !text-xs text-brand-300 hover:text-white" onClick={() => {
             setRequestFilter('');
             window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/qslips`);
           }}>Clear linked-request filter</button>
         )}
-      </section>
+        <button className="btn-primary !px-2 !py-1.5 !text-xs" onClick={() => openNew()}><Plus size={14} /> New QRS</button>
+      </div>
 
-      <div className="glass min-w-0 overflow-hidden rounded-2xl">
+      <div data-page-content="qslips" className="glass min-w-0 overflow-hidden rounded-2xl">
         <div className="fit-wrap qrs-list-fit w-full max-w-full min-w-0">
           <table className="table-fixed w-full text-left text-sm">
             <colgroup>{QUOTATION_REQUEST_COLUMNS.map((column) => <col key={column} />)}</colgroup>
@@ -364,10 +345,6 @@ export default function QSlipsPage() {
       </Modal>
     </div>
   );
-}
-
-function SlipCount({ label, value, color }: { label: string; value: number; color: string }) {
-  return <div className="glass rounded-2xl p-4"><div className="text-xs text-muted">{label}</div><div className={`mt-1 text-2xl font-bold ${color}`}>{value}</div></div>;
 }
 
 function FilterField({ label, children }: { label: string; children: React.ReactNode }) {

@@ -18,13 +18,15 @@ export default function Badge({
   variant = 'muted',
   children,
   dot,
+  compact = false,
 }: {
   variant?: Variant;
   children: ReactNode;
   dot?: boolean;
+  compact?: boolean;
 }) {
   return (
-    <span className={`pill border ${map[variant]}`}>
+    <span className={`pill border ${compact ? 'pill-compact' : ''} ${map[variant]}`}>
       {dot && <span className="w-1.5 h-1.5 rounded-full bg-current" />}
       {children}
     </span>

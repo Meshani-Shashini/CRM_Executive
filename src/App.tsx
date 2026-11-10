@@ -164,7 +164,9 @@ function Shell() {
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Topbar page={page} onMenu={() => setSidebarOpen(true)} />
         {persistenceError && <div role="alert" className="border-b border-hot/30 bg-hot/10 px-4 py-2 text-sm text-hot">{persistenceError}</div>}
-        <main className={`min-w-0 w-full max-w-full flex-1 overflow-x-hidden overflow-y-auto p-4 lg:p-6 animate-fadeIn ${page === 'leads' ? '!pt-1 lg:!pt-2' : ''}`}>
+        <main className={`min-w-0 w-full max-w-full flex-1 overflow-x-hidden overflow-y-auto p-4 lg:p-6 animate-fadeIn ${
+          ['leads', 'calendar', 'vendors', 'qslips', 'renewals', 'funnels', 'pipelines'].includes(page) ? '!pt-1 lg:!pt-2' : ''
+        } ${page === 'calendar' ? 'lg:!overflow-hidden lg:!p-0 lg:!pt-0' : ''}`}>
           {renderPage()}
         </main>
       </div>

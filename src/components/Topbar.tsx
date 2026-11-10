@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Menu, Search, Bell, ChevronDown, LogOut, Building2, UserRound, Receipt, AlertTriangle, CalendarDays, Check } from 'lucide-react';
 import { useApp } from '../store/AppContext';
+import PageInfoButton from './ui/PageInfoButton';
 import type { Role } from '../types';
 import { calculateLeadContactSla, getContactMadeSlaTargetDays } from '../utils/leadSla';
 import { isTerminalLeadStage, lifecycleStageForLead } from '../utils/leadLifecycle';
@@ -37,6 +38,15 @@ const titles: Record<string, string> = {
   targets: 'Targets',
   'audit-log': 'Audit Log',
   mira: 'MIRA Form 1 — Business Written',
+};
+
+const pageDescriptions: Partial<Record<string, string>> = {
+  vendors: 'Insurers, reinsurers, surveyors, and loss adjusters managed as active broker-side vendor records.',
+  calendar: 'Read-only schedule derived from activities, records, renewals, and SLAs.',
+  qslips: 'Track market requests linked to open deals.',
+  renewals: 'Policies due now or within the next 120 days, derived from existing records.',
+  funnels: 'Stage entries and conversion rates calculated from deal stage history.',
+  pipelines: 'Move opportunities through configured insurance stages.',
 };
 
 type SearchResult = {
@@ -244,10 +254,11 @@ export default function Topbar({
         <button type="button" onClick={onMenu} aria-label="Open navigation menu" className="shrink-0 rounded-lg p-2 -ml-2 text-muted hover:bg-ink-700 hover:text-white xl:hidden">
           <Menu size={18} />
         </button>
-        <div className="flex-1 min-w-0">
+        <div className="flex min-w-0 flex-1 items-center gap-1">
           <h1 className="text-white font-semibold text-base lg:text-lg truncate">
             {titles[page] ?? 'Dashboard'}
           </h1>
+          {pageDescriptions[page] && <PageInfoButton description={pageDescriptions[page]} />}
         </div>
         <div className="relative flex min-w-0 max-w-64 flex-1 items-center gap-2 rounded-lg border border-ink-600 bg-ink-800/70 px-3 py-1.5" ref={searchRef}>
           <Search size={14} className="text-muted" />

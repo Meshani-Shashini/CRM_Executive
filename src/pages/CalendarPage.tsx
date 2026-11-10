@@ -109,7 +109,7 @@ export default function CalendarPage() {
         type="button"
         title={`${event.title} · ${event.client}`}
         onClick={() => openEvent(event)}
-        className={`block w-full min-w-0 truncate rounded border text-left transition hover:brightness-125 ${meta.color} ${
+        className={`block w-full min-w-0 truncate whitespace-nowrap rounded border text-left transition hover:brightness-125 ${meta.color} ${
           compact ? 'px-1 py-0.5 text-[9px] leading-tight' : 'px-2.5 py-2 text-xs'
         }`}
       >
@@ -125,7 +125,7 @@ export default function CalendarPage() {
       return date;
     })
     : [];
-  const monthCells = Array.from({ length: Math.ceil((monthStart.getDay() + monthEnd.getDate()) / 7) * 7 }, (_, index) => {
+  const monthCells = Array.from({ length: 42 }, (_, index) => {
     const day = index - monthStart.getDay() + 1;
     return day > 0 && day <= monthEnd.getDate() ? new Date(cursorYear, cursorMonth, day) : null;
   });
@@ -139,12 +139,9 @@ export default function CalendarPage() {
   };
 
   return (
-    <div className="min-w-0 space-y-4">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs text-muted">Read-only schedule derived from activities, records, renewals, and SLAs.</p>
-        </div>
-        <div className="hidden items-center gap-1 rounded-lg border border-ink-700 bg-ink-900/70 p-1 sm:flex" aria-label="Calendar view">
+    <div className="calendar-page flex min-w-0 flex-col gap-2 lg:h-[calc(100dvh-3.5rem)] lg:overflow-hidden">
+      <div data-page-toolbar="calendar" className="flex min-w-0 flex-wrap items-center gap-2">
+        <div className="hidden items-center gap-1 rounded-lg border border-ink-700 bg-ink-900/70 p-1 sm:inline-flex" role="group" aria-label="Calendar view">
           {(['month', 'week', 'agenda'] as const).map((option) => (
             <button key={option} type="button" aria-pressed={view === option} onClick={() => setView(option)}
               className={`rounded-md px-3 py-1.5 text-xs capitalize ${view === option ? 'bg-brand-500 text-white' : 'text-muted hover:text-white'}`}>
@@ -152,58 +149,49 @@ export default function CalendarPage() {
             </button>
           ))}
         </div>
-      </header>
-
-      <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
-        <label className="text-[11px] text-muted">Show
-          <select className="input mt-1 !py-2 text-xs" value={ownership} onChange={(event) => setOwnership(event.target.value as 'all' | 'mine')}>
+        <label className="sr-only" htmlFor="calendar-ownership">Show</label>
+        <select id="calendar-ownership" aria-label="Show calendar events" className="input !w-auto !py-1.5 !text-xs" value={ownership} onChange={(event) => setOwnership(event.target.value as 'all' | 'mine')}>
             <option value="all">All events</option>
             <option value="mine">Mine</option>
-          </select>
-        </label>
-        <label className="text-[11px] text-muted">Type
-          <select className="input mt-1 !py-2 text-xs" value={category} onChange={(event) => setCategory(event.target.value)}>
+        </select>
+        <label className="sr-only" htmlFor="calendar-category">Type</label>
+        <select id="calendar-category" aria-label="Filter calendar by type" className="input !w-auto !py-1.5 !text-xs" value={category} onChange={(event) => setCategory(event.target.value)}>
             <option value="all">All types</option>
             {categories.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
-        </label>
-        <label className="text-[11px] text-muted">Pipeline
-          <select className="input mt-1 !py-2 text-xs" value={pipelineId} onChange={(event) => setPipelineId(event.target.value)}>
+        </select>
+        <label className="sr-only" htmlFor="calendar-pipeline">Pipeline</label>
+        <select id="calendar-pipeline" aria-label="Filter calendar by pipeline" className="input !w-auto max-w-48 !py-1.5 !text-xs" value={pipelineId} onChange={(event) => setPipelineId(event.target.value)}>
             <option value="all">All pipelines</option>
             {pipelines.filter((pipeline) => pipeline.isActive).map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
-          </select>
-        </label>
+        </select>
+        <span className="min-w-24 text-center text-xs font-medium text-white" aria-live="polite">{periodTitle}</span>
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          <button type="button" aria-label="Previous period" onClick={() => shiftCursor(-1)} className="rounded-lg p-2 text-muted hover:bg-ink-700 hover:text-white"><ChevronLeft size={16} /></button>
+          <button type="button" onClick={goToday} className="btn-ghost !px-2.5 !py-1.5 text-[11px]">Today</button>
+          <button type="button" aria-label="Next period" onClick={() => shiftCursor(1)} className="rounded-lg p-2 text-muted hover:bg-ink-700 hover:text-white"><ChevronRight size={16} /></button>
+        </div>
       </div>
 
-      <div className={`grid min-w-0 grid-cols-1 gap-4 ${effectiveView === 'agenda' ? '' : 'xl:grid-cols-[minmax(0,1fr)_300px]'}`}>
-        <section className="glass min-w-0 rounded-2xl p-3 sm:p-5" aria-label={`${effectiveView} calendar`}>
-          <div className="mb-4 flex min-w-0 items-center justify-between gap-2">
-            <h2 className="min-w-0 truncate text-sm font-semibold text-white sm:text-lg">{periodTitle}</h2>
-            <div className="flex shrink-0 items-center gap-1">
-              <button type="button" aria-label="Previous period" onClick={() => shiftCursor(-1)} className="rounded-lg p-2 text-muted hover:bg-ink-700 hover:text-white"><ChevronLeft size={16} /></button>
-              <button type="button" onClick={goToday} className="btn-ghost !px-2.5 !py-1.5 text-[11px]">Today</button>
-              <button type="button" aria-label="Next period" onClick={() => shiftCursor(1)} className="rounded-lg p-2 text-muted hover:bg-ink-700 hover:text-white"><ChevronRight size={16} /></button>
-            </div>
-          </div>
-
+      <div data-page-content="calendar" className="calendar-layout grid min-w-0 gap-2 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_280px] lg:grid-rows-[minmax(0,1fr)]">
+        <section className="calendar-view-panel glass min-w-0 rounded-2xl p-3 sm:p-4 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden" aria-label={`${effectiveView} calendar`}>
           {effectiveView === 'month' && (
             <>
-              <div className="mb-2 grid grid-cols-7 gap-1 text-center text-[10px] text-muted sm:text-xs">
+              <div className="mb-1 grid shrink-0 grid-cols-7 gap-1 text-center text-[10px] text-muted sm:text-xs">
                 {weekdays.map((day) => <div key={day} className="py-1">{day}</div>)}
               </div>
-              <div className="grid grid-cols-7 gap-1">
+              <div data-testid="calendar-month-grid" className="calendar-month-grid grid grid-cols-7 grid-rows-6 gap-1 lg:min-h-0 lg:flex-1">
                 {monthCells.map((date, index) => {
-                  if (!date) return <div key={`blank-${index}`} className="min-h-16 rounded-lg bg-ink-900/20 sm:min-h-24" />;
+                  if (!date) return <div key={`blank-${index}`} className="min-h-16 min-w-0 overflow-hidden rounded-lg bg-ink-900/20 lg:min-h-0" />;
                   const key = localDate(date);
                   const dayEvents = eventsByDate.get(key) ?? [];
                   return (
-                    <div key={key} className={`min-h-16 min-w-0 overflow-hidden rounded-lg border p-1 sm:min-h-24 sm:p-1.5 ${
+                    <div key={key} className={`flex min-h-16 min-w-0 flex-col overflow-hidden rounded-lg border p-1 sm:p-1.5 lg:min-h-0 ${
                       key === todayKey ? 'border-brand-400 bg-brand-500/10' : 'border-ink-700/50 bg-ink-900/40'
                     }`}>
-                      <div className={`mb-1 text-[10px] sm:text-xs ${key === todayKey ? 'font-bold text-brand-300' : 'text-muted'}`}>{date.getDate()}</div>
-                      <div className="space-y-0.5">
+                      <div className={`mb-0.5 shrink-0 text-[10px] sm:text-xs ${key === todayKey ? 'font-bold text-brand-300' : 'text-muted'}`}>{date.getDate()}</div>
+                      <div className="min-h-0 space-y-0.5 overflow-hidden">
                         {dayEvents.slice(0, 2).map((event) => eventButton(event, true))}
-                        {dayEvents.length > 2 && <div className="truncate text-[9px] text-muted">+{dayEvents.length - 2} more</div>}
+                        {dayEvents.length > 2 && <div className="truncate whitespace-nowrap text-[9px] leading-tight text-muted">+{dayEvents.length - 2} more</div>}
                       </div>
                     </div>
                   );
@@ -213,6 +201,7 @@ export default function CalendarPage() {
           )}
 
           {effectiveView === 'week' && (
+            <div className="min-h-0 min-w-0 overflow-y-auto lg:flex-1">
             <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
               {periodDays.map((date) => {
                 const key = localDate(date);
@@ -226,10 +215,11 @@ export default function CalendarPage() {
                 );
               })}
             </div>
+            </div>
           )}
 
           {effectiveView === 'agenda' && (
-            <div className="space-y-3">
+            <div className="min-h-0 space-y-3 overflow-y-auto lg:flex-1">
               {agendaDates.length === 0 && <p className="rounded-lg border border-ink-700/60 p-4 text-sm text-muted">No events in this period.</p>}
               {agendaDates.map((date) => (
                 <section key={date} className="min-w-0 rounded-lg border border-ink-700/60 bg-ink-900/30 p-3">
@@ -249,9 +239,9 @@ export default function CalendarPage() {
           )}
         </section>
 
-        <aside className="glass min-w-0 rounded-2xl p-4 sm:p-5">
+        <aside className="glass flex min-w-0 flex-col rounded-2xl p-4 sm:p-5 lg:min-h-0 lg:overflow-hidden">
           <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white"><Bell size={15} /> Upcoming</h2>
-          <div className="space-y-2">
+          <div className="space-y-2 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
             {upcoming.length === 0 && <p className="text-sm text-muted">No upcoming events.</p>}
             {upcoming.map((event) => (
               <button key={event.id} type="button" onClick={() => openEvent(event)}

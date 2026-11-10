@@ -22,15 +22,21 @@ export default function RenewalsPage() {
     clients, deals, leads, pipelines, pipelineStages, users,
   }), [clients, deals, leads, pipelines, pipelineStages, users]);
   const staffName = (id: string) => users.find((user) => user.id === id)?.name ?? formatStaffIdentifier(id);
+  const renewalCounts = [
+    { label: 'Overdue', count: rows.filter((row) => row.daysUntil < 0).length, variant: 'hot' as const },
+    { label: 'Due 30d', count: rows.filter((row) => row.daysUntil >= 0 && row.daysUntil <= 30).length, variant: 'warm' as const },
+    { label: 'Due 60d', count: rows.filter((row) => row.daysUntil > 30 && row.daysUntil <= 60).length, variant: 'brand' as const },
+    { label: 'Due 90d', count: rows.filter((row) => row.daysUntil > 60 && row.daysUntil <= 120).length, variant: 'muted' as const },
+  ];
 
   return (
-    <div className="min-w-0 space-y-4">
-      <header>
-        <p className="text-xs text-muted">Policies due now or within the next 120 days, derived from existing records.</p>
-      </header>
+    <div className="flex min-w-0 flex-col gap-2">
+      <div data-page-toolbar="renewals" className="flex min-w-0 flex-wrap items-center gap-2">
+        {renewalCounts.map((item) => <Badge key={item.label} variant={item.variant}>{item.label} <span className="font-semibold">{item.count}</span></Badge>)}
+      </div>
 
-      {rows.length === 0 && <div className="glass rounded-xl p-6 text-sm text-muted">No renewals are due within the next 120 days.</div>}
-      <div className="space-y-4">
+      <div data-page-content="renewals" className="space-y-4">
+        {rows.length === 0 && <div className="glass rounded-xl p-6 text-sm text-muted">No renewals are due within the next 120 days.</div>}
         {GROUPS.map((group) => {
           const groupRows = rows.filter((row) => row.bucket === group.key);
           if (!groupRows.length) return null;
