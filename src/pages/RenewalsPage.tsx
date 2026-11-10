@@ -26,8 +26,7 @@ export default function RenewalsPage() {
   return (
     <div className="min-w-0 space-y-4">
       <header>
-        <h1 className="text-xl font-semibold text-white">Renewals</h1>
-        <p className="mt-1 text-xs text-muted">Policies due now or within the next 120 days, derived from existing records.</p>
+        <p className="text-xs text-muted">Policies due now or within the next 120 days, derived from existing records.</p>
       </header>
 
       {rows.length === 0 && <div className="glass rounded-xl p-6 text-sm text-muted">No renewals are due within the next 120 days.</div>}

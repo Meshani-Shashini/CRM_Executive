@@ -40,7 +40,7 @@ export default function MiraPage() {
               <FileCheck2 size={20} className="text-win" />
             </div>
             <div>
-              <h2 className="text-white font-semibold">MIRA Form 1 — Summary of Business Written</h2>
+              <h2 className="hidden text-white font-semibold print:block">MIRA Form 1 — Summary of Business Written</h2>
               <p className="text-sm text-muted mt-0.5">Maldives Inland Revenue Authority · statutory regulatory export</p>
             </div>
           </div>

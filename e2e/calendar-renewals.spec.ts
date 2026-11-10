@@ -11,7 +11,8 @@ test.beforeAll(() => {
 test('calendar and renewals render with responsive layouts and screenshots', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('/#/calendar');
-  await expect(page.getByRole('main').getByRole('heading', { name: 'Calendar' })).toBeVisible();
+  await expect(page.getByRole('banner').getByRole('heading', { name: 'Calendar' })).toBeVisible();
+  await expect(page.getByRole('main').getByRole('heading', { name: 'Calendar' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'month', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'week', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'agenda', exact: true })).toBeVisible();
@@ -40,7 +41,8 @@ test('calendar and renewals render with responsive layouts and screenshots', asy
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('/#/renewals');
-  await expect(page.getByRole('main').getByRole('heading', { name: 'Renewals' })).toBeVisible();
+  await expect(page.getByRole('banner').getByRole('heading', { name: 'Renewals' })).toBeVisible();
+  await expect(page.getByRole('main').getByRole('heading', { name: 'Renewals' })).toHaveCount(0);
   await expect(page.getByRole('table', { name: /renewals/i }).first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'Open deal' }).first()).toBeVisible();
   await page.screenshot({

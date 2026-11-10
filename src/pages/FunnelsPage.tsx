@@ -127,8 +127,7 @@ export default function FunnelsPage() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-white">Pipeline Funnels</h2>
-          <p className="text-sm text-muted mt-1">Stage entries and conversion rates calculated from deal stage history.</p>
+          <p className="text-sm text-muted">Stage entries and conversion rates calculated from deal stage history.</p>
         </div>
         <select className="input w-auto min-w-64" value={pipelineId} onChange={(event) => setPipelineId(event.target.value)} aria-label="Select pipeline">
           {pipelines.filter((pipeline) => pipeline.isActive).length === 0 && <option value="">No active pipelines</option>}

@@ -679,8 +679,7 @@ export default function PipelinesPage() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-white">Insurance Pipelines</h2>
-          <p className="text-sm text-muted mt-1">Move opportunities through configured insurance stages.</p>
+          <p className="text-sm text-muted">Move opportunities through configured insurance stages.</p>
         </div>
         <div className="flex items-center gap-2">
           <select className="input w-auto min-w-64" value={pipelineId} onChange={(event) => setPipelineId(event.target.value)} aria-label="Select pipeline">

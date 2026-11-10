@@ -317,7 +317,8 @@ for (const viewport of viewports) {
     await takeViewportScreenshot(page, `deals-inspection-${sizeLabel}`);
 
     await page.goto('/#/vendors');
-    await expect(page.getByRole('main').getByRole('heading', { name: 'Vendors' })).toBeVisible();
+    await expect(page.getByRole('banner').getByRole('heading', { name: 'Vendors' })).toBeVisible();
+    await expect(page.getByRole('main').getByRole('heading', { name: 'Vendors' })).toHaveCount(0);
     const vendors = page.locator('.vendor-card-grid > div');
     await expect(vendors).toHaveCount(4);
     for (const vendor of [
@@ -335,7 +336,8 @@ for (const viewport of viewports) {
     await takeViewportScreenshot(page, `vendors-${sizeLabel}`);
 
     await page.goto('/#/qslips');
-    await expect(page.getByRole('main').getByRole('heading', { name: 'Quotation Request Slips' })).toBeVisible();
+    await expect(page.getByRole('banner').getByRole('heading', { name: 'Quotation Request Slips' })).toBeVisible();
+    await expect(page.getByRole('main').getByRole('heading', { name: 'Quotation Request Slips' })).toHaveCount(0);
     await assertTableFields(page);
     await assertNoHorizontalOverflow(page);
     await takeViewportScreenshot(page, `qslips-${sizeLabel}`);

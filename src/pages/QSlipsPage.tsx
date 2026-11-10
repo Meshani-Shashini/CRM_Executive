@@ -193,7 +193,6 @@ export default function QSlipsPage() {
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-semibold text-white">Quotation Request Slips</h2>
           <p className="text-sm text-muted">Track market requests linked to open deals.</p>
         </div>
         <button className="btn-primary !py-1.5" onClick={() => openNew()}><Plus size={14} /> New QRS</button>

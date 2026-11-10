@@ -153,7 +153,7 @@ function Shell() {
       case 'funnels': return <FunnelsPage />;
       default: {
         const p = placeholders[page];
-        return <Placeholder title={p?.title ?? 'Module'} subtitle={p?.subtitle ?? 'Coming soon.'} />;
+        return <Placeholder title={p?.title ?? 'Module'} subtitle={p?.subtitle ?? 'Coming soon.'} showTitle={false} />;
       }
     }
   };

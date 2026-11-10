@@ -166,7 +166,6 @@ export default function VendorsPage() {
     <div className="space-y-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-white">Vendors</h1>
           <p className="text-xs text-muted">Insurers, reinsurers, surveyors, and loss adjusters managed as active broker-side vendor records.</p>
         </div>
         {activeRole !== 'finance' && (

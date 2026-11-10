@@ -142,8 +142,7 @@ export default function CalendarPage() {
     <div className="min-w-0 space-y-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-white">Calendar</h1>
-          <p className="mt-1 text-xs text-muted">Read-only schedule derived from activities, records, renewals, and SLAs.</p>
+          <p className="text-xs text-muted">Read-only schedule derived from activities, records, renewals, and SLAs.</p>
         </div>
         <div className="hidden items-center gap-1 rounded-lg border border-ink-700 bg-ink-900/70 p-1 sm:flex" aria-label="Calendar view">
           {(['month', 'week', 'agenda'] as const).map((option) => (
