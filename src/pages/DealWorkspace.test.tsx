@@ -2,6 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEAL_PIPELINE_STAGES } from '../data/pipelineStageTemplates';
 
 const { mockUseApp } = vi.hoisted(() => ({ mockUseApp: vi.fn() }));
 vi.mock('../store/AppContext', () => ({ useApp: mockUseApp }));
@@ -146,5 +147,52 @@ describe('Deal list row accessibility', () => {
     expect(viewTabs[0].getAttribute('aria-selected')).toBe('true');
     expect(viewTabs.slice(1).every((tab) => tab.getAttribute('aria-selected') === 'false')).toBe(true);
     expect(viewTabs[0].className).toContain('bg-[#1B1E22]');
+  });
+
+  it('groups the Deals Kanban by the fixed stages and filters deals by pipeline', () => {
+    window.location.hash = '#/deals?view=pipeline';
+    const pipelines = [
+      { id: 'pipeline-1', tenantId: 'tenant-1', name: 'Commercial Lines Brokerage', code: 'COMMERCIAL', isActive: true },
+      { id: 'pipeline-2', tenantId: 'tenant-1', name: 'Retail, SME & Velocity Packages', code: 'SME_VELOCITY', isActive: true },
+    ];
+    const stages = pipelines.flatMap((pipeline) => DEAL_PIPELINE_STAGES.map((stage, index) => ({
+      ...stage,
+      id: `${pipeline.id}-stage-${index + 1}`,
+      pipelineId: pipeline.id,
+      stageOrder: index + 1,
+    })));
+    const deals = [
+      { ...testDeal, id: 'deal-commercial', pipelineId: 'pipeline-1', stage: 'Identified', value: 1000 },
+      { ...testDeal, id: 'deal-sme', pipelineId: 'pipeline-2', stage: 'Identified', value: 2000 },
+    ];
+    mockUseApp.mockReturnValue({
+      activities: [], setActivities: vi.fn(), clients: [], setClients: vi.fn(),
+      deals, setDeals: vi.fn(), leads: [], setLeads: vi.fn(), products: [], pipelines, pipelineStages: stages,
+      stageHistory: [], setStageHistory: vi.fn(), invoices: [], setInvoices: vi.fn(),
+      user: { id: 'user-1', name: 'QA User', email: 'qa@example.com', role: 'sales' },
+      users: [], vendors: [], viewAsRole: null, quotationRequests: [],
+      company: { requireNextActivityForStageChange: false },
+    });
+
+    act(() => root.render(<DealWorkspace deals={deals} dealsPageMode />));
+
+    expect(container.querySelectorAll('section[data-stage-name]')).toHaveLength(9);
+    const identifiedColumn = container.querySelector<HTMLElement>('section[data-stage-name="Identified"]');
+    expect(identifiedColumn?.getAttribute('data-total-mvr')).toBe('3000');
+    expect(identifiedColumn?.querySelectorAll('article[data-deal-id]')).toHaveLength(2);
+    expect(identifiedColumn?.textContent).toContain('Commercial');
+    expect(identifiedColumn?.textContent).toContain('SME');
+
+    const pipelineFilter = container.querySelector<HTMLSelectElement>('select[aria-label="Filter deals by pipeline"]');
+    act(() => {
+      if (!pipelineFilter) throw new Error('Pipeline filter was not rendered');
+      pipelineFilter.value = 'pipeline-1';
+      pipelineFilter.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    const filteredColumn = container.querySelector<HTMLElement>('section[data-stage-name="Identified"]');
+    expect(filteredColumn?.getAttribute('data-total-mvr')).toBe('1000');
+    expect(filteredColumn?.querySelectorAll('article[data-deal-id]')).toHaveLength(1);
+    expect(filteredColumn?.textContent).not.toContain('SME');
   });
 });

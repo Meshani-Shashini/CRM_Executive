@@ -20,6 +20,7 @@ test('Pipelines board keeps all stage columns in one viewport-filling row', asyn
   for (const viewport of viewports) {
     await page.setViewportSize(viewport);
     await page.goto('/#/pipelines');
+    await page.getByLabel('Select pipeline').selectOption('');
 
     const board = page.getByTestId('pipelines-board');
     const columns = page.getByTestId('pipelines-board-column');
@@ -64,6 +65,7 @@ test('Pipelines board keeps all stage columns in one viewport-filling row', asyn
     )).toBe(true);
     const cards = page.getByTestId('pipeline-deal-card');
     expect(await cards.count(), `seeded deal cards exist at ${viewport.width}x${viewport.height}`).toBeGreaterThan(0);
+    await expect(page.getByTestId('pipeline-deal-card-pipeline').first()).toBeVisible();
     const cardOverflow = await cards.evaluateAll((elements) => elements.flatMap((card) => {
       const cardBounds = card.getBoundingClientRect();
       const containedParts = [...card.querySelectorAll<HTMLElement>(

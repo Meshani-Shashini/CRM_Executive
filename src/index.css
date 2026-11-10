@@ -250,6 +250,183 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   }
 }
 
+.fit-wrap.clients-table-fit {
+  overflow-x: auto;
+}
+
+@keyframes client-drawer-enter {
+  from { opacity: 0.8; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.client-drawer-enter {
+  animation: client-drawer-enter 180ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .client-drawer-enter {
+    animation: none;
+  }
+}
+
+.clients-table-fit table {
+  min-width: 1740px;
+  table-layout: fixed;
+}
+
+.clients-table-fit th,
+.clients-table-fit td {
+  box-sizing: border-box;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.clients-table-fit th button {
+  max-width: 100%;
+}
+
+.clients-table-fit td[data-label="Insurance Type"] > span,
+.clients-table-fit td[data-label="Status"] > span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.clients-table-fit td[data-label="Insurance Type"] .pill,
+.clients-table-fit td[data-label="Status"] .pill {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.clients-table-fit td[data-label="Status"] .pill {
+  white-space: nowrap;
+}
+
+.clients-table-fit td .truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clients-table-fit .owner-name {
+  display: inline;
+}
+
+@container (max-width: 639px) {
+  .clients-table-fit table {
+    display: table;
+    width: 100%;
+    min-width: 1740px;
+  }
+
+  .clients-table-fit colgroup {
+    display: table-column-group;
+  }
+
+  .clients-table-fit thead {
+    display: table-header-group;
+  }
+
+  .clients-table-fit tbody {
+    display: table-row-group;
+    width: 100%;
+  }
+
+  .clients-table-fit tbody tr {
+    display: table-row;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .clients-table-fit tbody td {
+    display: table-cell;
+    padding: 0.6rem 0.5rem;
+    border-bottom: 1px solid #1B1E22;
+    white-space: normal;
+  }
+
+  .clients-table-fit tbody td::before {
+    display: none;
+  }
+
+  .clients-table-fit tbody td[data-label="Actions"] {
+    position: static;
+    padding: 0.4rem;
+  }
+}
+
+.fit-wrap.vendors-table-fit {
+  overflow-x: hidden;
+}
+
+.vendors-table-fit table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.vendors-table-fit th,
+.vendors-table-fit td {
+  box-sizing: border-box;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.vendors-table-fit th button {
+  max-width: 100%;
+}
+
+.vendors-table-fit td .truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@container (max-width: 639px) {
+  .vendors-table-fit table {
+    display: table;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .vendors-table-fit colgroup {
+    display: table-column-group;
+  }
+
+  .vendors-table-fit thead {
+    display: table-header-group;
+  }
+
+  .vendors-table-fit tbody {
+    display: table-row-group;
+    width: 100%;
+  }
+
+  .vendors-table-fit tbody tr {
+    display: table-row;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .vendors-table-fit tbody td {
+    display: table-cell;
+    padding: 0.6rem 0.375rem;
+    border-bottom: 1px solid #1B1E22;
+    white-space: normal;
+  }
+
+  .vendors-table-fit tbody td::before {
+    display: none;
+  }
+}
+
 .fit-wrap.deals-list-fit col:nth-child(1) { width: 13%; }
 .fit-wrap.deals-list-fit col:nth-child(2) { width: 10%; }
 .fit-wrap.deals-list-fit col:nth-child(3) { width: 8%; }

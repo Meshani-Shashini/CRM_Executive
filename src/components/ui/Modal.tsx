@@ -49,7 +49,7 @@ export default function Modal({ open, onClose, title, subtitle, children, footer
   if (!open) return null;
   const w = { sm: 'max-w-md', md: 'max-w-xl', lg: 'max-w-3xl', xl: 'max-w-5xl' }[size];
   return (
-    <div ref={rootRef} className={`fixed inset-0 ${layer === 'overlay' ? 'z-[60]' : 'z-50'} flex items-center justify-center p-4 animate-fadeIn`}
+    <div ref={rootRef} className={`fixed inset-0 ${layer === 'overlay' ? 'z-[90]' : 'z-[80]'} flex items-center justify-center p-4 animate-fadeIn`}
       onClick={(event) => {
         event.stopPropagation();
         onClose();

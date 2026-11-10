@@ -26,7 +26,7 @@ import {
 } from '../utils/stageSla';
 import { linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
 import { linkDealToLead } from '../utils/dealFactory';
-import { getPipelineLossReasons } from '../data/pipelineStageTemplates';
+import { DEAL_PIPELINE_STAGES, getPipelineLossReasons } from '../data/pipelineStageTemplates';
 import {
   appendLeadStageTransition, buildLeadTelemetryStages, LEAD_LIFECYCLE_STAGES,
   isLeadLifecycleStage, isTerminalLeadStage, lifecycleStageForLead,
@@ -831,11 +831,26 @@ export default function DealWorkspace({
   const kanbanPipelines = selectedPipelineFilter
     ? activePipelines.filter((pipeline) => pipeline.id === selectedPipelineFilter)
     : activePipelines;
-  const kanbanStages = kanbanPipelines.flatMap((pipeline) => pipelineStages
-    .filter((stage) => stage.pipelineId === pipeline.id)
-    .sort((left, right) => left.stageOrder - right.stageOrder));
+  const kanbanStagePipelineId = kanbanPipelines[0]?.id;
+  const kanbanStages = DEAL_PIPELINE_STAGES.map((template, index) =>
+    pipelineStages.find((stage) => stage.pipelineId === kanbanStagePipelineId && stage.name === template.name)
+    ?? {
+      ...template,
+      id: `open-stage-${index + 1}`,
+      pipelineId: kanbanStagePipelineId ?? '',
+      stageOrder: index + 1,
+    });
+  const pipelineLabelForDeal = (deal: Deal) => {
+    const pipeline = pipelines.find((item) => item.id === deal.pipelineId);
+    return pipeline?.code.toUpperCase() === 'COMMERCIAL' ? 'Commercial'
+      : pipeline?.code.toUpperCase() === 'SME_VELOCITY' ? 'SME'
+        : pipeline?.code.toUpperCase() === 'RENEWALS' ? 'Renewals'
+          : pipeline?.name ?? 'Unknown pipeline';
+  };
+  const showKanbanPipelineChips = !selectedPipelineFilter
+    && new Set(listDeals.map((deal) => deal.pipelineId).filter(Boolean)).size > 1;
   const pipelineDealsByStage = (stage: PipelineStage) => listDeals
-    .filter((deal) => deal.pipelineId === stage.pipelineId && deal.stage === stage.name)
+    .filter((deal) => deal.stage === stage.name)
     .sort((left, right) => {
       if (pipelineSort === 'value') return right.value - left.value;
       if (pipelineSort === 'close') return (left.closeDate ?? '').localeCompare(right.closeDate ?? '');
@@ -2118,7 +2133,7 @@ export default function DealWorkspace({
               </label>
             </div>
           </div>
-          {kanbanPipelines.length && kanbanStages.length ? <div className="deals-fit min-w-0">
+          {kanbanStages.length ? <div className="deals-fit min-w-0">
             <div className="deals-board deals-board-compact grid gap-2">
               {kanbanStages.map((stage) => {
                 const stageDeals = pipelineDealsByStage(stage);
@@ -2131,14 +2146,14 @@ export default function DealWorkspace({
                     event.preventDefault();
                     const dealId = event.dataTransfer.getData('text/deal-id');
                     const droppedDeal = listDeals.find((deal) => deal.id === dealId);
-                    if (canMoveStage && droppedDeal) requestStageChange(stage, droppedDeal);
+                    const targetPipelineId = droppedDeal?.pipelineId ?? kanbanPipelines[0]?.id;
+                    const targetStage = droppedDeal && pipelineStages.find((item) =>
+                      item.pipelineId === targetPipelineId && item.name === stage.name);
+                    if (canMoveStage && droppedDeal && targetStage) requestStageChange(targetStage, droppedDeal);
                   }}
                   className="flex min-w-0 flex-col rounded-xl border border-ink-700 bg-ink-900/55 p-2.5">
                   <header className="mb-2 min-w-0 px-1">
-                    <h3 className="truncate text-sm font-semibold text-white" title={selectedPipelineFilter ? stage.name : `${activePipelines.find((pipeline) => pipeline.id === stage.pipelineId)?.name}: ${stage.name}`}>
-                      {!selectedPipelineFilter && <span className="text-muted">{activePipelines.find((pipeline) => pipeline.id === stage.pipelineId)?.name}: </span>}
-                      {stage.name}
-                    </h3>
+                    <h3 className="truncate text-sm font-semibold text-white">{stage.name}</h3>
                     <p className="mt-1 truncate text-[10px] text-muted">{formatAmount(totalMvr, 'MVR')} · {stageDeals.length} {stageDeals.length === 1 ? 'deal' : 'deals'}</p>
                   </header>
                   <div className="max-h-[calc(100vh-330px)] min-h-40 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
@@ -2152,6 +2167,7 @@ export default function DealWorkspace({
                         <button type="button" onClick={() => openDealRecord(deal)} className="min-w-0 flex-1 text-left">
                           <span className="block truncate text-xs font-semibold text-white" title={dealTitle(deal)}>{dealTitle(deal)}</span>
                           <span className="mt-0.5 block truncate text-[10px] text-muted" title={deal.client}>{deal.client}</span>
+                          {showKanbanPipelineChips && <span className="mt-1 inline-flex max-w-full truncate rounded-full border border-ink-600 px-1.5 py-0.5 text-[9px] leading-tight text-muted" title={pipelines.find((pipeline) => pipeline.id === deal.pipelineId)?.name ?? 'Unknown pipeline'}>{pipelineLabelForDeal(deal)}</span>}
                           <span className="mt-2 flex min-w-0 items-center gap-1.5">
                             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#1E2024] text-[9px] font-semibold text-[#D0D3D9]" title={ownerName}>{avatarCode(ownerName)}</span>
                             <span className="truncate text-[10px] text-brand-300">{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
@@ -2179,16 +2195,22 @@ export default function DealWorkspace({
           {kanbanStages.length ? <div className="deals-fit">
             <div className="deals-board grid gap-3">
               {kanbanStages.map((stage) => {
-                const stageDeals = listDeals.filter((deal) => deal.pipelineId === kanbanPipeline?.id && deal.stage === stage.name);
+                const stageDeals = listDeals.filter((deal) => deal.stage === stage.name);
+                const totalMvr = stageDeals.reduce((total, deal) =>
+                  total + toMvr(deal.value, deal.currency, deal.exchangeRate), 0);
                 return <section key={stage.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
                   event.preventDefault();
                   const dealId = event.dataTransfer.getData('text/deal-id');
                   const droppedDeal = deals.find((deal) => deal.id === dealId);
-                  if (droppedDeal) requestStageChange(stage, droppedDeal);
+                  const targetPipelineId = droppedDeal?.pipelineId ?? kanbanPipelines[0]?.id;
+                  const targetStage = droppedDeal && pipelineStages.find((item) =>
+                    item.pipelineId === targetPipelineId && item.name === stage.name);
+                  if (droppedDeal && targetStage) requestStageChange(targetStage, droppedDeal);
                 }} className="min-w-0 rounded-xl border border-ink-700 bg-ink-900/55 p-2.5">
                   <header className="mb-2 flex items-center justify-between gap-2 px-1">
                     <h3 className="min-w-0 break-words text-sm font-semibold text-white">{stage.name}</h3><Badge variant="muted">{stageDeals.length}</Badge>
                   </header>
+                <p className="mb-2 px-1 text-[10px] text-muted">{formatAmount(totalMvr, 'MVR')} · {stageDeals.length} {stageDeals.length === 1 ? 'deal' : 'deals'}</p>
                   <div className="max-h-[calc(100vh-310px)] min-h-48 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
                     {stageDeals.map((deal) => <button key={deal.id} type="button" draggable
                       onDragStart={(event) => { event.dataTransfer.setData('text/deal-id', deal.id); event.dataTransfer.effectAllowed = 'move'; }}
@@ -2196,6 +2218,7 @@ export default function DealWorkspace({
                       className="w-full cursor-grab rounded-lg border border-ink-700 bg-ink-800/80 p-3 text-left shadow-sm transition hover:border-brand-400/50 active:cursor-grabbing">
                       <span className="block truncate text-sm font-semibold text-white">{deal.client}</span>
                       <span className="mt-1 block truncate text-xs text-muted">{deal.product} · {deal.insurer}</span>
+                      {showKanbanPipelineChips && <span className="mt-1 inline-flex max-w-full truncate rounded-full border border-ink-600 px-1.5 py-0.5 text-[9px] leading-tight text-muted" title={pipelines.find((pipeline) => pipeline.id === deal.pipelineId)?.name ?? 'Unknown pipeline'}>{pipelineLabelForDeal(deal)}</span>}
                       <span className="mt-2 block text-xs text-brand-300">{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
                     </button>)}
                     {!stageDeals.length && <p className="py-7 text-center text-[11px] text-muted/60">Drop deals here</p>}

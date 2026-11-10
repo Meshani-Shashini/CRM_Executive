@@ -39,6 +39,7 @@ interface AppState {
   signOut: () => Promise<void>;
   initializeSampleLeads: (ownerIds?: string[]) => Promise<void>;
   hasAccess: (allowed: Role[]) => boolean;
+  dataReady: boolean;
   taxRates: TaxRate[];
   setTaxRates: (items: TaxRate[]) => void;
   leads: Lead[];
@@ -1000,14 +1001,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
   const value = useMemo(() => ({
     user, authLoading, authError, viewAsRole, setViewAsRole,
-    signIn, register, signOut, initializeSampleLeads, hasAccess,
+    signIn, register, signOut, initializeSampleLeads, hasAccess, dataReady,
     taxRates, setTaxRates, leads, setLeads, clients, setClients, customerLookups, setCustomerLookups, products, setProducts,
     activities, setActivities, vendors, setVendors, quotationRequests, setQuotationRequests,
     deals, setDeals, invoices, setInvoices, payments, setPayments, users, setUsers,
     createUser, updateUserProfile, company, setCompany, emailTemplates, setEmailTemplates, persistenceError,
     pipelines, setPipelines, pipelineStages, setPipelineStages, stageHistory, setStageHistory,
   }), [
-    user, authLoading, authError, viewAsRole, setViewAsRole, signIn, register, signOut, initializeSampleLeads, hasAccess,
+    user, authLoading, authError, viewAsRole, setViewAsRole, signIn, register, signOut, initializeSampleLeads, hasAccess, dataReady,
     taxRates, leads, clients, customerLookups, products, activities, vendors, quotationRequests, deals, invoices, payments, users,
     createUser, updateUserProfile, company, emailTemplates, persistenceError, pipelines, pipelineStages, stageHistory,
   ]);

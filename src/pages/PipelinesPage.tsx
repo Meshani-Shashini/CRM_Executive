@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { ArrowDown, ArrowUp, CalendarClock, Check, Clock3, Plus, Settings2, Zap } from 'lucide-react';
 import { useApp } from '../store/AppContext';
-import { getPipelineLossReasons, PIPELINE_TEMPLATES } from '../data/pipelineStageTemplates';
+import { DEAL_PIPELINE_STAGES, getPipelineLossReasons, PIPELINE_TEMPLATES } from '../data/pipelineStageTemplates';
 import { AUTH_BYPASS, TENANT_ID } from '../lib/supabase';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
@@ -73,6 +73,14 @@ function isWonStage(stage: string | PipelineStage) {
 
 function isRenewalPipeline(pipeline?: Pipeline) {
   return pipeline?.code.toLowerCase() === 'renewals';
+}
+
+function pipelineShortLabel(pipeline?: Pipeline) {
+  const code = pipeline?.code.toUpperCase();
+  return code === 'COMMERCIAL' ? 'Commercial'
+    : code === 'SME_VELOCITY' ? 'SME'
+      : code === 'RENEWALS' ? 'Renewals'
+        : pipeline?.name ?? 'Unknown pipeline';
 }
 
 function renewalHorizonDate(from: Date) {
@@ -220,24 +228,37 @@ export default function PipelinesPage() {
   const [now, setNow] = useState(Date.now());
   const [healthFilter, setHealthFilter] = useState<HealthState | ''>('');
   const [intentFilter, setIntentFilter] = useState<IntentTier | ''>('');
+  const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
+  const defaultPipelineId = activePipelines[0]?.id ?? '';
   const selectedPipeline = pipelines.find((pipeline) => pipeline.id === pipelineId);
   const fixedStageSequence = Boolean(selectedPipeline?.isActive);
   const pendingMoveDeal = pendingMove
     ? deals.find((deal) => deal.id === pendingMove.dealId)
     : undefined;
-  const pendingMovePipelineCode = pipelines.find((pipeline) => pipeline.id === pendingMoveDeal?.pipelineId)?.code;
+  const pendingMovePipelineCode = pipelines.find((pipeline) =>
+    pipeline.id === (pendingMoveDeal?.pipelineId ?? defaultPipelineId))?.code;
   const stages = useMemo(
     () => pipelineStages.filter((stage) => stage.pipelineId === pipelineId).sort((a, b) => a.stageOrder - b.stageOrder),
     [pipelineStages, pipelineId],
   );
-  const pipelineDeals = deals.filter((deal) => deal.pipelineId
-    ? deal.pipelineId === pipelineId
-    : pipelineId === pipelines.find((pipeline) => pipeline.isActive)?.id);
+  const boardStages = DEAL_PIPELINE_STAGES.map((template, index) =>
+    pipelineStages.find((stage) => stage.pipelineId === (pipelineId || defaultPipelineId) && stage.name === template.name)
+    ?? {
+      ...template,
+      id: `open-stage-${index + 1}`,
+      pipelineId: pipelineId || defaultPipelineId,
+      stageOrder: index + 1,
+    });
+  const pipelineDeals = deals.filter((deal) => {
+    const dealPipelineId = deal.pipelineId ?? defaultPipelineId;
+    return activePipelines.some((pipeline) => pipeline.id === dealPipelineId)
+      && (!pipelineId || dealPipelineId === pipelineId);
+  });
   useEffect(() => {
-    if (!pipelines.some((pipeline) => pipeline.id === pipelineId && pipeline.isActive)) {
-      setPipelineId(pipelines.find((pipeline) => pipeline.isActive)?.id ?? '');
+    if (pipelineId && !pipelines.some((pipeline) => pipeline.id === pipelineId && pipeline.isActive)) {
+      setPipelineId(defaultPipelineId);
     }
-  }, [pipelines, pipelineId]);
+  }, [defaultPipelineId, pipelines, pipelineId]);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
@@ -281,7 +302,7 @@ export default function PipelinesPage() {
   }, [clients, deals, pipelines, pipelineStages, setDeals, setLeads]);
 
   const stageForDeal = (deal: typeof deals[number]) => {
-    const dealStages = pipelineStages.filter((stage) => stage.pipelineId === (deal.pipelineId ?? pipelineId))
+    const dealStages = pipelineStages.filter((stage) => stage.pipelineId === (deal.pipelineId ?? defaultPipelineId))
       .sort((left, right) => left.stageOrder - right.stageOrder);
     return dealStages.find((stage) => stage.name === deal.stage)
     ?? (deal.disposition === 'lost'
@@ -318,7 +339,7 @@ export default function PipelinesPage() {
       legacyDueDate: deal.nextActivityAt,
       legacyTitle: deal.nextActivityTitle,
     });
-    const renewalWin = isRenewalPipeline(selectedPipeline) && isWonStage(target);
+    const renewalWin = isRenewalPipeline(pipelines.find((pipeline) => pipeline.id === (deal.pipelineId ?? defaultPipelineId))) && isWonStage(target);
     const needsMoveDialog = requiresCommunicationChannels(target.name)
       || target.name.toLowerCase().includes('proposal')
       || target.requiresApproval
@@ -463,7 +484,7 @@ export default function PipelinesPage() {
     setDeals((current) => current.map((deal) => deal.id === dealId
       ? {
         ...deal,
-        pipelineId,
+        pipelineId: movingDeal.pipelineId ?? defaultPipelineId,
         stage: to.name,
         stageChangedAt: now,
         probability: disposition === 'lost' || isLostStage(to) ? 0 : disposition === 'won' ? 100 : to.winProbabilityPct,
@@ -485,7 +506,7 @@ export default function PipelinesPage() {
     setPendingMove(null);
     setMoveOutcome('');
     setActivityWarningOnly(false);
-    if (selectedPipeline?.code.toUpperCase() === 'COMMERCIAL'
+    if (pipelines.find((pipeline) => pipeline.id === (movingDeal.pipelineId ?? defaultPipelineId))?.code.toUpperCase() === 'COMMERCIAL'
       && to.name === 'Quotation / Underwriting'
       && !quotationRequests.some((request) => request.dealId === dealId)) {
       promptQuotationRequestForDeal(dealId);
@@ -509,7 +530,7 @@ export default function PipelinesPage() {
     const data = new FormData(event.currentTarget);
     const wonStage = isWonStage(pendingMove.stage);
     const lostStage = isLostStage(pendingMove.stage);
-    const renewalWin = isRenewalPipeline(selectedPipeline) && wonStage;
+    const renewalWin = isRenewalPipeline(pipelines.find((pipeline) => pipeline.id === (deal.pipelineId ?? defaultPipelineId))) && wonStage;
     const disposition = wonStage || renewalWin ? 'won' : lostStage ? 'lost' : undefined;
     if ((wonStage || lostStage || renewalWin) && !moveOutcome) return;
     const isLost = disposition === 'lost';
@@ -658,18 +679,21 @@ export default function PipelinesPage() {
   };
 
   const visibleDealsForStage = (stage: PipelineStage) => pipelineDeals
-    .filter((deal) => stageForDeal(deal)?.id === stage.id)
+    .filter((deal) => stageForDeal(deal)?.name === stage.name)
     .filter((deal) => {
-      const targetDays = isTerminalDealStage(deal.stage, deal.disposition, stageForDeal(deal)) ? 0 : stage.stagnationDaysThreshold;
-      const health = dealHealth(stageElapsedDays(deal.id, stage), targetDays);
+      const dealStage = stageForDeal(deal);
+      const targetDays = isTerminalDealStage(deal.stage, deal.disposition, dealStage) ? 0 : dealStage?.stagnationDaysThreshold ?? stage.stagnationDaysThreshold;
+      const health = dealHealth(dealStage ? stageElapsedDays(deal.id, dealStage) : null, targetDays);
       const intent = intentForDeal(deal);
       return (!healthFilter || health === healthFilter) && (!intentFilter || intent === intentFilter);
     });
+  const visibleBoardDeals = boardStages.flatMap(visibleDealsForStage);
+  const showBoardPipelineChips = new Set(visibleBoardDeals.map((deal) => deal.pipelineId ?? defaultPipelineId)).size > 1;
 
   const moveTitle = activityWarningOnly
     ? 'Confirm stage change'
     : pendingMove && (isWonStage(pendingMove.stage)
-    || (isRenewalPipeline(selectedPipeline) && isWonStage(pendingMove.stage)))
+    || (pendingMovePipelineCode?.toLowerCase() === 'renewals' && isWonStage(pendingMove.stage)))
     ? 'Confirm deal outcome'
     : pendingMove && isLostStage(pendingMove.stage)
       ? 'Close deal as lost'
@@ -679,12 +703,13 @@ export default function PipelinesPage() {
     <div className="flex min-w-0 flex-col gap-2 overflow-x-hidden lg:h-[calc(100dvh-3.5rem)] lg:min-h-0 lg:overflow-hidden lg:px-6 lg:pt-2 lg:pb-6">
       <div data-page-toolbar="pipelines" className="flex min-w-0 flex-wrap items-center gap-2">
           <select className="input !w-auto min-w-48 max-w-64 !py-1.5 !text-xs" value={pipelineId} onChange={(event) => setPipelineId(event.target.value)} aria-label="Select pipeline">
-            {pipelines.filter((pipeline) => pipeline.isActive).length === 0 && <option value="">No active pipelines</option>}
-            {pipelines.filter((pipeline) => pipeline.isActive).map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
+            {activePipelines.length === 0 && <option value="">No active pipelines</option>}
+            {activePipelines.length > 0 && <option value="">All pipelines</option>}
+            {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
           </select>
           {user.role === 'admin' && <button className="btn-primary !py-1.5 !text-xs" onClick={openPipelineModal}><Plus size={14} /> New Pipeline</button>}
-          {user.role === 'admin' && <button className="btn-ghost !py-1.5 !text-xs" onClick={() => setConfigOpen((open) => !open)}><Settings2 size={14} /> {configOpen ? 'Back to Board' : 'Configure Stages'}</button>}
-          {selectedPipeline && !configOpen && <div role="group" className="flex flex-wrap items-center gap-1.5" aria-label="Deal health and intent filters">
+          {user.role === 'admin' && selectedPipeline && <button className="btn-ghost !py-1.5 !text-xs" onClick={() => setConfigOpen((open) => !open)}><Settings2 size={14} /> {configOpen ? 'Back to Board' : 'Configure Stages'}</button>}
+          {activePipelines.length > 0 && !configOpen && <div role="group" className="flex flex-wrap items-center gap-1.5" aria-label="Deal health and intent filters">
             <span className="text-xs text-muted">Health</span>
             {(['Healthy', 'At Risk', 'Rotting'] as const).map((health) => (
               <button
@@ -739,12 +764,12 @@ export default function PipelinesPage() {
         </div>
       )}
 
-      {!selectedPipeline ? (
+      {activePipelines.length === 0 ? (
         <div className="glass rounded-2xl p-8 text-center">
           <h3 className="font-semibold text-white">No pipelines configured</h3>
           <p className="mt-1 text-sm text-muted">Create a pipeline to add stages and track deals.</p>
         </div>
-      ) : configOpen && user.role === 'admin' ? (
+      ) : selectedPipeline && configOpen && user.role === 'admin' ? (
         <div className="glass rounded-2xl p-5">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div><h3 className="font-semibold text-white">Stage Configuration</h3><p className="text-xs text-muted mt-1">{fixedStageSequence ? 'The active pipeline stage names and order are fixed; adjust probability and SLA targets.' : 'Set order, win probability, and deal-rotting thresholds.'}</p></div>
@@ -776,8 +801,10 @@ export default function PipelinesPage() {
           data-testid="pipelines-board"
           className="grid min-w-0 grid-flow-col grid-rows-1 auto-cols-[minmax(160px,1fr)] gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain [contain:layout] lg:min-h-0 lg:flex-1"
         >
-          {stages.map((stage) => {
+          {boardStages.map((stage) => {
             const stageDeals = visibleDealsForStage(stage);
+            const totalMvr = stageDeals.reduce((total, deal) =>
+              total + toMvr(deal.value, deal.currency, deal.exchangeRate), 0);
             return (
               <section
                 key={stage.id}
@@ -789,8 +816,8 @@ export default function PipelinesPage() {
                     <h3 className="min-w-0 flex-1 line-clamp-2 text-sm font-semibold text-white">{stage.name}</h3>
                     <Badge variant="muted">{stageDeals.length}</Badge>
                   </div>
-                  <div className="whitespace-nowrap pb-2 pt-1 text-[10px] text-muted">
-                    {stage.winProbabilityPct}% win · {stageDeals.length} deal{stageDeals.length === 1 ? '' : 's'}
+                  <div className="pb-2 pt-1 text-[10px] text-muted">
+                    {stage.winProbabilityPct}% win · {formatAmount(totalMvr, 'MVR')} · {stageDeals.length} deal{stageDeals.length === 1 ? '' : 's'}
                   </div>
                 </div>
                 <div
@@ -799,12 +826,13 @@ export default function PipelinesPage() {
                 >
                   {stageDeals.map((deal) => {
                     const dealStages = pipelineStages
-                      .filter((item) => item.pipelineId === (deal.pipelineId ?? pipelineId))
+                      .filter((item) => item.pipelineId === (deal.pipelineId ?? defaultPipelineId))
                       .sort((left, right) => left.stageOrder - right.stageOrder);
-                    const elapsed = stageElapsedDays(deal.id, stage);
-                    const targetDays = isTerminalDealStage(deal.stage, deal.disposition, stageForDeal(deal)) ? 0 : stage.stagnationDaysThreshold;
+                    const dealStage = stageForDeal(deal);
+                    const elapsed = dealStage ? stageElapsedDays(deal.id, dealStage) : null;
+                    const targetDays = isTerminalDealStage(deal.stage, deal.disposition, dealStage) ? 0 : dealStage?.stagnationDaysThreshold ?? stage.stagnationDaysThreshold;
                     const health = dealHealth(elapsed, targetDays);
-                    const activeHistory = historyForDeal(deal.id).find((entry) => entry.toStageId === stage.id && !entry.exitedAt);
+                    const activeHistory = historyForDeal(deal.id).find((entry) => entry.toStageId === dealStage?.id && !entry.exitedAt);
                     const enteredAt = activeHistory?.enteredAt ?? deal.stageChangedAt ?? deal.createdAt;
                     const slaOverdue = isStageSlaOverdue(enteredAt, targetDays, now);
                     const momentum = dealMomentum(elapsed, targetDays);
@@ -838,6 +866,7 @@ export default function PipelinesPage() {
                         </div>
                         <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted" title={`${deal.product} · ${deal.insurer}`}>{deal.product} · {deal.insurer}</div>
                         {deal.renewalExpiry && <div className="mt-1 text-[10px] leading-tight text-warm">Renewal due {formatDate(deal.renewalExpiry)}</div>}
+                        {showBoardPipelineChips && <span data-testid="pipeline-deal-card-pipeline" className="mt-1 inline-flex max-w-full truncate rounded-full border border-ink-600 px-1.5 py-0.5 text-[9px] leading-tight text-muted" title={pipelines.find((pipeline) => pipeline.id === (deal.pipelineId ?? defaultPipelineId))?.name}>{pipelineShortLabel(pipelines.find((pipeline) => pipeline.id === (deal.pipelineId ?? defaultPipelineId)))}</span>}
                         <div
                           data-testid="pipeline-deal-card-badges"
                           className="mt-2 flex min-w-0 flex-wrap items-start gap-1 [&_.pill]:max-w-full [&_.pill]:min-w-0 [&_.pill]:!whitespace-normal [&_.pill]:!px-1.5 [&_.pill]:!py-0.5 [&_.pill]:!text-[9px] [&_.pill]:!leading-tight [&_.pill]:[overflow-wrap:anywhere]"
@@ -948,13 +977,13 @@ export default function PipelinesPage() {
               : 'You can schedule one now from the deal details or continue without one.'}
           </p>}
           {pendingMove && (isWonStage(pendingMove.stage)
-            || (isRenewalPipeline(selectedPipeline) && isWonStage(pendingMove.stage))) && <>
+            || (pendingMovePipelineCode?.toLowerCase() === 'renewals' && isWonStage(pendingMove.stage))) && <>
             <p className="rounded-lg border border-win/30 bg-win/5 p-3 text-sm text-muted">
               Confirm that the policy is bound. Proceed with invoicing and active-sales follow-up.
             </p>
             <Field label="Win reason (required)"><textarea className="input min-h-20" name="winReason" required maxLength={2000} placeholder="Record why the client selected this placement." /></Field>
           </>}
-          {pendingMove && isRenewalPipeline(selectedPipeline) && isWonStage(pendingMove.stage) && (
+          {pendingMove && pendingMovePipelineCode?.toLowerCase() === 'renewals' && isWonStage(pendingMove.stage) && (
             <p className="rounded-lg border border-win/30 bg-win/5 p-3 text-sm text-muted">
               Confirm the policy renewal. It will remain in the Annual Renewals pipeline as Won; proceed with invoicing and active sales follow-up.
             </p>
@@ -966,7 +995,7 @@ export default function PipelinesPage() {
             </>
           ) : !activityWarningOnly && pendingMove
             && !isWonStage(pendingMove.stage)
-            && !(isRenewalPipeline(selectedPipeline) && isWonStage(pendingMove.stage)) ? (
+            && !(pendingMovePipelineCode?.toLowerCase() === 'renewals' && isWonStage(pendingMove.stage)) ? (
             <>
               <p className="text-sm text-muted">Capture the proposal details before moving this deal forward.</p>
               <Field label="Proposal summary (required)"><textarea className="input min-h-24" name="proposalSummary" required placeholder="Coverage, premium, and decision context" /></Field>
