@@ -759,6 +759,35 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   grid-auto-columns: minmax(150px, 1fr);
 }
 
+.deals-board-compact {
+  gap: 0.375rem;
+  grid-auto-columns: minmax(120px, min(160px, calc((100cqw - 1.875rem) / 6)));
+}
+
+.deals-board-compact > section {
+  padding: 0.5rem;
+}
+
+.deals-board-compact > section > header {
+  margin-bottom: 0.375rem;
+  padding-inline: 0.125rem;
+}
+
+.deals-board-compact > section > header h3 {
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.deals-board-compact > section > div {
+  min-height: 9rem;
+  padding: 0.25rem;
+}
+
+.deals-board-compact article {
+  gap: 0.375rem;
+  padding: 0.5rem;
+}
+
 .deals-board > section,
 .deals-board > section > header,
 .deals-board > section > header h3 {

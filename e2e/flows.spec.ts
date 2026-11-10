@@ -1,5 +1,32 @@
 import { expect, test } from '@playwright/test';
 
+test('Deals opens with all pipelines selected and all deals visible', async ({ page }) => {
+  await page.goto('/#/deals');
+  const pipelineFilter = page.getByLabel('Filter deals by pipeline');
+
+  await expect(pipelineFilter).toHaveValue('');
+  await expect(page.getByText('5 deals', { exact: true })).toBeVisible();
+  await expect(page.locator('.deals-board article[data-deal-id]')).toHaveCount(5);
+
+  await pipelineFilter.selectOption({ label: 'Retail, SME & Velocity Packages' });
+  await expect(pipelineFilter).toHaveValue(/.+/);
+  await expect(page.locator('.deals-board article[data-deal-id]').filter({ hasText: 'Male Retail Package' })).toBeVisible();
+  const boardLayout = await page.locator('.deals-fit').evaluate((container) => {
+    const columns = [...container.querySelectorAll('.deals-board > section')];
+    return {
+      count: columns.length,
+      containerWidth: container.getBoundingClientRect().width,
+      firstSixWidth: columns.length >= 6
+        ? columns[5].getBoundingClientRect().right - columns[0].getBoundingClientRect().left
+        : 0,
+      sixthColumnFits: columns.length >= 6
+        && columns[5].getBoundingClientRect().right <= container.getBoundingClientRect().right + 1,
+    };
+  });
+  expect(boardLayout.count).toBeGreaterThanOrEqual(6);
+  expect(boardLayout.sixthColumnFits, JSON.stringify(boardLayout)).toBe(true);
+});
+
 test('lead conversion creates one linked deal and blocks a second conversion', async ({ page }) => {
   await page.goto('/#/leads');
   const title = 'North Harbour Cargo Cover';

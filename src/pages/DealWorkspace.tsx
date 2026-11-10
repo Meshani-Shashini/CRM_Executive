@@ -826,14 +826,15 @@ export default function DealWorkspace({
     if (!isClosedDeal(deal, stage)) return false;
     return archiveFilter === 'all' || (archiveFilter === 'won' ? isWonDeal(deal, stage) : !isWonDeal(deal, stage));
   });
-  const pipelineId = selectedPipelineFilter || activePipelines[0]?.id || '';
-  const kanbanPipeline = activePipelines.find((pipeline) => pipeline.id === pipelineId);
-  const kanbanStages = (kanbanPipeline
-    ? pipelineStages.filter((stage) => stage.pipelineId === kanbanPipeline.id)
-      .sort((left, right) => left.stageOrder - right.stageOrder)
-    : []);
+  const kanbanPipeline = activePipelines.find((pipeline) => pipeline.id === selectedPipelineFilter);
+  const kanbanPipelines = selectedPipelineFilter
+    ? activePipelines.filter((pipeline) => pipeline.id === selectedPipelineFilter)
+    : activePipelines;
+  const kanbanStages = kanbanPipelines.flatMap((pipeline) => pipelineStages
+    .filter((stage) => stage.pipelineId === pipeline.id)
+    .sort((left, right) => left.stageOrder - right.stageOrder));
   const pipelineDealsByStage = (stage: PipelineStage) => listDeals
-    .filter((deal) => deal.pipelineId === kanbanPipeline?.id && deal.stage === stage.name)
+    .filter((deal) => deal.pipelineId === stage.pipelineId && deal.stage === stage.name)
     .sort((left, right) => {
       if (pipelineSort === 'value') return right.value - left.value;
       if (pipelineSort === 'close') return (left.closeDate ?? '').localeCompare(right.closeDate ?? '');
@@ -857,7 +858,7 @@ export default function DealWorkspace({
   ];
   const tableColumns = workspaceView === 'archive' ? archiveColumns : baseListColumns;
   const tableDeals = workspaceView === 'archive' ? archiveDeals : sortedListDeals;
-  const pipelineViewDeals = listDeals.filter((deal) => deal.pipelineId === kanbanPipeline?.id);
+  const pipelineViewDeals = listDeals;
   const toolbarDealCount = workspaceView === 'pipeline' ? pipelineViewDeals.length
     : workspaceView === 'archive' ? archiveDeals.length
       : workspaceView === 'forecast' ? forecastDeals.length
@@ -998,19 +999,6 @@ export default function DealWorkspace({
     if (!selectedPipelineFilter || kanbanPipeline) return;
     changePipelineFilter('');
   }, [changePipelineFilter, kanbanPipeline, selectedPipelineFilter]);
-
-  useEffect(() => {
-    if (!dealsPageMode || workspaceView !== 'pipeline' || selectedPipelineFilter || !activePipelines.length) return;
-    const remembered = window.localStorage.getItem('crm:last-deals-pipeline');
-    changePipelineFilter(activePipelines.some((pipeline) => pipeline.id === remembered)
-      ? remembered!
-      : activePipelines[0].id);
-  }, [activePipelines, changePipelineFilter, dealsPageMode, selectedPipelineFilter, workspaceView]);
-
-  useEffect(() => {
-    if (!dealsPageMode || !selectedPipelineFilter) return;
-    window.localStorage.setItem('crm:last-deals-pipeline', selectedPipelineFilter);
-  }, [dealsPageMode, selectedPipelineFilter]);
 
   useEffect(() => {
     if (!dealsPageMode) return;
@@ -1796,9 +1784,9 @@ export default function DealWorkspace({
           </div>
           {!dealsPageMode && onClose && <button type="button" className="btn-ghost !py-1.5" onClick={onClose}>Back to leads</button>}
           {dealsPageMode && <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
-            <select className="input !w-auto max-w-full !py-1.5 !text-xs" value={workspaceView === 'pipeline' ? pipelineId : selectedPipelineFilter}
+            <select className="input !w-auto max-w-full !py-1.5 !text-xs" value={selectedPipelineFilter}
               onChange={(event) => changePipelineFilter(event.target.value)} aria-label="Filter deals by pipeline">
-              {workspaceView !== 'pipeline' && <option value="">All pipelines</option>}
+              <option value="">All pipelines</option>
               {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
             </select>
             <Badge variant="brand">{toolbarDealCount} {toolbarDealCount === 1 ? 'deal' : 'deals'}</Badge>
@@ -2079,7 +2067,7 @@ export default function DealWorkspace({
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-white">{kanbanPipeline?.name ?? 'Pipeline'}</h2>
+              <h2 className="text-sm font-semibold text-white">{kanbanPipeline?.name ?? 'All pipelines'}</h2>
               <p className="mt-1 text-xs text-muted">Drag a deal between stages to use the existing stage-change flow.</p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-3">
@@ -2092,8 +2080,8 @@ export default function DealWorkspace({
               </label>
             </div>
           </div>
-          {kanbanPipeline && kanbanStages.length ? <div className="deals-fit min-w-0">
-            <div className="deals-board grid gap-2">
+          {kanbanPipelines.length && kanbanStages.length ? <div className="deals-fit min-w-0">
+            <div className="deals-board deals-board-compact grid gap-2">
               {kanbanStages.map((stage) => {
                 const stageDeals = pipelineDealsByStage(stage);
                 const totalMvr = stageDeals.reduce((total, deal) =>
@@ -2109,7 +2097,10 @@ export default function DealWorkspace({
                   }}
                   className="flex min-w-0 flex-col rounded-xl border border-ink-700 bg-ink-900/55 p-2.5">
                   <header className="mb-2 min-w-0 px-1">
-                    <h3 className="truncate text-sm font-semibold text-white" title={stage.name}>{stage.name}</h3>
+                    <h3 className="truncate text-sm font-semibold text-white" title={selectedPipelineFilter ? stage.name : `${activePipelines.find((pipeline) => pipeline.id === stage.pipelineId)?.name}: ${stage.name}`}>
+                      {!selectedPipelineFilter && <span className="text-muted">{activePipelines.find((pipeline) => pipeline.id === stage.pipelineId)?.name}: </span>}
+                      {stage.name}
+                    </h3>
                     <p className="mt-1 truncate text-[10px] text-muted">{formatAmount(totalMvr, 'MVR')} · {stageDeals.length} {stageDeals.length === 1 ? 'deal' : 'deals'}</p>
                   </header>
                   <div className="max-h-[calc(100vh-330px)] min-h-40 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
