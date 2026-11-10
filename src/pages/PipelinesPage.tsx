@@ -676,7 +676,7 @@ export default function PipelinesPage() {
       : 'Proposal readiness';
 
   return (
-    <div className="flex min-w-0 flex-col gap-2">
+    <div className="flex min-w-0 flex-col gap-2 overflow-x-hidden lg:h-[calc(100dvh-3.5rem)] lg:min-h-0 lg:overflow-hidden lg:px-6 lg:pt-2 lg:pb-6">
       <div data-page-toolbar="pipelines" className="flex min-w-0 flex-wrap items-center gap-2">
           <select className="input !w-auto min-w-48 max-w-64 !py-1.5 !text-xs" value={pipelineId} onChange={(event) => setPipelineId(event.target.value)} aria-label="Select pipeline">
             {pipelines.filter((pipeline) => pipeline.isActive).length === 0 && <option value="">No active pipelines</option>}
@@ -725,7 +725,10 @@ export default function PipelinesPage() {
           </div>}
       </div>
 
-      <div data-page-content="pipelines" className="flex min-w-0 flex-col gap-2">
+      <div
+        data-page-content="pipelines"
+        className={`flex min-w-0 flex-col gap-2 lg:min-h-0 lg:flex-1 ${configOpen ? 'lg:overflow-y-auto' : 'lg:overflow-hidden'}`}
+      >
       {isRenewalPipeline(selectedPipeline) && (
         <div role="status" className="rounded-xl border border-brand-400/30 bg-brand-400/5 px-4 py-3 text-sm text-muted">
           <span className="font-medium text-white">Annual renewal workflow:</span>{' '}
@@ -769,19 +772,31 @@ export default function PipelinesPage() {
         </div>
       ) : (
         <>
-        <div className="grid min-w-0 gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(18rem,100%),1fr))]">
+        <div
+          data-testid="pipelines-board"
+          className="grid min-w-0 grid-flow-col grid-rows-1 auto-cols-[minmax(130px,1fr)] gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain [contain:layout] lg:min-h-0 lg:flex-1"
+        >
           {stages.map((stage) => {
             const stageDeals = visibleDealsForStage(stage);
             return (
-              <section key={stage.id} className="min-w-0 rounded-xl bg-ink-900/50 p-2">
-                <div className="flex items-start justify-between gap-2 px-2 py-2">
-                  <div>
-                    <h3 className="text-sm font-semibold text-white">{stage.name}</h3>
-                    <div className="text-[11px] text-muted">{stage.winProbabilityPct}% win · {stageDeals.length} deal{stageDeals.length === 1 ? '' : 's'}</div>
+              <section
+                key={stage.id}
+                data-testid="pipelines-board-column"
+                className="flex min-w-0 flex-col border-r border-ink-700 bg-ink-900/40 last:border-r-0"
+              >
+                <div data-testid="pipelines-stage-header" className="shrink-0 border-b border-ink-700 px-2 pt-2">
+                  <div className="flex items-start gap-2">
+                    <h3 className="min-w-0 flex-1 line-clamp-2 text-sm font-semibold text-white">{stage.name}</h3>
+                    <Badge variant="muted">{stageDeals.length}</Badge>
                   </div>
-                  <Badge variant="muted">{stageDeals.length}</Badge>
+                  <div className="whitespace-nowrap pb-2 pt-1 text-[10px] text-muted">
+                    {stage.winProbabilityPct}% win · {stageDeals.length} deal{stageDeals.length === 1 ? '' : 's'}
+                  </div>
                 </div>
-                <div className="space-y-2 min-h-32">
+                <div
+                  data-testid="pipelines-column-body"
+                  className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-y-contain p-2"
+                >
                   {stageDeals.map((deal) => {
                     const dealStages = pipelineStages
                       .filter((item) => item.pipelineId === (deal.pipelineId ?? pipelineId))
