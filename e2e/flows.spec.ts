@@ -1,7 +1,10 @@
 import { expect, test } from '@playwright/test';
 
-test('Deals opens with all pipelines selected and all deals visible', async ({ page }) => {
+test('Deals defaults to List and Pipeline shows all deals', async ({ page }) => {
   await page.goto('/#/deals');
+  await expect(page.getByRole('tab', { name: 'List' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.deals-list-fit table')).toBeVisible();
+  await page.getByRole('tab', { name: 'Pipeline' }).click();
   const pipelineFilter = page.getByLabel('Filter deals by pipeline');
 
   await expect(pipelineFilter).toHaveValue('');

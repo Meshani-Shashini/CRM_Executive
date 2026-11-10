@@ -356,7 +356,7 @@ export default function DealWorkspace({
     if (!dealsPageMode) return 'list';
     const view = hashParams().get('view');
     if (view === 'inspection') return view;
-    return view === 'list' || view === 'forecast' || view === 'archive' || view === 'pipeline' ? view : 'pipeline';
+    return view === 'list' || view === 'forecast' || view === 'archive' || view === 'pipeline' ? view : 'list';
   });
   const [kanbanPipelineId, setKanbanPipelineId] = useState('');
   const selectedPipelineFilter = pipelineFilter ?? kanbanPipelineId;
@@ -1755,10 +1755,11 @@ export default function DealWorkspace({
   return (
     <div className="space-y-2">
       {(dealsPageMode ? !selectedItem : workspaceView === 'list' || workspaceView === 'kanban' || !selectedItem) && <div className="space-y-2">
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-          <div className="flex gap-1 rounded-lg border border-ink-600 bg-ink-800/60 p-1" role="tablist" aria-label={dealsPageMode ? 'Deal views' : 'Deal workspace views'}
+        <div data-testid={dealsPageMode ? 'deals-toolbar' : undefined} className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-0.5" role="tablist" aria-label={dealsPageMode ? 'Deal views' : 'Deal workspace views'}
             onKeyDown={(event) => {
-              const names: DealsView[] = ['pipeline', 'list', 'forecast', 'archive'];
+              const names: DealsView[] = ['list', 'pipeline', 'forecast', 'archive'];
               if (!dealsPageMode || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
               event.preventDefault();
               const current = names.indexOf(workspaceView as DealsView);
@@ -1767,33 +1768,38 @@ export default function DealWorkspace({
               requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-deals-view="${names[next]}"]`)?.focus());
             }}>
             {dealsPageMode ? ([
-              { key: 'pipeline' as const, label: 'Pipeline', Icon: Columns3 },
               { key: 'list' as const, label: 'List', Icon: List },
+              { key: 'pipeline' as const, label: 'Pipeline', Icon: Columns3 },
               { key: 'forecast' as const, label: 'Forecast', Icon: TrendingUp },
               { key: 'archive' as const, label: 'Archive', Icon: Archive },
             ]).map(({ key, label, Icon }) => <button key={key} type="button" role="tab" data-deals-view={key}
               aria-label={label} title={label} aria-selected={workspaceView === key}
               onClick={() => changeDealsView(key)}
-              className={`rounded-md p-2 transition ${workspaceView === key ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>
-              <Icon size={15} />
+              className={`rounded-md p-1.5 transition ${workspaceView === key ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}>
+              <Icon size={14} />
             </button>) : <>
               <button type="button" role="tab" aria-selected={workspaceView === 'list'} onClick={() => setWorkspaceView('list')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'list' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>List</button>
               <button type="button" role="tab" aria-selected={workspaceView === 'kanban'} onClick={() => setWorkspaceView('kanban')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'kanban' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>Kanban</button>
               <button type="button" role="tab" aria-selected={workspaceView === 'inspection'} onClick={() => setWorkspaceView('inspection')} className={`rounded-md px-3 py-1.5 text-sm ${workspaceView === 'inspection' ? 'bg-ink-700 text-white' : 'text-muted hover:text-white'}`}>Inspection</button>
             </>}
           </div>
+          {dealsPageMode && onLegacyImport && <button type="button" className="btn-primary !px-3 !py-1.5 !text-xs" onClick={onLegacyImport}><Plus size={13} /> Legacy deal</button>}
           {!dealsPageMode && onClose && <button type="button" className="btn-ghost !py-1.5" onClick={onClose}>Back to leads</button>}
-          {dealsPageMode && <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+          </div>
+          {dealsPageMode && <div data-testid="deals-toolbar-controls" className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+            <Badge variant="brand">{toolbarDealCount} {toolbarDealCount === 1 ? 'deal' : 'deals'}</Badge>
             <select className="input !w-auto max-w-full !py-1.5 !text-xs" value={selectedPipelineFilter}
               onChange={(event) => changePipelineFilter(event.target.value)} aria-label="Filter deals by pipeline">
               <option value="">All pipelines</option>
               {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
             </select>
-            <Badge variant="brand">{toolbarDealCount} {toolbarDealCount === 1 ? 'deal' : 'deals'}</Badge>
+            {workspaceView === 'list' && <label className="relative w-full md:min-w-36 md:max-w-64 md:flex-1">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <input className="input !py-1.5 pl-9 !text-xs" type="search" value={dealListSearch} onChange={(event) => setDealListSearch(event.target.value)} placeholder="Search deals" aria-label="Search deals" />
+            </label>}
             <button type="button" className={`btn-ghost !px-3 !py-1.5 !text-xs ${conditionBuilderOpen ? 'border-brand-400 text-white' : ''}`}
               onClick={() => setConditionBuilderOpen((open) => !open)}><Plus size={13} /> Add condition</button>
             {onOpenFilters && <button type="button" className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={onOpenFilters}><Filter size={13} /> Filter</button>}
-            {onLegacyImport && <button type="button" className="btn-primary !px-3 !py-1.5 !text-xs" onClick={onLegacyImport}><Plus size={13} /> Legacy deal</button>}
           </div>}
         </div>
         {dealsPageMode && (conditionBuilderOpen || filterConditions.length > 0) && <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-ink-700 bg-ink-900/40 p-2">
@@ -1941,7 +1947,8 @@ export default function DealWorkspace({
                             }
                           }}
                         >
-                          <StagePill stage={stage?.name ?? deal.stage} outcome={stageOutcome} truncate />
+                          <StagePill stage={dealsPageMode ? stage?.shortLabel ?? stage?.name ?? deal.stage : stage?.name ?? deal.stage}
+                            title={stage?.name ?? deal.stage} outcome={stageOutcome} truncate />
                           <span className={`deal-stage-sla ${isOverdue ? 'deal-stage-sla-overdue' : ''}`} title={stage?.stagnationDaysThreshold ? `Stage SLA: ${elapsedDays ?? 0} of ${stage.stagnationDaysThreshold} days` : 'No stage SLA configured'}>
                             {stage?.stagnationDaysThreshold ? `${elapsedDays ?? 0}/${stage.stagnationDaysThreshold}d` : 'No SLA'}
                           </span>
@@ -1981,7 +1988,7 @@ export default function DealWorkspace({
                           <span className="block truncate text-[10px] font-normal leading-none text-[#8E95A2]" title={dealReferences.get(deal.id) ?? deal.id}>{dealReferences.get(deal.id) ?? deal.id}</span>
                         </td>
                         <td data-label="Value" className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
-                          <span className="block truncate font-semibold" title={formatAmount(deal.value, deal.currency ?? 'USD')}>{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
+                          <span className="block whitespace-nowrap font-semibold" title={formatAmount(deal.value, deal.currency ?? 'USD')}>{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
                           <span className="block text-[10px] leading-none text-[#8E95A2]">{deal.probability}%</span>
                         </td>
                         <td data-label="Organization" className="px-2 py-2 font-normal text-[#E1E2E5]"><span className="block truncate" title={deal.client}>{deal.client}</span></td>
@@ -2054,7 +2061,7 @@ export default function DealWorkspace({
                           </>}
                           {onEditDeal && <button type="button" role="menuitem" className="table-row-actions-item text-white hover:bg-ink-700" onClick={() => { setOpenDealActionsId(''); setDealActionsAnchor(null); onEditDeal(deal); }}><Pencil size={12} /> Edit deal</button>}
                           {onDeleteDeal && <button type="button" role="menuitem" className="table-row-actions-item text-hot hover:bg-ink-700" onClick={() => { setOpenDealActionsId(''); setDealActionsAnchor(null); onDeleteDeal(deal); }}><Trash2 size={12} /> Delete deal</button>}
-                          <span className="block whitespace-nowrap px-3 py-2 text-[10px] text-muted">{outcome}</span>
+                          {outcome !== 'Open' && <span className="block whitespace-nowrap px-3 py-2 text-[10px] text-muted">{outcome}</span>}
                         </TableRowActionsMenu>
                       </td>
                     </tr>
@@ -2278,20 +2285,20 @@ export default function DealWorkspace({
                 onKeyDown={(event) => {
                   if (!dealsPageMode || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
                   event.preventDefault();
-                  const names: DealsView[] = ['pipeline', 'list', 'forecast', 'archive'];
+                  const names: DealsView[] = ['list', 'pipeline', 'forecast', 'archive'];
                   const current = names.indexOf(workspaceView as DealsView);
                   const next = (current + (event.key === 'ArrowRight' ? 1 : -1) + names.length) % names.length;
                   changeDealsView(names[next]);
                   requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-deals-view="${names[next]}"]`)?.focus());
                 }}>
                 {dealsPageMode ? ([
-                  { key: 'pipeline' as const, label: 'Pipeline', Icon: Columns3 },
                   { key: 'list' as const, label: 'List', Icon: List },
+                  { key: 'pipeline' as const, label: 'Pipeline', Icon: Columns3 },
                   { key: 'forecast' as const, label: 'Forecast', Icon: TrendingUp },
                   { key: 'archive' as const, label: 'Archive', Icon: Archive },
                 ]).map(({ key, label, Icon }) => <button key={key} type="button" role="tab" data-deals-view={key} aria-label={label} title={label}
                   aria-selected={workspaceView === key} onClick={() => changeDealsView(key)}
-                  className={`rounded-md p-2 transition ${workspaceView === key ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><Icon size={14} /></button>)
+                  className={`rounded-md p-1.5 transition ${workspaceView === key ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}><Icon size={14} /></button>)
                   : <>
                     <button type="button" role="tab" aria-label="Kanban view" title="Kanban view" aria-selected={false} onClick={() => setWorkspaceView('kanban')} className="rounded-md p-2 text-muted transition hover:text-white"><Columns3 size={14} /></button>
                     <button type="button" role="tab" aria-label="Inspection view" title="Inspection view" aria-selected={true} onClick={() => setWorkspaceView('inspection')} className="rounded-md bg-[#1B1E22] p-2 text-white transition"><List size={14} /></button>

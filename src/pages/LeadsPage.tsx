@@ -160,6 +160,7 @@ export default function LeadsPage() {
   const [leadValue, setLeadValue] = useState('');
   const [exchangeRate, setExchangeRate] = useState('');
   const [formError, setFormError] = useState('');
+  const [conversionWarningOpen, setConversionWarningOpen] = useState(false);
   const [validationAttempted, setValidationAttempted] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [temperatureFilter, setTemperatureFilter] = useState(() => hashParams().get('temperature') ?? '');
@@ -906,7 +907,6 @@ export default function LeadsPage() {
                         ? <StagePill stage={stage} outcome={stage === 'Lost' ? 'lost' : 'won'} uppercase />
                         : <span className="min-w-0 flex-1 truncate">{stage}</span>}
                     </span>
-                    <LeadStageSlaIndicator lead={lead} stage={stage} targets={company.leadStageSlaDays} />
                   </td>
                   <td data-label={leadTableColumns[3].label} className="whitespace-nowrap px-2 py-2 font-normal"><ProductCodePill code={lead.productCode} name={products.find((product) => product.code === lead.productCode)?.name} /></td>
                   <td data-label={leadTableColumns[4].label} className="whitespace-nowrap px-1 py-2 font-normal" onClick={(event) => event.stopPropagation()}>
@@ -976,7 +976,7 @@ export default function LeadsPage() {
                             contactChannels: { contactPhone: lead.contactPhone || '', whatsapp: lead.whatsapp || '', telegram: lead.telegram || '' },
                           });
                           if (!conversion) {
-                            window.alert('Complete the client profile and contact details before converting this lead.');
+                            setConversionWarningOpen(true);
                             return;
                           }
                           setDeals((current) => [conversion.deal, ...current]);
@@ -1305,6 +1305,17 @@ export default function LeadsPage() {
         footer={<><button type="button" className="btn-ghost" onClick={() => setPendingLeadDeletion(null)}>Cancel</button><button type="button" className="btn-primary !bg-hot-600" disabled={activeRole !== 'admin'} onClick={confirmDeleteLead}>Delete Lead</button></>}
       >
         <p className="text-sm text-muted">This lead will be permanently removed from the funnel.</p>
+      </Modal>
+      <Modal
+        open={conversionWarningOpen}
+        onClose={() => setConversionWarningOpen(false)}
+        title="Complete client details first"
+        size="sm"
+        footer={<button type="button" className="btn-primary" onClick={() => setConversionWarningOpen(false)}>Got it</button>}
+      >
+        <p role="alert" className="rounded-lg border border-amber-400/25 bg-amber-400/5 px-3 py-2 text-sm text-amber-100">
+          Complete the client profile and contact details before converting this lead.
+        </p>
       </Modal>
       {formError && (newLeadOpen || newOrganizationOpen) && (
         <div role="alert" aria-live="assertive" className="fixed right-4 top-4 z-[100] flex max-w-sm items-start gap-3 rounded-xl border border-red-500/50 bg-ink-900 px-4 py-3 text-sm text-red-300 shadow-2xl">

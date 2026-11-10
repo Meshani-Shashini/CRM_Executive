@@ -105,4 +105,32 @@ describe('Deal list row accessibility', () => {
       'Actions',
     ]);
   });
+
+  it('omits the Open status from the deal action menu', () => {
+    window.location.hash = '#/deals?view=list';
+    act(() => root.render(<DealWorkspace deals={[testDeal]} dealsPageMode />));
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Actions for Property placement"]')?.click());
+
+    const menu = document.body.querySelector('[role="menu"]');
+    expect(menu).not.toBeNull();
+    expect(menu?.textContent).not.toContain('Open');
+    expect([...menu!.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent?.trim())).toContain('Mark won');
+  });
+
+  it('defaults to the List view and orders Deals tabs to match Leads', () => {
+    window.location.hash = '#/deals';
+    act(() => root.render(<DealWorkspace deals={[testDeal]} dealsPageMode />));
+
+    const viewTabs = [...container.querySelectorAll<HTMLButtonElement>('[data-deals-view]')];
+    expect(viewTabs.map((tab) => tab.getAttribute('data-deals-view'))).toEqual([
+      'list',
+      'pipeline',
+      'forecast',
+      'archive',
+    ]);
+    expect(container.querySelector('[data-testid="deals-toolbar"]')?.className).toContain('flex-wrap');
+    expect(viewTabs[0].getAttribute('aria-selected')).toBe('true');
+    expect(viewTabs.slice(1).every((tab) => tab.getAttribute('aria-selected') === 'false')).toBe(true);
+    expect(viewTabs[0].className).toContain('bg-[#1B1E22]');
+  });
 });

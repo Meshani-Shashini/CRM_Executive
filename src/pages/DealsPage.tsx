@@ -470,9 +470,6 @@ export default function DealsPage() {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><h1 className="text-xl font-semibold text-white">Deals</h1><p className="mt-1 text-xs text-muted">Pipeline, forecast, active deals, and archive.</p></div>
-      </div>
       <DealWorkspace
         deals={visibleDeals}
         dealsPageMode

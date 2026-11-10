@@ -32,11 +32,13 @@ export function StagePill({
   outcome,
   uppercase = false,
   truncate = false,
+  title,
 }: {
   stage: string;
   outcome: 'won' | 'lost' | 'neutral';
   uppercase?: boolean;
   truncate?: boolean;
+  title?: string;
 }) {
   const tone = outcome === 'lost'
     ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]'
@@ -45,7 +47,7 @@ export function StagePill({
       : 'border-[#2A2E35] bg-[#17191C] text-[#E1E2E5]';
   const label = uppercase && stage === 'Converted to deal' ? 'CONVERTED' : stage;
   return (
-    <span className={`pill inline-flex ${truncate ? 'min-w-0 flex-1 overflow-hidden text-ellipsis' : 'w-fit max-w-full shrink-0'} whitespace-nowrap border !px-2 !py-0.5 text-[10px] leading-none ${uppercase ? 'uppercase' : 'normal-case tracking-normal'} ${tone}`} title={stage}>
+    <span className={`pill inline-flex ${truncate ? 'min-w-0 flex-1 overflow-hidden text-ellipsis' : 'w-fit max-w-full shrink-0'} whitespace-nowrap border !px-2 !py-0.5 text-[10px] leading-none ${uppercase ? 'uppercase' : 'normal-case tracking-normal'} ${tone}`} title={title ?? stage}>
       {truncate ? <span className="block min-w-0 truncate">{label}</span> : label}
     </span>
   );
