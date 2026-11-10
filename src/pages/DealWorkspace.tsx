@@ -1853,12 +1853,14 @@ export default function DealWorkspace({
               <option value="all">All outcomes</option><option value="won">Won</option><option value="lost">Lost</option>
             </select>
           </div>}
-          <TableShell className={workspaceView === 'archive' ? 'deals-list-fit deals-archive-fit' : `deals-list-fit${dealsPageMode ? ' deals-page-list-fit' : ''}`}>
+          <TableShell className={workspaceView === 'archive'
+            ? `deals-list-fit deals-archive-fit${dealsPageMode ? ' deals-page-archive-fit' : ''}`
+            : `deals-list-fit${dealsPageMode ? ' deals-page-list-fit' : ''}`}>
             <table className="table-fixed w-full leading-tight text-left">
               <colgroup>{tableColumns.map((column) => <col key={column.key} />)}</colgroup>
               <thead className="bg-[#111214] text-[10px] font-semibold text-[#D0D3D9]">
                 <tr>{tableColumns.map((column) => (
-                  <th key={column.key} scope="col" className="border-b border-[#1B1E22] px-1 py-2 text-left">
+                  <th key={column.key} scope="col" className="border-b border-[#1B1E22] px-2 py-2 text-left">
                     {column.key === 'actions' ? <span className="sr-only">{column.label}</span> : (
                       ['closedDate', 'lossReason'].includes(column.key) ? column.label : <button type="button" className="inline-flex items-center gap-1 whitespace-nowrap" onClick={() => {
                         const nextKey = column.key as typeof sortKey;

@@ -297,6 +297,50 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
 .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(12) { width: 9%; }
 .fit-wrap.deals-list-fit.deals-archive-fit col:nth-child(13) { width: 4%; }
 
+.fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit {
+  overflow-x: auto;
+}
+
+@container (min-width: 640px) {
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit table {
+    min-width: 1000px;
+  }
+
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit col:nth-child(1) { width: 12%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit col:nth-child(2) { width: 7%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit col:nth-child(3) { width: 9%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit col:nth-child(4) { width: 9%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit col:nth-child(5) { width: 13%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit col:nth-child(6) { width: 13%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit col:nth-child(7) { width: 8%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit col:nth-child(8) { width: 7%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit col:nth-child(9) { width: 7%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit col:nth-child(10) { width: 6%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit col:nth-child(11) { width: 5%; }
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit col:nth-child(12) { width: 4%; }
+
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit th {
+    min-width: 80px;
+    white-space: nowrap;
+  }
+
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit th:nth-child(5),
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit td[data-label="Expected Close Date"],
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit th:nth-child(6),
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit td[data-label="Next Activity Date"] {
+    min-width: 132px;
+  }
+
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit th:nth-child(7),
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit td[data-label="Owner"] {
+    min-width: 80px;
+  }
+
+  .fit-wrap.deals-list-fit.deals-archive-fit.deals-page-archive-fit th button {
+    white-space: nowrap;
+  }
+}
+
 .fit-wrap.deals-list-fit td[data-label="Pipeline"],
 .fit-wrap.deals-list-fit td[data-label="Stage"],
 .fit-wrap.deals-list-fit td[data-label="Value"],
