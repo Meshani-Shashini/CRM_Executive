@@ -24,6 +24,18 @@ test('lead converts through QRS, invoice, and payment with monthly open-to-won r
   const organization = 'Lagoon Marine Logistics';
   const leadTitle = 'Lagoon Marine Hull Insurance';
   const phone = '+960 7771234';
+  await page.route('**/rest/v1/rpc/get_next_reference', async (route) => {
+    const body = route.request().postDataJSON() as { p_kind?: string; p_year?: number };
+    if (body.p_kind !== 'client-quotation' || !body.p_year) {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(`QTY-${body.p_year}-0001`),
+    });
+  });
 
   await page.goto('/#/leads', { waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: 'Lead', exact: true }).click();
@@ -59,8 +71,8 @@ test('lead converts through QRS, invoice, and payment with monthly open-to-won r
   await clientForm.locator('input[name="contactPerson"]').fill('Aminath Rasheed');
   await clientForm.locator('textarea[name="address"]').fill('Hulhumale, Maldives');
   await clientForm.locator('input[name="country"]').fill('Maldives');
-  await clientForm.locator('input[name="class"]').fill('Marine Hull');
-  await clientForm.locator('input[name="productCode"]').fill('HR');
+  //await clientForm.locator('input[name="class"]').fill('Marine Hull');
+ //await clientForm.locator('input[name="productCode"]').fill('HR');
   await page.getByRole('button', { name: 'Save Changes' }).click();
   await page.getByRole('dialog', { name: organization })
     .getByRole('button', { name: 'Close client details' }).click();
@@ -108,18 +120,9 @@ test('lead converts through QRS, invoice, and payment with monthly open-to-won r
   await dealWorkspace.getByRole('button', { name: 'Schedule next activity' }).click();
   await page.locator('#workspace-activity-form input[name="title"]').fill('Submit underwriting pack');
   await page.getByRole('button', { name: 'Schedule activity' }).click();
+  await expect(page.getByRole('heading', { name: 'Schedule next activity' })).toHaveCount(0);
 
-  page.once('dialog', async (dialog) => {
-    expect(dialog.message()).toContain('Create one now');
-    await dialog.accept();
-  });
-  await page.getByTestId('deal-stage-stepper').getByRole('button', {
-    name: /^Quotation \/ Underwriting/,
-  }).click();
-  await page.getByLabel('Insurer *').fill('Island Insurance');
-  const intakeCheckbox = page.getByLabel('Required underwriting intake is complete');
-  if (!(await intakeCheckbox.isChecked())) await intakeCheckbox.check();
-  await page.getByRole('button', { name: 'Save stage' }).click();
+  await page.getByRole('link', { name: 'Create QRS', exact: true }).first().click();
   await expect(page).toHaveURL(/#\/qslips/);
   await expect(page.getByRole('heading', { name: 'New Quotation Request Slip' })).toBeVisible();
 
@@ -210,9 +213,13 @@ test('lead converts through QRS, invoice, and payment with monthly open-to-won r
   const liveComparisonRow = page.getByRole('row').filter({ hasText: secondLineReference! });
   await expect(liveComparisonRow).toContainText('Quoted');
   await expect(liveComparisonRow).toContainText('MVR 1,200.00');
-  await page.getByRole('link', { name: 'Prepare QTY' }).first().click();
+  await page.getByRole('link', { name: 'Create client quotation' }).click();
   await expect(page).toHaveURL(/#\/quotations\?/);
-  await page.getByRole('button', { name: 'Create QTY' }).click();
+  await expect(page.getByRole('heading', { name: 'Create client quotation' })).toBeVisible();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByLabel('Addressee').selectOption({ index: 1 });
+  await page.getByRole('button', { name: 'Save as Draft' }).click();
   await expect(page.getByRole('heading', { name: /QTY-\d{4}-\d{4}/ })).toBeVisible();
   await page.getByRole('button', { name: 'Issue quotation' }).click();
   await expect(page.getByRole('status')).toContainText('issued');
@@ -220,8 +227,8 @@ test('lead converts through QRS, invoice, and payment with monthly open-to-won r
   await acceptanceName.fill('Aminath Rasheed');
   await expect(acceptanceName).toHaveValue('Aminath Rasheed');
   await page.getByLabel('Designation').last().fill('Fleet Manager');
-  await page.getByRole('button', { name: 'Accept quotation' }).click();
-  await expect(page.getByText('Accepted quotation enables Won; the deal has advanced to its next pipeline stage.')).toBeVisible();
+  await page.getByRole('button', { name: 'Record acceptance' }).click();
+  await expect(page.getByRole('status')).toContainText('accepted');
 
   await navigate(page, 'Dashboard');
   const monthlySummary = page.getByRole('region', { name: 'Monthly company deal summary' });
@@ -250,7 +257,7 @@ test('lead converts through QRS, invoice, and payment with monthly open-to-won r
   await navigate(page, 'Payments');
   await page.getByRole('button', { name: 'Record Payment' }).click();
   await page.locator('#record-payment-form select[name="invoiceId"]').selectOption({ index: 0 });
-  await page.locator('#record-payment-form input[name="amount"]').fill('100000');
+  await page.locator('#record-payment-form input[name="amount"]').fill('1200');
   await page.locator('button[form="record-payment-form"]').click();
   await expect(page.getByRole('row').filter({ hasText: organization })).toBeVisible();
 

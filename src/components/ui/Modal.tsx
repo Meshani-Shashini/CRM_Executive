@@ -59,7 +59,7 @@ export default function Modal({ open, onClose, title, subtitle, children, footer
         className={`relative ${w} w-full glass rounded-2xl shadow-glass flex flex-col max-h-[90vh] animate-slideUp`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between p-5 border-b border-ink-600">
+        <div className="flex shrink-0 items-start justify-between p-5 border-b border-ink-600">
           <div>
             <h3 className="text-lg font-semibold text-white">{title}</h3>
             {subtitle && <p className="text-sm text-muted mt-0.5">{subtitle}</p>}
@@ -68,8 +68,8 @@ export default function Modal({ open, onClose, title, subtitle, children, footer
             <X size={18} />
           </button>
         </div>
-        <div className="p-5 overflow-y-auto">{children}</div>
-        {footer && <div className="p-4 border-t border-ink-600 flex justify-end gap-2">{footer}</div>}
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">{children}</div>
+        {footer && <div className="flex shrink-0 justify-end gap-2 border-t border-ink-600 p-4">{footer}</div>}
       </div>
     </div>
   );

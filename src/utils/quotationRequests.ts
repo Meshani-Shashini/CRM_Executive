@@ -10,8 +10,21 @@ export type DerivedQuotationRequestStatus =
 
 export function getQuotationLineDisplayStatus(line: QuotationRequestLine, now = new Date()): QuotationRequestLineStatus {
   const lastStatusChange = line.statusHistory[line.statusHistory.length - 1];
-  if (line.status === 'Cancelled' || lastStatusChange?.toStatus === 'Cancelled') return 'Cancelled';
-  if (line.status !== 'Sent' && line.status !== 'Quoted') return line.status;
+  const statuses = [line.status, lastStatusChange?.toStatus].filter(
+    (status): status is QuotationRequestLineStatus => Boolean(status),
+  );
+  const precedence: QuotationRequestLineStatus[] = [
+    'Cancelled', 'Declined', 'Quoted', 'Expired', 'Sent', 'Requested',
+  ];
+  const currentStatus = precedence.find((status) => statuses.includes(status));
+  if (!currentStatus) return 'Requested';
+  if (currentStatus === 'Cancelled' || currentStatus === 'Declined') {
+    return currentStatus;
+  }
+  const underlyingStatus = currentStatus === 'Expired'
+    ? [line.status, lastStatusChange?.fromStatus].find((status) => status === 'Sent' || status === 'Quoted')
+    : currentStatus;
+  if (underlyingStatus !== 'Sent' && underlyingStatus !== 'Quoted') return 'Requested';
   const validityDates = line.quotes.length
     ? line.quotes.map((quote) => quote.validUntil)
     : [line.validUntil];
@@ -20,7 +33,21 @@ export function getQuotationLineDisplayStatus(line: QuotationRequestLine, now = 
     const expiresAt = Date.parse(`${date.slice(0, 10)}T23:59:59.999Z`);
     return Number.isFinite(expiresAt) && now.getTime() > expiresAt;
   });
-  return allQuotesExpired ? 'Expired' : line.status;
+  return allQuotesExpired ? 'Expired' : underlyingStatus;
+}
+
+export function quotationLineStatusCellText(line: QuotationRequestLine, now = new Date()) {
+  const status = getQuotationLineDisplayStatus(line, now);
+  if (status === 'Requested' || status === 'Sent') return 'Awaiting quote';
+  if (status === 'Declined') return `Declined: ${line.declineReason || line.remarks || 'No reason provided'}`;
+  if (status === 'Cancelled') return 'Cancelled';
+  if (status === 'Expired') {
+    const validityDates = line.quotes.map((quote) => quote.validUntil)
+      .filter((date): date is string => Boolean(date)).sort();
+    const validityDate = line.quotes.length ? validityDates[validityDates.length - 1] : line.validUntil;
+    return `Expired${validityDate ? ` ${validityDate.slice(0, 10)}` : ' (validity date unavailable)'}`;
+  }
+  return undefined;
 }
 
 export function formatQuotationLineReference(line: Pick<QuotationRequestLine, 'reference'>) {

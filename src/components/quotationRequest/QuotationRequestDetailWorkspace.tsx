@@ -11,11 +11,14 @@ import type {
 } from '../../types';
 import { formatAmount } from '../../utils/currency';
 import { formatDate } from '../../utils/date';
+import { dashboardHref } from '../../utils/navigation';
 import { printDocument } from '../../utils/print';
-import { canTransitionQuotationRequestStatus, quotationRequestStatusOptions } from '../../utils/quotationRequestStatus';
+import {
+  canTransitionQuotationRequestStatus, quotationLineRowActions, quotationRequestStatusOptions,
+} from '../../utils/quotationRequestStatus';
 import {
   deriveRequestStatus, deriveSectionStatus, formatQuotationLineActivity,
-  formatQuotationLineReference, getQuotationLineDisplayStatus,
+  formatQuotationLineReference, getQuotationLineDisplayStatus, quotationLineStatusCellText,
 } from '../../utils/quotationRequests';
 import {
   calculateIndicativePremium, compareOptionCoverage, isQuoteExpiring, quotationInterestBreakdown,
@@ -105,6 +108,13 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
   const allInsurers = [...new Set(request.lines.map((line) => line.vendorId))]
     .map((vendorId) => vendors.find((vendor) => vendor.id === vendorId))
     .filter((vendor): vendor is NonNullable<typeof vendor> => Boolean(vendor));
+  const hasEligibleQuotedSection = request.lines.some((line) => {
+    if (getQuotationLineDisplayStatus(line) !== 'Quoted') return false;
+    const section = request.sections.find((item) => item.id === line.sectionId);
+    if (!section || section.status !== 'Active') return false;
+    return line.quotes.some((quote) => quote.premium > 0
+      && (!quote.validUntil || Date.parse(`${quote.validUntil.slice(0, 10)}T23:59:59.999Z`) >= Date.now()));
+  });
 
   useEffect(() => {
     if (!printTarget) return;
@@ -121,21 +131,21 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
   const sectionsToShow = activeSection ? [activeSection] : request.sections;
   const totalSumInsured = request.sections.reduce((sum, section) => sum + section.data.totalSumInsured, 0);
   const lineCounts = request.lines.reduce<Record<QuotationRequestLineStatus, number>>((counts, line) => {
-    counts[line.status] += 1;
+    counts[getQuotationLineDisplayStatus(line)] += 1;
     return counts;
   }, { Requested: 0, Sent: 0, Quoted: 0, Declined: 0, Expired: 0, Cancelled: 0 });
-  const activeLines = request.lines.filter((line) => line.status !== 'Cancelled');
-  const quotedLines = activeLines.filter((line) => line.status === 'Quoted').length;
+  const activeLines = request.lines.filter((line) => getQuotationLineDisplayStatus(line) !== 'Cancelled');
+  const quotedLines = activeLines.filter((line) => getQuotationLineDisplayStatus(line) === 'Quoted').length;
   const activeSections = request.sections.filter((section) => deriveSectionStatus(section.id, request.lines) === 'Active').length;
   const filteredLines = useMemo(() => request.lines.filter((line) =>
     sectionTab === 'all' || line.sectionId === sectionTab,
   ), [request.lines, sectionTab]);
 
-  const openLineEditor = (line: QuotationRequestLine) => {
+  const openLineEditor = (line: QuotationRequestLine, initialStatus = line.status) => {
     const section = request.sections.find((item) => item.id === line.sectionId);
     const options = section?.data.options.length ? section.data.options : [{ id: 'base', label: 'Premium' }];
     setLineEditor(line);
-    setLineStatus(line.status);
+    setLineStatus(initialStatus);
     setQuoteCurrency(line.quotes[0]?.currency ?? line.quotedCurrency ?? request.currency);
     setQuoteDrafts(Object.fromEntries(options.map((option) => {
       const quote = lineQuote(line, option.id);
@@ -424,7 +434,9 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
               <tbody>{filteredLines.map((line) => {
                 const section = request.sections.find((item) => item.id === line.sectionId);
                 const vendor = vendors.find((item) => item.id === line.vendorId);
-                const contact = vendor?.contacts?.[0];
+                const contact = vendor?.contacts?.find((item) =>
+                  item.name.trim() || item.email.trim() || item.phone.trim(),
+                );
                 const options = section?.data.options.length ? section.data.options : [{ id: 'base', label: 'Premium' }];
                 const quotes = options
                   .map((option) => ({ option, quote: lineQuote(line, option.id) }))
@@ -438,6 +450,14 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
                   return selectBestQuote(sameCurrency)?.line.id === line.id;
                 }).map(({ option }) => option.id));
                 const displayStatus = getQuotationLineDisplayStatus(line);
+                const statusCellText = quotationLineStatusCellText(line);
+                const rowActions = quotationLineRowActions(
+                  displayStatus,
+                  line.status,
+                  role,
+                  user.role === 'admin' || role === 'admin' || deal?.ownerId === user.id,
+                );
+                const statusCellFallback = statusCellText ?? 'Quote details unavailable';
                 const cancelled = displayStatus === 'Cancelled' || section?.status === 'Cancelled';
                 return <tr key={line.id} className={`border-t border-ink-700/60 ${cancelled ? 'text-muted opacity-60' : 'text-white'}`}>
                   <td className="px-2 py-2"><span className="font-mono text-brand-300">{formatQuotationLineReference(line)}</span><div>{vendor?.name ?? 'Unknown insurer'}</div></td>
@@ -445,26 +465,66 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
                   <td className="px-2 py-2">{section?.title ?? 'Section unavailable'}<div className="text-muted">{section?.productCode}</div></td>
                   <td className="px-2 py-2">{quotes.length ? quotes.map(({ option }) => <div key={option.id} className="flex items-center gap-1">{option.label}{bestByOption.has(option.id) && <Badge compact variant="win">Best</Badge>}</div>) : section?.data.options.map((option) => <div key={option.id}>{option.label}</div>) ?? 'Standard'}</td>
                   <td className="px-2 py-2"><Badge compact variant={displayStatus === 'Quoted' ? 'win' : displayStatus === 'Declined' ? 'warm' : displayStatus === 'Cancelled' || cancelled ? 'muted' : 'brand'}>{displayStatus}</Badge></td>
-                  <td className="px-2 py-2">{quotes.length ? quotes.map(({ option, quote }) => <div key={option.id} className={bestByOption.has(option.id) ? 'font-semibold text-win' : 'text-brand-300'}>{formatAmount(quote!.premium, quote!.currency)}{bestByOption.has(option.id) ? ' · Best' : ''}</div>) : '—'}</td>
-                  <td className="px-2 py-2">{quotes.length ? quotes.map(({ option, quote }) => <div key={option.id} className="text-muted">{quotationRateFromPremium(quote!.premium, section?.data.totalSumInsured ?? 0)?.toFixed(2) ?? '—'}%</div>) : '—'}</td>
-                  <td className="px-2 py-2">{quotes.length ? quotes.map(({ option, quote }) => <div key={option.id} className={isQuoteExpiring(quote!.validUntil, new Date(), expiringWithinDays) ? 'text-warm' : 'text-muted'}>
-                    {quote!.validUntil ? formatDate(quote!.validUntil) : '—'}{isQuoteExpiring(quote!.validUntil, new Date(), expiringWithinDays) && <TriangleAlert className="ml-1 inline" size={12} aria-label="Expiring soon" />}
-                  </div>) : line.validUntil ? formatDate(line.validUntil) : '—'}</td>
-                  <td className="max-w-40 whitespace-normal px-2 py-2 text-muted">{[...(line.insurerDeductibles ?? []), line.remarks].filter(Boolean).join(' · ') || line.declineReason || '—'}</td>
-                  <td className="px-2 py-2 text-muted">{line.insurerQuoteRef || '—'}</td>
-                  <td className="px-2 py-2"><button type="button" className="btn-ghost !px-2 !py-1 text-[10px]" disabled={!canEdit || cancelled} onClick={() => openLineEditor(line)}>{displayStatus === 'Quoted' ? 'Update line' : 'Log carrier quotation'}</button></td>
+                  <td className="px-2 py-2">{quotes.length ? quotes.map(({ option, quote }) => <div key={option.id} className={bestByOption.has(option.id) ? 'font-semibold text-win' : 'text-brand-300'}>{formatAmount(quote.premium, quote.currency)}{bestByOption.has(option.id) ? ' · Best' : ''}</div>) : statusCellText ?? statusCellFallback}</td>
+                  <td className="px-2 py-2">{quotes.length ? quotes.map(({ option, quote }) => {
+                    const rate = quotationRateFromPremium(quote.premium, section?.data.totalSumInsured ?? 0);
+                    return <div key={option.id} className="text-muted">{rate === undefined ? 'Rate unavailable' : `${rate.toFixed(2)}%`}</div>;
+                  }) : statusCellText ?? statusCellFallback}</td>
+                  <td className="px-2 py-2">{quotes.length ? quotes.map(({ option, quote }) => <div key={option.id} className={isQuoteExpiring(quote.validUntil, new Date(), expiringWithinDays) ? 'text-warm' : 'text-muted'}>
+                    {quote.validUntil ? formatDate(quote.validUntil) : 'Validity unavailable'}{isQuoteExpiring(quote.validUntil, new Date(), expiringWithinDays) && <TriangleAlert className="ml-1 inline" size={12} aria-label="Expiring soon" />}
+                  </div>) : statusCellText ?? statusCellFallback}</td>
+                  <td className="max-w-40 whitespace-normal px-2 py-2 text-muted">{displayStatus === 'Quoted'
+                    ? [...(line.insurerDeductibles ?? []), line.remarks].filter(Boolean).join(' · ') || 'No deductible/notes supplied'
+                    : statusCellFallback}</td>
+                  <td className="px-2 py-2 text-muted">{displayStatus === 'Quoted' ? line.insurerQuoteRef || 'No insurer reference' : statusCellFallback}</td>
+                  <td className="px-2 py-2">
+                    <div className="flex flex-wrap gap-1">
+                      {rowActions.map((action) => {
+                        const actionLabels = {
+                          send: 'Send',
+                          cancel: 'Cancel',
+                          'log-quote': 'Log carrier quotation',
+                          decline: 'Decline',
+                          'edit-quote': 'Edit quote',
+                          reopen: 'Reopen',
+                        } as const;
+                        const targetStatus = action === 'send' ? 'Sent'
+                          : action === 'cancel' ? 'Cancelled'
+                            : action === 'decline' ? 'Declined'
+                              : action === 'reopen' ? 'Requested'
+                                : 'Quoted';
+                        return <button key={action} type="button" className="btn-ghost !px-2 !py-1 text-[10px]"
+                          disabled={!canEdit} title={!canEdit ? 'You are not authorized to update this line.' : undefined}
+                          onClick={() => openLineEditor(line, targetStatus)}>
+                          {actionLabels[action]}
+                        </button>;
+                      })}
+                    </div>
+                  </td>
                 </tr>;
               })}</tbody>
             </table>
           </TableShell>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-muted">{filteredLines.length} insurer line{filteredLines.length === 1 ? '' : 's'} shown</p>
-            <button type="button" className="btn-primary !px-3 !py-1.5 text-xs" disabled title="Client quotation creation will be enabled in Phase 7">Create client quotation</button>
+            {canEdit && <button type="button" className="btn-primary !px-3 !py-1.5 text-xs"
+              disabled={!hasEligibleQuotedSection}
+              title={!hasEligibleQuotedSection ? 'Log at least one carrier quotation first' : 'Create client quotation'}
+              onClick={() => {
+                if (!hasEligibleQuotedSection) return;
+                window.location.hash = dashboardHref('quotations', {
+                  dealId: request.dealId,
+                  requestId: request.id,
+                  create: '1',
+                });
+              }}>Create client quotation</button>}
           </div>
         </Card>
       </> : <FormalSlip request={request} sections={sectionsForView} lines={linesForView} vendorName={(id) => vendors.find((vendor) => vendor.id === id)?.name ?? 'Unknown insurer'} company={company} clientName={client?.name} leadName={lead?.title} printableVendor={printableVendor} />}
 
-      <Modal open={Boolean(lineEditor)} onClose={() => setLineEditor(null)} title={`Log carrier quotation · ${lineEditor?.reference ?? ''}`} subtitle={`${vendors.find((vendor) => vendor.id === lineEditor?.vendorId)?.name ?? 'Insurer'} · ${selectedSection?.title ?? ''}`} size="md" footer={<>
+      <Modal open={Boolean(lineEditor)} onClose={() => setLineEditor(null)}
+        title={`${lineEditor?.status === 'Quoted' || lineStatus === 'Quoted' ? 'Carrier quotation' : 'Update insurer line'} · ${lineEditor?.reference ?? ''}`}
+        subtitle={`${vendors.find((vendor) => vendor.id === lineEditor?.vendorId)?.name ?? 'Insurer'} · ${selectedSection?.title ?? ''}`} size="md" footer={<>
         <button type="button" className="btn-ghost" onClick={() => setLineEditor(null)}>Cancel</button>
         <button type="submit" form="qrs-detail-line-form" className="btn-primary">Save line</button>
       </>}>

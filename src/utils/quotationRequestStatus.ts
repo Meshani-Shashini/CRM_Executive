@@ -1,6 +1,7 @@
 import type { QuotationRequestLineStatus, Role } from '../types';
 
 export type QuotationRequestStatus = QuotationRequestLineStatus;
+export type QuotationLineRowAction = 'send' | 'cancel' | 'log-quote' | 'decline' | 'edit-quote' | 'reopen';
 
 const ALLOWED_TRANSITIONS: Record<QuotationRequestStatus, QuotationRequestStatus[]> = {
   Requested: ['Sent', 'Expired', 'Cancelled'],
@@ -39,4 +40,18 @@ export function quotationRequestStatusOptions(
       disabled: false,
     })),
   ];
+}
+
+export function quotationLineRowActions(
+  displayStatus: QuotationRequestStatus,
+  currentStatus: QuotationRequestStatus,
+  role: Role,
+  canManageAllStatuses = false,
+): QuotationLineRowAction[] {
+  if (displayStatus === 'Requested') return ['send', 'cancel'];
+  if (displayStatus === 'Sent') return ['log-quote', 'decline', 'cancel'];
+  if (displayStatus === 'Quoted') return ['edit-quote', 'cancel'];
+  return canTransitionQuotationRequestStatus(currentStatus, 'Requested', role, canManageAllStatuses)
+    ? ['reopen']
+    : [];
 }

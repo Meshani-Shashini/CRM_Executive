@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { QuotationRequest, QuotationRequestLine } from '../../types';
 import { nextLocalReference } from '../references';
 import { createQuotationSection } from '../quotationSectionTemplates';
+import { quotationLineRowActions } from '../quotationRequestStatus';
 import {
   createLineReference, deriveRequestStatus, formatQuotationLineActivity, formatQuotationLineReference,
   getQuotationLineDisplayStatus, hasActiveQuotationLine, hasDuplicateQuotationReferences,
-  deriveSectionStatus, nextLineReference, normalizeQuotationRequest,
+  deriveSectionStatus, nextLineReference, normalizeQuotationRequest, quotationLineStatusCellText,
 } from '../quotationRequests';
 
 function line(reference: string, status: QuotationRequestLine['status']): QuotationRequestLine {
@@ -74,14 +75,39 @@ describe('quotation request batches', () => {
 
   it('keeps cancellation precedence over an expired quote and only expires sent or quoted lines', () => {
     const now = new Date('2026-11-11T12:00:00.000Z');
-    const expiredQuote = { ...line('QRS-012-2026-01-01', 'Expired'), validUntil: '2026-11-10' };
+    const expiredQuote = { ...line('QRS-012-2026-01-01', 'Sent'), validUntil: '2026-11-10' };
     expect(getQuotationLineDisplayStatus({
       ...expiredQuote,
       statusHistory: [{ fromStatus: 'Sent' as const, toStatus: 'Cancelled' as const, changedAt: '2026-11-10T12:00:00.000Z', changedBy: 'user-1' }],
     }, now)).toBe('Cancelled');
-    expect(getQuotationLineDisplayStatus({ ...expiredQuote, status: 'Sent' }, now)).toBe('Expired');
+    expect(getQuotationLineDisplayStatus(expiredQuote, now)).toBe('Expired');
     expect(getQuotationLineDisplayStatus({ ...expiredQuote, status: 'Requested' }, now)).toBe('Requested');
     expect(getQuotationLineDisplayStatus({ ...expiredQuote, status: 'Quoted', validUntil: '2026-11-12' }, now)).toBe('Quoted');
+    expect(getQuotationLineDisplayStatus({ ...expiredQuote, status: 'Quoted', statusHistory: [
+      { fromStatus: 'Sent', toStatus: 'Declined', changedAt: '2026-11-10T12:00:00.000Z', changedBy: 'user-1' },
+    ] }, now)).toBe('Declined');
+  });
+
+  it('uses status-aware text for empty quote cells', () => {
+    const now = new Date('2026-11-11T12:00:00.000Z');
+    expect(quotationLineStatusCellText(line('requested', 'Requested'), now)).toBe('Awaiting quote');
+    expect(quotationLineStatusCellText(line('sent', 'Sent'), now)).toBe('Awaiting quote');
+    expect(quotationLineStatusCellText(line('quoted', 'Quoted'), now)).toBeUndefined();
+    expect(quotationLineStatusCellText({ ...line('declined', 'Declined'), declineReason: 'Outside appetite' }, now))
+      .toBe('Declined: Outside appetite');
+    expect(quotationLineStatusCellText(line('cancelled', 'Cancelled'), now)).toBe('Cancelled');
+    expect(quotationLineStatusCellText({ ...line('expired', 'Sent'), validUntil: '2026-11-10' }, now))
+      .toBe('Expired 2026-11-10');
+  });
+
+  it('offers only the row actions supported by each line status and transition rules', () => {
+    expect(quotationLineRowActions('Requested', 'Requested', 'sales')).toEqual(['send', 'cancel']);
+    expect(quotationLineRowActions('Sent', 'Sent', 'sales')).toEqual(['log-quote', 'decline', 'cancel']);
+    expect(quotationLineRowActions('Quoted', 'Quoted', 'sales')).toEqual(['edit-quote', 'cancel']);
+    expect(quotationLineRowActions('Declined', 'Declined', 'sales')).toEqual([]);
+    expect(quotationLineRowActions('Cancelled', 'Cancelled', 'admin', true)).toEqual(['reopen']);
+    expect(quotationLineRowActions('Expired', 'Sent', 'sales')).toEqual([]);
+    expect(quotationLineRowActions('Expired', 'Sent', 'admin', true)).toEqual(['reopen']);
   });
 
   it('displays stored line references verbatim in labels and activity messages', () => {

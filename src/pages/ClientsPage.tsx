@@ -559,7 +559,7 @@ export default function ClientsPage() {
             <thead className="sticky top-0 z-10 bg-[#111214] font-semibold text-[#D0D3D9]">
               <tr>
                 {([
-                  ['name', 'Client Name'], ['tin', 'TIN'], ['country', 'Country / Location'],
+                  ['name', 'Client Name'], ['tin', 'TIN'], ['country', 'Location'],
                   ['class', 'Insurance Type'], ['contactPerson', 'Contact Person'], ['phone', 'Phone'],
                   ['email', 'Email'], ['address', 'Address'], ['owner', 'Account Owner'],
                   ['activity', 'Last Activity'], ['status', 'Status'],

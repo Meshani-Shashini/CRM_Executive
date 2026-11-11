@@ -32,6 +32,7 @@ export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) 
   const [editingTemplate, setEditingTemplate] = useState<string | null>(null);
   const [templateText, setTemplateText] = useState('');
   const [notice, setNotice] = useState('');
+  const [companyError, setCompanyError] = useState('');
   const [companyDetails, setCompanyDetails] = useState(company);
   const [clauseProductCode, setClauseProductCode] = useState('default');
 
@@ -94,6 +95,32 @@ export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) 
   };
 
   const saveCompany = () => {
+    if (!Number.isInteger(companyDetails.quotationValidityDays)
+      || companyDetails.quotationValidityDays < 1
+      || companyDetails.quotationValidityDays > 365) {
+      setCompanyError('Quotation validity must be a whole number from 1 to 365 days.');
+      return;
+    }
+    const invalidClauseSet = Object.entries(companyDetails.quotationClauses).find(([, clauses]) => {
+      const clauseLists = [clauses.perils, clauses.exclusions, clauses.conditions ?? []];
+      const hasDuplicate = clauseLists.some((items) => {
+        const normalized = items.map((item) => item.trim().toLocaleLowerCase());
+        return new Set(normalized).size !== normalized.length;
+      }) || clauses.deductibles.some((item, index) => clauses.deductibles
+        .slice(0, index).some((other) => other.label.trim().toLocaleLowerCase() === item.label.trim().toLocaleLowerCase()))
+        || clauses.warranties.some((item, index) => clauses.warranties
+          .slice(0, index).some((other) => other.title.trim().toLocaleLowerCase() === item.title.trim().toLocaleLowerCase()));
+      return !clauses.disclaimer.trim()
+        || clauseLists.flat().some((item) => !item.trim())
+        || clauses.deductibles.some((item) => !item.label.trim() || !item.text.trim())
+        || clauses.warranties.some((item) => !item.title.trim() || !item.text.trim())
+        || hasDuplicate;
+    });
+    if (invalidClauseSet) {
+      setCompanyError(`Complete all clause fields, remove duplicate entries, and provide a disclaimer for ${invalidClauseSet[0]}.`);
+      return;
+    }
+    setCompanyError('');
     setCompany(companyDetails);
     logSystemAudit('Company settings updated', companyDetails.legalName);
     setNotice('Company settings updated.');
@@ -290,12 +317,14 @@ export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) 
           <div className="grid gap-3 sm:grid-cols-2">
             <ClauseTextarea label="Covered perils (one per line)" value={listText(clauses.perils)} onChange={(value) => updateClauses({ perils: parseList(value) })} />
             <ClauseTextarea label="Exclusions (one per line)" value={listText(clauses.exclusions)} onChange={(value) => updateClauses({ exclusions: parseList(value) })} />
+            <ClauseTextarea label="Conditions (one per line)" value={listText(clauses.conditions ?? [])} onChange={(value) => updateClauses({ conditions: parseList(value) })} />
             <ClauseTextarea label="Deductibles (label | text)" value={pairText(clauses.deductibles)} onChange={(value) => updateClauses({ deductibles: parseLabelPairs(value) })} />
             <ClauseTextarea label="Warranties (title | text)" value={clauses.warranties.map(({ title, text }) => `${title} | ${text}`).join('\n')} onChange={(value) => updateClauses({ warranties: parseTitlePairs(value) })} />
             <ClauseTextarea label="Communicable-disease exclusion" value={clauses.communicableDiseaseExclusion} onChange={(value) => updateClauses({ communicableDiseaseExclusion: value })} />
             <ClauseTextarea label="Sanctions clause" value={clauses.sanctionClause} onChange={(value) => updateClauses({ sanctionClause: value })} />
             <div className="sm:col-span-2"><ClauseTextarea label="Disclaimer" value={clauses.disclaimer} onChange={(value) => updateClauses({ disclaimer: value })} /></div>
           </div>
+          {companyError && <p role="alert" className="text-sm text-hot">{companyError}</p>}
           <button className="btn-primary" onClick={saveCompany}><Save size={14} /> Save Quotation Settings</button>
         </div>;
       })()}

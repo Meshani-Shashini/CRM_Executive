@@ -65,6 +65,10 @@ describe('quotation request dashboard calculations', () => {
       { line: quoteLine('one', 250), quote: quoteLine('one', 250).quotes[0] },
       { line: quoteLine('two', 180), quote: quoteLine('two', 180).quotes[0] },
       { line: { ...quoteLine('declined', 10), status: 'Declined' as const }, quote: quoteLine('declined', 10).quotes[0] },
+      {
+        line: { ...quoteLine('expired', 1), quotes: [{ optionId: 'option-01', premium: 1, currency: 'MVR' as const, validUntil: '2020-01-01' }] },
+        quote: { optionId: 'option-01', premium: 1, currency: 'MVR' as const, validUntil: '2020-01-01' },
+      },
     ];
     expect(selectBestQuote(candidates)?.line.id).toBe('two');
   });

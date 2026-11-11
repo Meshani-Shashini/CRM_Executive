@@ -15,6 +15,9 @@ export function nextLocalReference(
   existingReferences: string[],
   persistedCounter = 0,
 ) {
+  if (kind === 'client-quotation') {
+    throw new Error('Client quotation references must be allocated by the database.');
+  }
   const highestExisting = existingReferences.reduce((highest, reference) => {
     let value = 0;
     if (kind === 'quotation-request') {
@@ -40,17 +43,14 @@ export async function getNextReference(
   year: number,
   existingReferences: string[],
 ) {
-  if (AUTH_BYPASS) {
+  if (AUTH_BYPASS && kind !== 'client-quotation') {
     const counterKey = `crm:sequence:${TENANT_ID}:${kind}:${year}`;
-    const persistedCounter = kind === 'quotation-request' || kind === 'client-quotation'
+    const persistedCounter = kind === 'quotation-request'
       ? Number(window.localStorage.getItem(counterKey) ?? 0)
       : 0;
     const reference = nextLocalReference(kind, year, existingReferences, persistedCounter);
-    if (kind === 'quotation-request' || kind === 'client-quotation') {
-      const allocated = kind === 'quotation-request'
-        ? Number(reference.split('-')[1])
-        : Number(reference.slice(reference.lastIndexOf('-') + 1));
-      window.localStorage.setItem(counterKey, String(allocated));
+    if (kind === 'quotation-request') {
+      window.localStorage.setItem(counterKey, String(Number(reference.split('-')[1])));
     }
     return reference;
   }
@@ -63,7 +63,9 @@ export async function getNextReference(
   if (error) throw new Error(`Could not allocate a ${kind} reference: ${error.message}`);
   const isValidReference = kind === 'quotation-request'
     ? typeof data === 'string' && new RegExp(`^QRS-\\d{3,}-${year}$`).test(data)
-    : typeof data === 'string' && data.startsWith(`${referencePrefixes[kind]}-${year}-`);
+    : kind === 'client-quotation'
+      ? typeof data === 'string' && new RegExp(`^QTY-${year}-\\d{4}$`).test(data)
+      : typeof data === 'string' && new RegExp(`^${referencePrefixes[kind]}-${year}-\\d{4}$`).test(data);
   if (!isValidReference) {
     throw new Error(`The database returned an invalid ${kind} reference.`);
   }

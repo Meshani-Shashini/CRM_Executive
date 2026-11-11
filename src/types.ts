@@ -333,14 +333,55 @@ export interface QuotationRequestLine {
 export type ClientQuotationStatus =
   | 'Draft' | 'Issued' | 'Accepted' | 'Rejected' | 'Expired' | 'Superseded';
 
-export interface ClientQuotationSectionItem {
+export interface ClientQuotationSource {
+  sectionId: string;
+  lineId: string;
+  optionKey?: string;
+}
+
+export interface ClientQuotationSectionInterest {
   interest: string;
   sumInsured: number;
 }
 
+export interface ClientQuotationSectionOption {
+  optionKey: string;
+  label: string;
+  proposedPremium: number;
+  ratePct: number;
+  insurerLineReference: string;
+  sourceValidUntil?: string;
+}
+
 export interface ClientQuotationSection {
+  sectionId: string;
+  productCode: string;
   title: string;
-  items: ClientQuotationSectionItem[];
+  interests: ClientQuotationSectionInterest[];
+  businessInterruption?: {
+    grossProfit: number;
+    indemnityMonths: number;
+  };
+  totalSumInsured: number;
+  perils: string[];
+  extensions: Array<{ name: string; limit: string }>;
+  deductibles: Array<{ label: string; text: string }>;
+  warranties: Array<{ title: string; text: string }>;
+  conditions: string[];
+  exclusions: string[];
+  proposedPremium: number;
+  ratePct: number;
+  insurerLineReference: string;
+  sourceValidUntil?: string;
+  optionQuotes: ClientQuotationSectionOption[];
+}
+
+export interface ClientQuotationStatusChange {
+  fromStatus?: ClientQuotationStatus;
+  toStatus: ClientQuotationStatus;
+  changedAt: string;
+  changedBy: string;
+  note?: string;
 }
 
 export interface ClientQuotation {
@@ -349,13 +390,10 @@ export interface ClientQuotation {
   dealId: string;
   leadId: string;
   clientId: string;
-  sourceRequestId: string;
-  sourceLineId: string;
   version: number;
   status: ClientQuotationStatus;
-  issuedAt?: string;
-  validUntil: string;
-  validUntilOverridden?: boolean;
+  requestId: string;
+  sources: ClientQuotationSource[];
   addressee: { contactId: string; name: string; designation: string };
   policyNo: string;
   endorsementNo: string;
@@ -363,20 +401,21 @@ export interface ClientQuotation {
   territorialLimits: string;
   occupation: string;
   riskLocation: string;
-  sections: ClientQuotationSection[];
-  totalSumInsured: number;
+  insuredName: string;
   currency: 'MVR' | 'USD';
-  perils: string[];
-  extensions: Array<{ name: string; limit: string }>;
-  deductibles: Array<{ label: string; text: string }>;
-  warranties: Array<{ title: string; text: string }>;
-  conditions: string[];
-  exclusions: string[];
+  sections: ClientQuotationSection[];
+  totalPremium: number;
+  totalSumInsured: number;
+  issuedAt?: string;
+  validityDays: number;
+  validUntil: string;
   disclaimer: string;
-  proposedPremium: number;
-  ratePct: number;
   preparedBy: string;
   authorizedBy: string;
+  createdAt: string;
+  updatedAt: string;
+  statusHistory: ClientQuotationStatusChange[];
+  sourceValidityConfirmed?: boolean;
   acceptance?: {
     name: string;
     designation: string;

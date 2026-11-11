@@ -149,6 +149,7 @@ export const COMPANY = {
       deductibles: [{ label: 'Standard deductible', text: 'As specified in the policy schedule.' }],
       warranties: [{ title: 'Risk safeguards', text: 'The insured will maintain all declared safeguards and notify the insurer of material changes.' }],
       exclusions: ['War and terrorism, unless specifically endorsed'],
+      conditions: [],
       disclaimer: 'This quotation is indicative, subject to underwriting review and the insurer’s policy wording.',
       communicableDiseaseExclusion: 'Communicable disease exclusion applies as specified in the insurer’s policy wording.',
       sanctionClause: 'No insurer is deemed to provide cover or pay a claim where doing so would expose it to applicable sanctions.',
@@ -158,6 +159,7 @@ export const COMPANY = {
     deductibles: Array<{ label: string; text: string }>;
     warranties: Array<{ title: string; text: string }>;
     exclusions: string[];
+    conditions: string[];
     disclaimer: string;
     communicableDiseaseExclusion: string;
     sanctionClause: string;

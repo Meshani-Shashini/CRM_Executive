@@ -32,7 +32,7 @@ const accessMap: Record<NavKey, Role[]> = {
   calendar: ['admin', 'sales'],
   reports: ['admin', 'finance'],
   documents: ['admin', 'sales', 'finance', 'client'],
-  quotations: ['admin', 'sales', 'client'],
+  quotations: ['admin', 'sales'],
   qslips: ['admin', 'sales'],
   'internal-slips': ['admin', 'sales'],
   invoices: ['admin', 'finance', 'client'],

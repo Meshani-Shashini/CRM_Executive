@@ -1,4 +1,5 @@
 import type { QuotationRequestLine, QuotationRequestQuote, QuotationSection } from '../types';
+import { getQuotationLineDisplayStatus } from './quotationRequests';
 
 export function quotationInterestBreakdown(section: QuotationSection) {
   const subtotal = section.data.interests.reduce((sum, interest) =>
@@ -48,7 +49,8 @@ export function selectBestQuote<T extends { line: QuotationRequestLine; quote: Q
   candidates: T[],
 ): T | undefined {
   return candidates
-    .filter(({ line, quote }) => line.status === 'Quoted' && Number.isFinite(quote.premium) && quote.premium >= 0)
+    .filter(({ line, quote }) => getQuotationLineDisplayStatus(line) === 'Quoted'
+      && Number.isFinite(quote.premium) && quote.premium >= 0)
     .reduce<T | undefined>((best, candidate) =>
       !best || candidate.quote.premium < best.quote.premium ? candidate : best, undefined);
 }

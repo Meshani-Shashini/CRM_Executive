@@ -43,7 +43,9 @@ import { dashboardHref, hashParams, promptQuotationRequestForDeal } from '../uti
 import { nextLocalReference } from '../utils/references';
 import {
   deriveRequestStatus, formatQuotationLineReference, getQuotationLineDisplayStatus,
+  quotationLineStatusCellText,
 } from '../utils/quotationRequests';
+import { quotationRateFromPremium } from '../utils/quotationRequestDashboard';
 import {
   classifyDealOutcome,
   isValidDealCloseDate,
@@ -538,6 +540,19 @@ export default function DealWorkspace({
   const selectedDealRequests = selectedDeal
     ? linkedQuotationRequests.filter((request) => request.dealId === selectedDeal.id)
     : [];
+  const activeClientQuotation = selectedDeal
+    ? clientQuotations.filter((quotation) => quotation.dealId === selectedDeal.id
+      && (quotation.status === 'Draft' || quotation.status === 'Issued' && !isQuotationExpired(quotation)))
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
+    : undefined;
+  const selectedDealHasEligibleQuotedLine = selectedDealRequests.some((request) =>
+    request.lines.some((line) => {
+      if (getQuotationLineDisplayStatus(line) !== 'Quoted') return false;
+      const section = request.sections.find((item) => item.id === line.sectionId);
+      return Boolean(section?.status === 'Active' && line.quotes.some((quote) => quote.premium > 0
+        && (!quote.validUntil || Date.parse(`${quote.validUntil.slice(0, 10)}T23:59:59.999Z`) >= Date.now())));
+    }),
+  );
   const openQrsDetail = (requestId: string) => {
     if (!selectedDeal) return;
     window.location.hash = dashboardHref('qslips', {
@@ -1324,8 +1339,9 @@ export default function DealWorkspace({
     const now = new Date().toISOString();
     const lost = outcome === 'lost' || isLostStage(target);
     const bound = outcome === 'won' || isBoundStage(target);
-    if (bound && !clientQuotations.some((quotation) =>
-      quotation.dealId === selectedDeal.id && quotation.status === 'Accepted')) {
+    const acceptedQuotation = clientQuotations.find((quotation) =>
+      quotation.dealId === selectedDeal.id && quotation.status === 'Accepted');
+    if (bound && (!acceptedQuotation || !Number.isFinite(acceptedQuotation.totalPremium) || acceptedQuotation.totalPremium <= 0)) {
       setMoveError('A client quotation must be accepted before this deal can be marked Won.');
       return;
     }
@@ -1520,6 +1536,11 @@ export default function DealWorkspace({
       }, ...activities]);
     }
     if (bound && !invoices.some((invoice) => invoice.linkedDealId === selectedDeal.id)) {
+      if (!acceptedQuotation) {
+        setMoveError('The accepted client quotation could not be found to create the premium invoice.');
+        return;
+      }
+      const quotedPremium = acceptedQuotation.totalPremium;
       const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
       setInvoices([...invoices, {
         id: invoiceId,
@@ -1534,9 +1555,9 @@ export default function DealWorkspace({
         issueDate: now.slice(0, 10),
         dueDate,
         status: 'Pending',
-        items: [{ description: `Premium for ${selectedDeal.product}`, qty: 1, unitPrice: selectedDeal.value, vatRate: 0 }],
-        installments: [{ id: `${invoiceId}-installment`, label: 'Single Payment', due: dueDate, amount: selectedDeal.value, paid: false }],
-        currency: selectedDeal.currency,
+        items: [{ description: `Premium for ${selectedDeal.product}`, qty: 1, unitPrice: quotedPremium, vatRate: 0 }],
+        installments: [{ id: `${invoiceId}-installment`, label: 'Single Payment', due: dueDate, amount: quotedPremium, paid: false }],
+        currency: acceptedQuotation.currency,
         linkedDealId: selectedDeal.id,
       }]);
     }
@@ -1962,6 +1983,9 @@ export default function DealWorkspace({
                   const clientContactName = deal.contactName ?? clients.find((client) => client.id === deal.clientId)?.contactPerson;
                   const ownerName = users.find((person) => person.id === deal.ownerId)?.name ?? formatStaffIdentifier(deal.ownerId);
                   const nextActivity = activityForDeal(deal);
+                  const dealHasAcceptedQuotation = clientQuotations.some((quotation) =>
+                    quotation.dealId === deal.id && quotation.status === 'Accepted',
+                  );
                   const terminal = isTerminalDealStage(deal.stage, deal.disposition, stage);
                   const outcome = deal.disposition === 'won' || stage?.isClosedWon
                     ? 'Won'
@@ -2122,6 +2146,14 @@ export default function DealWorkspace({
                               setDealActionsAnchor(null);
                               requestDealOutcome('lost', deal);
                             }}><X size={12} /> Mark lost</button>
+                            <button type="button" role="menuitem" className="table-row-actions-item text-brand-300 hover:bg-ink-700"
+                              disabled={!dealHasAcceptedQuotation}
+                              title={!dealHasAcceptedQuotation ? 'Accept a client quotation before binding this policy.' : 'Bind policy'}
+                              onClick={() => {
+                                setOpenDealActionsId('');
+                                setDealActionsAnchor(null);
+                                requestDealOutcome('won', deal);
+                              }}><ShieldCheck size={12} /> Bind policy</button>
                           </>}
                           {onEditDeal && <button type="button" role="menuitem" className="table-row-actions-item text-white hover:bg-ink-700" onClick={() => { setOpenDealActionsId(''); setDealActionsAnchor(null); onEditDeal(deal); }}><Pencil size={12} /> Edit deal</button>}
                           {onDeleteDeal && <button type="button" role="menuitem" className="table-row-actions-item text-hot hover:bg-ink-700" onClick={() => { setOpenDealActionsId(''); setDealActionsAnchor(null); onDeleteDeal(deal); }}><Trash2 size={12} /> Delete deal</button>}
@@ -2788,12 +2820,22 @@ export default function DealWorkspace({
             </div>
             <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold text-white">Quotation comparison</h2>
-                {selectedDeal && (activeRole === 'admin' || activeRole === 'sales') && (selectedDealRequests.length
-                  ? <div className="flex flex-wrap gap-1">
+                {selectedDeal && (activeRole === 'admin' || activeRole === 'sales') && <div className="flex flex-wrap gap-1">
+                  {selectedDealRequests.length
+                  ? <>
                     <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => manageQrs('comparison')}>Manage QRS</button>
                     <a className="btn-ghost !px-2 !py-1 text-xs" href={dashboardHref('qslips', { deal: selectedDeal.id, action: 'create' })}><Plus size={12} /> Add another request</a>
-                  </div>
-                  : <a className="btn-ghost !px-2 !py-1 text-xs" href={dashboardHref('qslips', { deal: selectedDeal.id, action: 'create' })}><Plus size={12} /> Create QRS</a>)}
+                  </>
+                  : <a className="btn-ghost !px-2 !py-1 text-xs" href={dashboardHref('qslips', { deal: selectedDeal.id, action: 'create' })}><Plus size={12} /> Create QRS</a>}
+                  {activeClientQuotation
+                    ? <a className="btn-primary !px-2 !py-1 text-xs" href={dashboardHref('quotations', { dealId: selectedDeal.id, quotationId: activeClientQuotation.id, dealView: workspaceView })}>Open client quotation</a>
+                    : <button type="button" className="btn-primary !px-2 !py-1 text-xs" disabled={!selectedDealHasEligibleQuotedLine}
+                      title={!selectedDealHasEligibleQuotedLine ? 'Log at least one carrier quotation first' : 'Create client quotation'}
+                      onClick={() => {
+                        if (!selectedDealHasEligibleQuotedLine) return;
+                        window.location.hash = dashboardHref('quotations', { dealId: selectedDeal.id, create: '1', dealView: workspaceView });
+                      }}>Create client quotation</button>}
+                </div>}
               </div>
               {renderQrsPicker('comparison')}
               {quotationSections.some(({ lines }) => lines.length) ? <div className="max-w-full overflow-x-auto overscroll-x-contain"><table className="w-full min-w-72 text-left text-xs">
@@ -2806,50 +2848,31 @@ export default function DealWorkspace({
                         deal: request.dealId,
                         dealView: workspaceView,
                       })} title={`Open ${request.reference} details`}>
-                        {section.title} · {formatAmount(section.data.totalSumInsured, request.currency)}
+                        {section.productCode} · {section.title} · {formatAmount(section.data.totalSumInsured, request.currency)}
                       </a>
                     </td>
                   </tr>,
                   ...lines.map(({ line, vendor }) => {
                     const displayStatus = getQuotationLineDisplayStatus(line);
-                    const statusDetails = displayStatus === 'Declined'
-                      ? `Declined: ${line.declineReason || line.remarks || 'No reason provided'}`
-                      : displayStatus === 'Requested' || displayStatus === 'Sent'
-                        ? 'Awaiting quote'
-                        : displayStatus === 'Cancelled' || displayStatus === 'Expired'
-                          ? displayStatus
-                          : undefined;
+                    const statusDetails = quotationLineStatusCellText(line);
                     const visibleQuotes = displayStatus === 'Quoted' ? line.quotes : [];
                     return <tr key={line.id} className={`border-t border-ink-700/60 ${displayStatus === 'Cancelled' ? 'text-muted opacity-60' : 'text-white'}`}>
                       <td className="py-2">{vendor?.name ?? 'Unknown insurer'}
                         <div className="font-mono text-[10px] text-muted">{formatQuotationLineReference(line)} · {displayStatus}</div>
-                        {displayStatus === 'Quoted' && (activeRole === 'admin' || activeRole === 'sales') && <a className="text-[10px] text-brand-300 hover:text-white" href={dashboardHref('quotations', { dealId: request.dealId, requestId: request.id, lineId: line.id })}>Prepare QTY</a>}
                       </td>
                       <td className="py-2 text-right text-brand-300">{visibleQuotes.length ? visibleQuotes.map((quote) => <div key={quote.optionId}>
                         {section.data.options.find((option) => option.id === quote.optionId)?.label ?? 'Premium'}: {formatAmount(quote.premium, quote.currency)}
-                      </div>) : <span className="text-muted">{statusDetails ?? 'Awaiting quote'}</span>}</td>
-                      <td className="py-2 text-right text-muted">{visibleQuotes.length ? visibleQuotes.map((quote) => <div key={quote.optionId}>
-                        {quote.ratePct === undefined ? '—' : `${quote.ratePct}%`} · {quote.validUntil ? formatDate(quote.validUntil) : '—'}
-                      </div>) : statusDetails ?? 'Awaiting quote'}</td>
+                      </div>) : <span className="text-muted">{statusDetails ?? (displayStatus === 'Quoted' ? 'Quote details unavailable' : 'Awaiting quote')}</span>}</td>
+                      <td className="py-2 text-right text-muted">{visibleQuotes.length ? visibleQuotes.map((quote) => {
+                        const rate = quote.ratePct ?? quotationRateFromPremium(quote.premium, section.data.totalSumInsured);
+                        return <div key={quote.optionId}>
+                          {rate === undefined ? 'Rate unavailable' : `${rate}%`} · {quote.validUntil ? formatDate(quote.validUntil) : 'Validity unavailable'}
+                        </div>;
+                      }) : statusDetails ?? (displayStatus === 'Quoted' ? 'Quote details unavailable' : 'Awaiting quote')}</td>
                     </tr>;
                   }),
                 ])}</tbody>
               </table></div> : <p className="text-xs text-muted">No insurer quotes recorded. Add quotes to compare premium and terms.</p>}
-            </div>
-            <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
-              <h2 className="text-sm font-semibold text-white">Binding actions</h2>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                {selectedDeal && (activeRole === 'admin' || activeRole === 'sales') && (selectedDealRequests.length
-                  ? <button type="button" className="btn-ghost !px-2 !py-2 text-center text-xs" onClick={() => manageQrs('binding')}>Manage QRS</button>
-                  : <a className="btn-ghost !px-2 !py-2 text-center text-xs" href={dashboardHref('qslips', { deal: selectedDeal.id, action: 'create' })}>Create QRS</a>)}
-                <button type="button" className="btn-primary !px-2 !py-2 text-xs" disabled={!selectedDeal || !stages.find((stage) => isBoundStage(stage))} onClick={() => {
-                  const finalStage = stages.find((stage) => isBoundStage(stage));
-                  if (finalStage) requestStageChange(finalStage);
-                }}><ShieldCheck size={13} /> Bind policy</button>
-              </div>
-                {renderQrsPicker('binding')}
-                {selectedDeal && selectedDealRequests.length > 0 && (activeRole === 'admin' || activeRole === 'sales') && <a className="btn-ghost mt-2 inline-flex !px-2 !py-1 text-xs" href={dashboardHref('qslips', { deal: selectedDeal.id, action: 'create' })}>Add another request</a>}
-              {selectedDeal?.linkedInvoiceId && <p className="mt-2 text-xs text-win">Invoice generated for this bound deal.</p>}
             </div>
           </section>}
         </>}
