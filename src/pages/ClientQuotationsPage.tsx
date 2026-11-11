@@ -288,6 +288,7 @@ export default function ClientQuotationsPage() {
       }
     }
     setClientQuotations((current) => current.map((item) => item.id === quotation.id ? next : item));
+    setEditor((current) => current?.id === quotation.id ? next : current);
     recordQuotationActivity(next, `Client quotation ${status.toLowerCase()}`, status === 'Accepted'
       ? `Accepted by ${acceptanceName.trim()}${acceptanceDesignation.trim() ? `, ${acceptanceDesignation.trim()}` : ''}.`
       : `Status changed to ${status}.`);

@@ -10,5 +10,5 @@ export function hashParams(): URLSearchParams {
 
 export function promptQuotationRequestForDeal(dealId: string) {
   if (!window.confirm('This deal has no quotation request. Create one now?')) return;
-  window.location.hash = dashboardHref('qslips', { dealId });
+  window.location.hash = dashboardHref('qslips', { dealId, action: 'create' });
 }

@@ -9,17 +9,33 @@ import { nextLocalReference } from '../references';
 
 const request: QuotationRequest = {
   id: 'request-1',
-  reference: 'QRS-2026-0012',
+  reference: 'QRS-012-2026',
+  issuedAt: '2026-11-11',
   dealId: 'deal-1',
   leadId: 'lead-1',
   clientId: 'client-1',
+  insuredName: 'Lagoon Logistics',
+  businessActivity: '',
+  additionalActivity: '',
+  riskLocation: '',
+  territorialLimits: '',
+  occupation: '',
+  periodOfInsurance: 'TBA',
   requiredBy: '2026-11-20',
-  insuredAmount: 100000,
   currency: 'MVR',
   notes: '',
-  createdBy: 'sales-1',
+  preparedBy: 'sales-1',
+  checkedBy: '',
   createdAt: '2026-11-11T00:00:00.000Z',
   updatedAt: '2026-11-11T00:00:00.000Z',
+  sections: [{
+    id: 'section-1', no: 1, productCode: 'HR', title: 'Marine Hull',
+    status: 'Active',
+    data: {
+      template: 'marine-hull', interests: [{ interest: 'Hull', sumInsured: 100000 }],
+      totalSumInsured: 100000, deductibles: [], extensions: [], materialInfo: {}, options: [],
+    },
+  }],
   lines: [],
 };
 const deal = {
@@ -99,9 +115,11 @@ describe('client quotations', () => {
   it('requires an eligible quoted line and validates pricing, validity, addressee, and authorizer', () => {
     const line: QuotationRequestLine = {
       id: 'line-1',
-      reference: 'QRS-2026-0012-01',
+      reference: 'QRS-012-2026-01-01',
+      sectionId: 'section-1',
       vendorId: 'insurer-1',
       status: 'Quoted',
+      quotes: [{ optionId: 'base', premium: 2500, currency: 'MVR' }],
       quotedPremium: 2500,
       quotedCurrency: 'MVR',
       insurerDeductibles: ['USD 500 each and every loss'],

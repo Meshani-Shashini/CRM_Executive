@@ -717,6 +717,42 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   white-space: normal;
 }
 
+#qrs-line-form label > span {
+  color: #E5E7EB;
+}
+
+#qrs-line-form .input {
+  color: #FFFFFF;
+  background-color: #111214;
+  border-color: #454B55;
+}
+
+#qrs-line-form select.input {
+  color: #FFFFFF;
+  background-color: #111214;
+  color-scheme: dark;
+}
+
+#qrs-line-form select.input option {
+  color: #FFFFFF;
+  background-color: #111214;
+}
+
+#qrs-line-form select.input option:hover,
+#qrs-line-form select.input option:focus {
+  color: #FFFFFF;
+  background-color: #24282E;
+}
+
+#qrs-line-form select.input option:checked {
+  color: #FFFFFF;
+  background-color: #303640;
+}
+
+#qrs-line-form select.input option:disabled {
+  color: #D1D5DB;
+}
+
 .fit-wrap.qrs-list-fit .qrs-list-empty td::before {
   display: none;
 }
@@ -1514,6 +1550,39 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
       background-color: transparent !important;
       box-shadow: none !important;
       -webkit-text-fill-color: #000 !important;
+    }
+
+    body.print-qrs-formal-slip * {
+      visibility: hidden;
+    }
+
+    body.print-qrs-formal-slip .qrs-formal-slip,
+    body.print-qrs-formal-slip .qrs-formal-slip * {
+      visibility: visible;
+    }
+
+    body.print-qrs-formal-slip .qrs-formal-slip {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      padding: 24px;
+      color: #000 !important;
+      background: #fff !important;
+      border: 0 !important;
+      border-radius: 0 !important;
+      font: 10pt/1.45 Arial, sans-serif;
+    }
+
+    body.print-qrs-formal-slip .qrs-formal-slip * {
+      color: #000 !important;
+      border-color: #999 !important;
+      background-color: transparent !important;
+      box-shadow: none !important;
+      -webkit-text-fill-color: #000 !important;
+    }
+
+    body.print-qrs-formal-slip .qrs-formal-slip section {
+      break-inside: avoid;
     }
   }
 }

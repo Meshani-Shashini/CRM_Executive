@@ -117,14 +117,18 @@ describe('requested CRM fixes', () => {
     ]).map((lead) => lead.id)).toEqual(['active']);
   });
 
-  it('enforces next-step and admin-only reopen transitions', () => {
+  it('allows admins and authorized deal owners to manage QRS status transitions', () => {
     expect(canTransitionQuotationRequestStatus('Requested', 'Sent', 'sales')).toBe(true);
     expect(canTransitionQuotationRequestStatus('Sent', 'Quoted', 'sales')).toBe(true);
     expect(canTransitionQuotationRequestStatus('Sent', 'Requested', 'sales')).toBe(false);
     expect(canTransitionQuotationRequestStatus('Quoted', 'Sent', 'admin')).toBe(true);
-    expect(canTransitionQuotationRequestStatus('Cancelled', 'Sent', 'admin')).toBe(false);
+    expect(canTransitionQuotationRequestStatus('Cancelled', 'Sent', 'admin')).toBe(true);
+    expect(canTransitionQuotationRequestStatus('Cancelled', 'Requested', 'sales', true)).toBe(true);
+    expect(canTransitionQuotationRequestStatus('Quoted', 'Cancelled', 'sales', true)).toBe(true);
     expect(quotationRequestStatusOptions('Sent', 'sales').map(({ status }) => status))
       .toEqual(['Sent', 'Quoted', 'Declined', 'Expired', 'Cancelled']);
+    expect(quotationRequestStatusOptions('Cancelled', 'sales', true).map(({ status }) => status))
+      .toEqual(['Cancelled', 'Requested', 'Sent', 'Quoted', 'Declined', 'Expired']);
     expect(quotationRequestStatusOptions('Quoted', 'admin').find(({ status }) => status === 'Sent')?.label)
       .toBe('Reopen to Sent');
   });

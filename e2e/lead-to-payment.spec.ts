@@ -10,6 +10,12 @@ function dateDisplay(daysFromToday: number) {
   }).format(date).replaceAll(' ', '-');
 }
 
+function dateInputValue(daysFromToday: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + daysFromToday);
+  return date.toISOString().slice(0, 10);
+}
+
 async function navigate(page: import('@playwright/test').Page, label: string) {
   await page.locator('aside').getByRole('link', { name: label, exact: true }).click();
 }
@@ -115,7 +121,7 @@ test('lead converts through QRS, invoice, and payment with monthly open-to-won r
   if (!(await intakeCheckbox.isChecked())) await intakeCheckbox.check();
   await page.getByRole('button', { name: 'Save stage' }).click();
   await expect(page).toHaveURL(/#\/qslips/);
-  await expect(page.getByRole('heading', { name: 'New Quotation Request' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'New Quotation Request Slip' })).toBeVisible();
 
   const qrsForm = page.locator('#quotation-request-form');
   await expect(qrsForm.getByText(organization, { exact: true })).toBeVisible();
@@ -124,30 +130,42 @@ test('lead converts through QRS, invoice, and payment with monthly open-to-won r
   await expect(requiredBy).toHaveAttribute('required', '');
   expect(await requiredBy.evaluate((input: HTMLInputElement) => input.checkValidity())).toBe(false);
   await requiredBy.fill(dateDisplay(14));
-  await page.getByRole('button', { name: 'Submit to Insurer' }).click();
-  await expect(page.getByRole('alert')).toContainText('Select at least one active insurer or reinsurer.');
+  await page.getByRole('button', { name: 'Continue' }).click();
 
-  const insurerChoices = qrsForm.locator('input[type="checkbox"]');
-  await expect(insurerChoices).toHaveCount(3);
-  await insurerChoices.nth(0).check();
-  await insurerChoices.nth(1).check();
-  await page.getByRole('button', { name: 'Submit to Insurers' }).click();
-  const batchRow = page.getByRole('row').filter({ hasText: leadTitle });
+  await qrsForm.getByLabel('Product section *').selectOption('PR');
+  await qrsForm.getByRole('button', { name: 'Add section' }).click();
+  await qrsForm.getByLabel('Sum insured').first().fill('300000');
+  await qrsForm.getByLabel('Product section *').selectOption('LP');
+  await qrsForm.getByRole('button', { name: 'Add section' }).click();
+  await qrsForm.getByLabel('Gross profit').fill('120000');
+  await page.getByRole('button', { name: 'Continue' }).click();
+
+  const sectionInsurers = qrsForm.locator('fieldset');
+  await expect(sectionInsurers).toHaveCount(2);
+  const firstSectionInsurers = sectionInsurers.nth(0).locator('input[type="checkbox"]');
+  const secondSectionInsurers = sectionInsurers.nth(1).locator('input[type="checkbox"]');
+  await expect(firstSectionInsurers).toHaveCount(3);
+  await firstSectionInsurers.nth(0).check();
+  await firstSectionInsurers.nth(1).check();
+  await secondSectionInsurers.nth(0).check();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByRole('button', { name: 'Create slips' }).click();
+  const batchRow = page.getByRole('link', { name: /Open QRS details/ }).first();
   await expect(batchRow).toBeVisible();
-  const batchReference = (await batchRow.innerText()).match(/QRS-\d{4}-\d{4}/)?.[0];
+  const batchReference = (await batchRow.getAttribute('aria-label'))?.match(/QRS-\d{3,}-\d{4}/)?.[0];
   expect(batchReference).toBeTruthy();
-  const lineRows = page.getByRole('row').filter({ hasText: new RegExp(`${batchReference}-0[12]`) });
+  const lineRows = page.getByRole('row').filter({ hasText: new RegExp(`${batchReference}-01-0[12]`) });
   await expect(lineRows).toHaveCount(2);
-  const firstLineReference = (await lineRows.nth(0).innerText()).match(/QRS-\d{4}-\d{4}-\d{2}/)?.[0];
-  const secondLineReference = (await lineRows.nth(1).innerText()).match(/QRS-\d{4}-\d{4}-\d{2}/)?.[0];
+  const firstLineReference = (await lineRows.nth(0).innerText()).match(/QRS-\d{3,}-\d{4}-\d{2}-\d{2}/)?.[0];
+  const secondLineReference = (await lineRows.nth(1).innerText()).match(/QRS-\d{3,}-\d{4}-\d{2}-\d{2}/)?.[0];
   expect(firstLineReference).toBeTruthy();
   expect(secondLineReference).toBeTruthy();
   expect(firstLineReference).not.toBe(secondLineReference);
+  await expect(page.getByRole('row').filter({ hasText: new RegExp(`${batchReference}-02-01`) })).toHaveCount(1);
 
   await page.getByRole('button', { name: `Update ${firstLineReference}` }).click();
   await page.getByLabel('Status *').selectOption('Quoted');
-  await page.getByLabel('Quoted premium *').fill('2400');
-  await page.getByLabel('Quoted currency *').selectOption('MVR');
+  await page.getByLabel('Premium *').fill('2400');
   await page.getByRole('button', { name: 'Save line' }).click();
 
   await page.getByRole('button', { name: `Update ${secondLineReference}` }).click();
@@ -160,13 +178,47 @@ test('lead converts through QRS, invoice, and payment with monthly open-to-won r
   const qrsDealRow = page.getByRole('link', { name: `Open deal details for ${leadTitle}` });
   await qrsDealRow.focus();
   await page.keyboard.press('Enter');
-  await page.getByRole('link', { name: 'Prepare QTY' }).click();
+  await page.getByRole('button', { name: 'Manage QRS' }).last().click();
+  await expect(page).toHaveURL(/#\/qslips\?request=.*&deal=.*&dealView=/);
+  await expect(page.getByRole('link', { name: 'Back to deal' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'New Quotation Request Slip' })).toHaveCount(0);
+  await page.getByRole('link', { name: 'Back to deal' }).click();
+  await expect(page).toHaveURL(/#\/deals\?deal=.*&view=/);
+  await expect(page.getByRole('heading', { name: 'Quotation comparison' })).toBeVisible();
+  await page.goto('/#/qslips');
+  const listedBatchRow = page.getByRole('link', { name: `Open QRS details ${batchReference}` });
+  await expect(listedBatchRow).toBeVisible();
+  await listedBatchRow.click();
+  await expect(page).toHaveURL(/#\/qslips\?request=.*&deal=.*&source=list/);
+  await expect(page.getByRole('tab', { name: 'Formal slip' })).toBeVisible();
+  const detailLine = page.getByRole('row').filter({ hasText: secondLineReference! });
+  await detailLine.getByRole('button', { name: 'Log carrier quotation' }).click();
+  await page.getByLabel('Status *').selectOption('Quoted');
+  await page.getByLabel('Premium *').fill('1200');
+  await page.getByLabel('Valid until *').fill(dateInputValue(30));
+  await page.getByRole('button', { name: 'Save line' }).click();
+  await expect(page.getByRole('row').filter({ hasText: secondLineReference! })).toContainText('Best');
+  await page.getByRole('tab', { name: 'Formal slip' }).click();
+  await page.getByLabel('Print slip for insurer').selectOption({ index: 2 });
+  await expect(page.locator('article.qrs-formal-slip > section.rounded-lg')).toHaveCount(1);
+
+  await navigate(page, 'Deals');
+  const updatedDealLink = page.getByRole('link', { name: `Open deal details for ${leadTitle}` });
+  await updatedDealLink.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Quotation comparison' })).toBeVisible();
+  const liveComparisonRow = page.getByRole('row').filter({ hasText: secondLineReference! });
+  await expect(liveComparisonRow).toContainText('Quoted');
+  await expect(liveComparisonRow).toContainText('MVR 1,200.00');
+  await page.getByRole('link', { name: 'Prepare QTY' }).first().click();
   await expect(page).toHaveURL(/#\/quotations\?/);
   await page.getByRole('button', { name: 'Create QTY' }).click();
   await expect(page.getByRole('heading', { name: /QTY-\d{4}-\d{4}/ })).toBeVisible();
   await page.getByRole('button', { name: 'Issue quotation' }).click();
   await expect(page.getByRole('status')).toContainText('issued');
-  await page.getByLabel('Name *').fill('Aminath Rasheed');
+  const acceptanceName = page.getByRole('textbox', { name: 'Name *', exact: true });
+  await acceptanceName.fill('Aminath Rasheed');
+  await expect(acceptanceName).toHaveValue('Aminath Rasheed');
   await page.getByLabel('Designation').last().fill('Fleet Manager');
   await page.getByRole('button', { name: 'Accept quotation' }).click();
   await expect(page.getByText('Accepted quotation enables Won; the deal has advanced to its next pipeline stage.')).toBeVisible();

@@ -4,7 +4,7 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import PageToolbar from '../components/ui/PageToolbar';
 import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
-import { Plus, CreditCard, Download, TrendingUp, X } from 'lucide-react';
+import { CreditCard, Download, List, Plus, ReceiptText, ShieldCheck, TrendingUp, X } from 'lucide-react';
 import type { Payment } from '../types';
 import { downloadCsv } from '../utils/downloadCsv';
 import { hashParams } from '../utils/navigation';
@@ -85,10 +85,10 @@ export default function PaymentsPage() {
 
       <PageToolbar name="payments" className="justify-between">
         <ViewModeSwitcher label="Payment filters" role="group" value={tab} onChange={setTab} options={[
-          { value: 'all', label: 'All' },
-          { value: 'Premium', label: 'Premium' },
-          { value: 'Commission', label: 'Commission' },
-          { value: 'Fee', label: 'Fee' },
+          { value: 'all', label: 'All', Icon: List },
+          { value: 'Premium', label: 'Premium', Icon: ShieldCheck },
+          { value: 'Commission', label: 'Commission', Icon: TrendingUp },
+          { value: 'Fee', label: 'Fee', Icon: ReceiptText },
         ]} />
         <button className="btn-primary !py-1.5" onClick={() => setCreateOpen(true)} disabled={!invoices.some((invoice) => invoice.status !== 'Paid')} title={invoices.some((invoice) => invoice.status !== 'Paid') ? undefined : 'All invoices are paid'}><Plus size={14} /> Record Payment</button>
       </PageToolbar>

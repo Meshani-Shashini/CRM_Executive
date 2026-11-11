@@ -93,10 +93,19 @@ export function createClientQuotationDraft(input: {
   const { request, line, deal } = input;
   if (line.status !== 'Quoted') throw new Error('A client quotation can only be created from a Quoted QRS line.');
   const now = input.now ?? new Date().toISOString();
-  const validUntil = line.validUntil ?? defaultQuotationValidUntil(now, input.validityDays);
-  const sumInsured = deal.value;
+  const section = request.sections.find((item) => item.id === line.sectionId);
+  const primaryQuote = line.quotes[0];
+  const validUntil = primaryQuote?.validUntil ?? line.validUntil ?? defaultQuotationValidUntil(now, input.validityDays);
+  const sumInsured = section?.data.totalSumInsured || deal.value;
   const template = input.template ?? {};
-  const sections = [{ title: 'Insured Interest', items: [{ interest: deal.product, sumInsured }] }];
+  const sectionItems = section?.data.interests.filter((item) => item.sumInsured > 0) ?? [];
+  const items = sectionItems.length
+    ? sectionItems
+    : section?.data.businessInterruption
+      ? [{ interest: 'Business interruption - gross profit', sumInsured: section.data.businessInterruption.grossProfit }]
+      : section?.data.options[0]?.coverages.map((coverage) => ({ interest: coverage.name, sumInsured: coverage.limit }))
+        ?? [{ interest: deal.product, sumInsured }];
+  const sections = [{ title: section?.title ?? deal.product, items }];
   const conditions = [
     ...(template.communicableDiseaseExclusion ? [template.communicableDiseaseExclusion] : []),
     ...(template.sanctionClause ? [template.sanctionClause] : []),
@@ -117,15 +126,18 @@ export function createClientQuotationDraft(input: {
     policyNo: 'TBA',
     endorsementNo: 'Not applicable',
     policyPeriod: '',
-    territorialLimits: '',
-    occupation: deal.product,
-    riskLocation: '',
+    territorialLimits: request.territorialLimits,
+    occupation: request.occupation || request.businessActivity || deal.product,
+    riskLocation: request.riskLocation,
     sections,
     totalSumInsured: sumInsured,
-    currency: line.quotedCurrency ?? deal.currency,
+    currency: primaryQuote?.currency ?? line.quotedCurrency ?? deal.currency,
     perils: [...(template.perils ?? [])],
-    extensions: [],
+    extensions: [
+      ...(section?.data.extensions ?? []),
+    ],
     deductibles: [
+      ...(section?.data.deductibles ?? []).map((text) => ({ label: 'Section deductible', text })),
       ...(line.insurerDeductibles ?? []).map((text) => ({ label: 'Insurer deductible', text })),
       ...(template.deductibles ?? []),
     ],
@@ -133,8 +145,8 @@ export function createClientQuotationDraft(input: {
     conditions,
     exclusions: [...(template.exclusions ?? [])],
     disclaimer: template.disclaimer ?? '',
-    proposedPremium: line.quotedPremium ?? 0,
-    ratePct: line.quotedRatePct ?? quotationRatePct(line.quotedPremium ?? 0, sumInsured),
+    proposedPremium: primaryQuote?.premium ?? line.quotedPremium ?? 0,
+    ratePct: primaryQuote?.ratePct ?? line.quotedRatePct ?? quotationRatePct(primaryQuote?.premium ?? line.quotedPremium ?? 0, sumInsured),
     preparedBy: input.preparedBy,
     authorizedBy: input.authorizedBy,
   };

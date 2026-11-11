@@ -168,7 +168,7 @@ export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) 
       <PageToolbar name="settings">
         <ViewModeSwitcher label="Settings sections" role="group" value={tab} onChange={setTab}
           className="w-fit overflow-x-auto no-scrollbar"
-          options={tabs.map((item) => ({ value: item.key, label: item.label, Icon: item.icon, showLabel: true }))} />
+          options={tabs.map((item) => ({ value: item.key, label: item.label, Icon: item.icon }))} />
       </PageToolbar>
 
       {tab === 'general' && (
@@ -518,10 +518,20 @@ function ProductManagement({
       keyUnderwritingIntakeArtifacts: form.keyUnderwritingIntakeArtifacts?.trim() || 'Completed proposal form, asset/risk schedule and prior claims history',
       defaultPipelineCode: 'COMMERCIAL',
     };
+    const rateBounds = product.targetRateBounds;
+    const boundsConfigured = Boolean(rateBounds && rateBounds.hardMaxPct > 0);
+    const validRateBounds = !boundsConfigured || Boolean(rateBounds && (
+      [rateBounds.softMinPct, rateBounds.softMaxPct, rateBounds.hardMinPct, rateBounds.hardMaxPct]
+        .every((value) => Number.isFinite(value) && value >= 0 && value <= 100)
+      && rateBounds.hardMinPct <= rateBounds.softMinPct
+      && rateBounds.softMinPct <= rateBounds.softMaxPct
+      && rateBounds.softMaxPct <= rateBounds.hardMaxPct
+    ));
+    product.targetRateBounds = boundsConfigured && rateBounds ? rateBounds : undefined;
     const duplicateCode = products.some((item) => item.code.trim().toUpperCase() === product.code && item.code.trim().toUpperCase() !== editing?.code.trim().toUpperCase());
     const duplicateName = products.some((item) => item.name.trim().toLowerCase() === product.name.toLowerCase() && item.code !== editing?.code);
-    if (!product.code || !product.name || !product.classType || duplicateCode || duplicateName || !Number.isFinite(product.standardBrokerageRatePct) || product.standardBrokerageRatePct < 0 || product.standardBrokerageRatePct > 100) {
-      setError('Enter a unique product code, name, class, and a brokerage rate from 0 to 100.');
+    if (!product.code || !product.name || !product.classType || duplicateCode || duplicateName || !Number.isFinite(product.standardBrokerageRatePct) || product.standardBrokerageRatePct < 0 || product.standardBrokerageRatePct > 100 || !validRateBounds) {
+      setError('Enter a unique product code, name, class, valid brokerage rate, and ordered optional target-rate bounds from 0 to 100.');
       return;
     }
     setProducts((current) => editing
@@ -631,6 +641,24 @@ function ProductManagement({
             <div className="sm:col-span-2 rounded-lg border border-ink-600 bg-ink-900/40 p-3 text-xs text-muted">All products use the shared commercial placement pipeline. Retail, SME, and renewal workflows are selected at the deal level.</div>
             <Field label="Sales Cycle / Velocity *"><input className="input" value={form.salesCycleVelocity ?? ''} onChange={(event) => setForm({ ...form, salesCycleVelocity: event.target.value })} placeholder="e.g. 3–7 Days" required /></Field>
             <Field label="Risk Level *"><select className="input" value={form.riskLevel ?? 'Medium'} onChange={(event) => setForm({ ...form, riskLevel: event.target.value as ProductCode['riskLevel'] })} required><option>Low</option><option>Medium</option><option>High</option><option>Very High</option></select></Field>
+            <div className="sm:col-span-2 grid grid-cols-2 gap-3 rounded-lg border border-ink-600 bg-ink-900/40 p-3 sm:grid-cols-4">
+              <p className="col-span-2 text-xs text-muted sm:col-span-4">Optional target-rate slider bounds (%). Set all four values to enable the section calculator.</p>
+              {([
+                ['hardMinPct', 'Hard minimum'],
+                ['softMinPct', 'Soft minimum'],
+                ['softMaxPct', 'Soft maximum'],
+                ['hardMaxPct', 'Hard maximum'],
+              ] as const).map(([field, label]) => <Field key={field} label={label}>
+                <input className="input" type="number" min="0" max="100" step="0.01"
+                  value={form.targetRateBounds?.[field] ?? ''}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    const current = form.targetRateBounds ?? { hardMinPct: 0, softMinPct: 0, softMaxPct: 0, hardMaxPct: 0 };
+                    const next = { ...current, [field]: value === '' ? 0 : Number(value) };
+                    setForm({ ...form, targetRateBounds: next });
+                  }} />
+              </Field>)}
+            </div>
             <Field label="Key Underwriting Intake Artifacts *"><textarea className="input min-h-[88px] sm:col-span-2" value={form.keyUnderwritingIntakeArtifacts ?? ''} onChange={(event) => setForm({ ...form, keyUnderwritingIntakeArtifacts: event.target.value })} required /></Field>
             <label className="flex items-center gap-2 text-sm text-white self-end"><input type="checkbox" checked={form.isStatutoryMandatory} onChange={(event) => setForm({ ...form, isStatutoryMandatory: event.target.checked })} className="accent-brand-500" /> Statutory mandatory</label>
             {error && <p role="alert" className="sm:col-span-2 text-sm text-hot">{error}</p>}

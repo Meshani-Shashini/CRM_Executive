@@ -5,7 +5,7 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import PageToolbar from '../components/ui/PageToolbar';
 import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
-import { Download, Eye, Plus, Printer, X } from 'lucide-react';
+import { Archive, CircleCheck, CircleDollarSign, Clock3, Download, Eye, List, Plus, Printer, TriangleAlert, X } from 'lucide-react';
 import type { Invoice } from '../types';
 import { downloadCsv } from '../utils/downloadCsv';
 import { hashParams } from '../utils/navigation';
@@ -98,12 +98,12 @@ export default function InvoicesPage() {
     <div className="w-full max-w-full min-w-0 space-y-5">
       <PageToolbar name="invoices" className="justify-between gap-3">
         <ViewModeSwitcher label="Invoice filters" role="group" value={tab} onChange={setTab} options={[
-          { value: 'all', label: 'All' },
-          { value: 'outstanding', label: 'Outstanding' },
-          { value: 'Pending', label: 'Pending' },
-          { value: 'Paid', label: 'Paid' },
-          { value: 'Overdue', label: 'Overdue' },
-          { value: 'Archived', label: 'Archived' },
+          { value: 'all', label: 'All', Icon: List },
+          { value: 'outstanding', label: 'Outstanding', Icon: CircleDollarSign },
+          { value: 'Pending', label: 'Pending', Icon: Clock3 },
+          { value: 'Paid', label: 'Paid', Icon: CircleCheck },
+          { value: 'Overdue', label: 'Overdue', Icon: TriangleAlert },
+          { value: 'Archived', label: 'Archived', Icon: Archive },
         ]} />
         <button className="btn-primary !py-1.5" onClick={() => { setCreateError(''); setCreateOpen(true); }}><Plus size={14} /> New Invoice</button>
       </PageToolbar>

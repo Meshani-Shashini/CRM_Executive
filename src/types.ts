@@ -214,21 +214,91 @@ export interface Vendor {
 export interface QuotationRequest {
   id: string;
   reference: string;
+  issuedAt: string;
   dealId: string;
   leadId: string;
   clientId: string;
+  insuredName: string;
+  businessActivity: string;
+  additionalActivity: string;
+  riskLocation: string;
+  territorialLimits: string;
+  occupation: string;
+  periodOfInsurance: string;
   requiredBy: string;
-  insuredAmount: number;
   currency: 'MVR' | 'USD';
   notes: string;
-  createdBy: string;
+  preparedBy: string;
+  checkedBy: string;
   createdAt: string;
   updatedAt: string;
+  sections: QuotationSection[];
   lines: QuotationRequestLine[];
+}
+
+export type QuotationSectionStatus = 'Active' | 'Cancelled';
+
+export type QuotationSectionTemplate =
+  | 'property'
+  | 'business-interruption'
+  | 'liability'
+  | 'terrorism'
+  | 'fidelity'
+  | 'money-transit'
+  | 'marine-cargo'
+  | 'marine-hull'
+  | 'general';
+
+export interface QuotationInterest {
+  interest: string;
+  sumInsured: number;
+}
+
+export interface QuotationOptionCoverage {
+  name: string;
+  limit: number;
+}
+
+export interface QuotationOption {
+  id: string;
+  label: string;
+  coverages: QuotationOptionCoverage[];
+}
+
+export interface QuotationSectionData {
+  template: QuotationSectionTemplate;
+  interests: QuotationInterest[];
+  businessInterruption?: {
+    grossProfit: number;
+    indemnityMonths: number;
+  };
+  totalSumInsured: number;
+  deductibles: string[];
+  extensions: Array<{ name: string; limit: string }>;
+  targetRatePct?: number;
+  materialInfo: Record<string, string>;
+  options: QuotationOption[];
+}
+
+export interface QuotationSection {
+  id: string;
+  no: number;
+  productCode: string;
+  title: string;
+  data: QuotationSectionData;
+  status: QuotationSectionStatus;
 }
 
 export type QuotationRequestLineStatus =
   | 'Requested' | 'Sent' | 'Quoted' | 'Declined' | 'Expired' | 'Cancelled';
+
+export interface QuotationRequestQuote {
+  optionId: string;
+  premium: number;
+  currency: 'MVR' | 'USD';
+  ratePct?: number;
+  validUntil?: string;
+}
 
 export interface QuotationRequestLineStatusChange {
   fromStatus?: QuotationRequestLineStatus;
@@ -241,11 +311,15 @@ export interface QuotationRequestLineStatusChange {
 export interface QuotationRequestLine {
   id: string;
   reference: string;
+  sectionId: string;
   vendorId: string;
   status: QuotationRequestLineStatus;
   sentAt?: string;
   respondedAt?: string;
   insurerQuoteRef?: string;
+  quotes: QuotationRequestQuote[];
+  declineReason?: string;
+  /** Legacy pricing fields remain readable for existing client quotations. */
   quotedPremium?: number;
   quotedCurrency?: 'MVR' | 'USD';
   quotedRatePct?: number;
@@ -338,6 +412,12 @@ export interface ProductCode {
   salesCycleVelocity?: string;
   riskLevel?: 'Low' | 'Medium' | 'High' | 'Very High';
   keyUnderwritingIntakeArtifacts?: string;
+  targetRateBounds?: {
+    softMinPct: number;
+    softMaxPct: number;
+    hardMinPct: number;
+    hardMaxPct: number;
+  };
 }
 
 export interface InvoiceItem {

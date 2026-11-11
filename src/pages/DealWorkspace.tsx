@@ -42,6 +42,9 @@ import { getNextActivity } from '../utils/nextActivity';
 import { dashboardHref, hashParams, promptQuotationRequestForDeal } from '../utils/navigation';
 import { nextLocalReference } from '../utils/references';
 import {
+  deriveRequestStatus, formatQuotationLineReference, getQuotationLineDisplayStatus,
+} from '../utils/quotationRequests';
+import {
   classifyDealOutcome,
   isValidDealCloseDate,
   summarizeDealValues,
@@ -360,15 +363,16 @@ export default function DealWorkspace({
     quotationRequests, clientQuotations, company,
   } = useApp();
   const [selectedKey, setSelectedKey] = useState(() => {
-    const dealId = dealsPageMode ? hashParams().get('id') : null;
+    const dealId = dealsPageMode ? hashParams().get('id') ?? hashParams().get('deal') : null;
     return dealId ? `deal:${dealId}` : '';
   });
   const [workspaceView, setWorkspaceView] = useState<'list' | 'kanban' | 'inspection' | DealsView>(() => {
     if (!dealsPageMode) return 'list';
     const view = hashParams().get('view');
     if (view === 'inspection') return view;
-    return view === 'list' || view === 'forecast' || view === 'archive' || view === 'pipeline' ? view : 'list';
+    return view === 'list' || view === 'forecast' || view === 'archive' || view === 'pipeline' || view === 'kanban' ? view : 'list';
   });
+  const [qrsPickerLocation, setQrsPickerLocation] = useState<'comparison' | 'binding' | ''>('');
   const [kanbanPipelineId, setKanbanPipelineId] = useState('');
   const selectedPipelineFilter = pipelineFilter ?? kanbanPipelineId;
   const changePipelineFilter = onPipelineFilterChange ?? setKanbanPipelineId;
@@ -523,11 +527,44 @@ export default function DealWorkspace({
     ]
       .find((timestamp): timestamp is string => Boolean(timestamp && Number.isFinite(Date.parse(timestamp))))
     : undefined;
-  const quotationLines = linkedQuotationRequests.flatMap((request) => request.lines.map((line) => ({
+  const quotationSections = linkedQuotationRequests.flatMap((request) => request.sections.map((section) => ({
     request,
-    line,
-    vendor: vendors.find((item) => item.id === line.vendorId),
+    section,
+    lines: request.lines.filter((line) => line.sectionId === section.id).map((line) => ({
+      line,
+      vendor: vendors.find((item) => item.id === line.vendorId),
+    })),
   })));
+  const selectedDealRequests = selectedDeal
+    ? linkedQuotationRequests.filter((request) => request.dealId === selectedDeal.id)
+    : [];
+  const openQrsDetail = (requestId: string) => {
+    if (!selectedDeal) return;
+    window.location.hash = dashboardHref('qslips', {
+      request: requestId,
+      deal: selectedDeal.id,
+      dealView: workspaceView,
+    });
+  };
+  const manageQrs = (location: 'comparison' | 'binding') => {
+    if (selectedDealRequests.length === 1) openQrsDetail(selectedDealRequests[0].id);
+    else if (selectedDealRequests.length > 1) setQrsPickerLocation((current) => current === location ? '' : location);
+  };
+  const renderQrsPicker = (location: 'comparison' | 'binding') => qrsPickerLocation === location && selectedDealRequests.length > 1
+    ? <select
+      className="input !w-full !py-1.5 !text-xs"
+      aria-label="Choose quotation request"
+      defaultValue=""
+      onChange={(event) => {
+        if (event.target.value) openQrsDetail(event.target.value);
+      }}
+    >
+      <option value="">Choose a quotation request…</option>
+      {selectedDealRequests.map((request) => <option key={request.id} value={request.id}>
+        {request.reference} · {formatDate(request.issuedAt)} · {deriveRequestStatus(request.lines)}
+      </option>)}
+    </select>
+    : null;
   const selectedHistory = progressDeal
     ? stageHistory.filter((entry) => entry.dealId === progressDeal.id).sort((left, right) => Date.parse(left.enteredAt) - Date.parse(right.enteredAt))
     : [];
@@ -997,10 +1034,10 @@ export default function DealWorkspace({
     const syncDealsHash = () => {
       const params = hashParams();
       const view = params.get('view');
-      if (view === 'pipeline' || view === 'list' || view === 'forecast' || view === 'archive') {
+      if (view === 'pipeline' || view === 'list' || view === 'forecast' || view === 'archive' || view === 'inspection' || view === 'kanban') {
         setWorkspaceView(view);
       }
-      const id = params.get('id');
+      const id = params.get('id') ?? params.get('deal');
       const deal = id ? deals.find((item) => item.id === id) : undefined;
       setSelectedKey(deal ? `deal:${deal.id}` : '');
     };
@@ -2026,8 +2063,8 @@ export default function DealWorkspace({
                         </td>
                         <td data-label="Owner" className="px-2 py-2 font-normal text-[#E1E2E5]"><OwnerCell name={ownerName} /></td>
                         {stageCell}
-                        <td data-label="Pipeline" className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
-                          <span className="inline-flex max-w-full items-center rounded-full border border-[#2A2E35] bg-[#17191C] px-2 py-0.5 text-[10px] font-normal text-[#E1E2E5]" title={pipeline?.name ?? 'Unknown pipeline'}>{pipelineLabel}</span>
+                        <td data-label="Pipeline" className="px-2 py-2 font-normal text-[#E1E2E5]">
+                          <span className="inline-block max-w-full whitespace-normal break-words rounded-full border border-[#2A2E35] bg-[#17191C] px-1.5 py-0.5 text-[10px] font-normal leading-tight text-[#E1E2E5]" title={pipeline?.name ?? 'Unknown pipeline'}>{pipelineLabel}</span>
                         </td>
                       </> : <>
                         <td data-label={workspaceListColumns[0].label} className={`px-2 py-2 font-semibold ${nextActivity.state === 'overdue' ? 'text-hot' : 'text-white'}`}>
@@ -2038,8 +2075,8 @@ export default function DealWorkspace({
                           <span className="block truncate" title={deal.client}>{deal.client}</span>
                           {clientContactName && <span className="block truncate text-[10px] text-[#8E95A2]" title={clientContactName}>{clientContactName}</span>}
                         </td>
-                        <td data-label={workspaceListColumns[2].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
-                          <span className="inline-flex max-w-full items-center rounded-full border border-[#2A2E35] bg-[#17191C] px-2 py-0.5 text-[10px] font-normal text-[#E1E2E5]" title={pipeline?.name ?? 'Unknown pipeline'}>{pipelineLabel}</span>
+                        <td data-label={workspaceListColumns[2].label} className="px-2 py-2 font-normal text-[#E1E2E5]">
+                          <span className="inline-block max-w-full whitespace-normal break-words rounded-full border border-[#2A2E35] bg-[#17191C] px-1.5 py-0.5 text-[10px] font-normal leading-tight text-[#E1E2E5]" title={pipeline?.name ?? 'Unknown pipeline'}>{pipelineLabel}</span>
                         </td>
                         {stageCell}
                         <td data-label={workspaceListColumns[4].label} className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]"><ProductCodePill code={productCode} name={product?.name ?? deal.product} /></td>
@@ -2750,31 +2787,68 @@ export default function DealWorkspace({
               </div>
             </div>
             <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
-              <div className="mb-3 flex items-center justify-between gap-2"><h2 className="text-sm font-semibold text-white">Quotation comparison</h2>
-                {selectedDeal && (activeRole === 'admin' || activeRole === 'sales') && <a className="btn-ghost !px-2 !py-1 text-xs" href={dashboardHref('qslips', { dealId: selectedDeal.id })}><Plus size={12} /> Create QRS</a>}
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold text-white">Quotation comparison</h2>
+                {selectedDeal && (activeRole === 'admin' || activeRole === 'sales') && (selectedDealRequests.length
+                  ? <div className="flex flex-wrap gap-1">
+                    <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => manageQrs('comparison')}>Manage QRS</button>
+                    <a className="btn-ghost !px-2 !py-1 text-xs" href={dashboardHref('qslips', { deal: selectedDeal.id, action: 'create' })}><Plus size={12} /> Add another request</a>
+                  </div>
+                  : <a className="btn-ghost !px-2 !py-1 text-xs" href={dashboardHref('qslips', { deal: selectedDeal.id, action: 'create' })}><Plus size={12} /> Create QRS</a>)}
               </div>
-              {quotationLines.length ? <div className="max-w-full overflow-x-auto overscroll-x-contain"><table className="w-full min-w-72 text-left text-xs">
-                <thead className="text-[10px] text-muted"><tr><th className="pb-2 font-medium">Insurer / line</th><th className="pb-2 text-right font-medium">Premium</th><th className="pb-2 text-right font-medium">Rate</th><th className="pb-2 text-right font-medium">Valid until</th><th className="pb-2 text-right font-medium">Client QTY</th></tr></thead>
-                <tbody>{quotationLines.map(({ request, line, vendor }) => <tr key={line.id} className="border-t border-ink-700/60">
-                  <td className="py-2 text-white">{vendor?.name ?? 'Unknown insurer'}<div className="font-mono text-[10px] text-muted">{line.reference} · {line.status}</div></td>
-                  <td className="py-2 text-right text-brand-300">{line.quotedPremium === undefined ? '—' : formatAmount(line.quotedPremium, line.quotedCurrency ?? request.currency)}</td>
-                  <td className="py-2 text-right text-muted">{line.quotedRatePct === undefined ? '—' : `${line.quotedRatePct}%`}</td>
-                  <td className="py-2 text-right text-muted">{line.validUntil ? formatDate(line.validUntil) : '—'}</td>
-                  <td className="py-2 text-right">{line.status === 'Quoted' && (activeRole === 'admin' || activeRole === 'sales')
-                    ? <a className="text-brand-300 hover:text-white" href={dashboardHref('quotations', { dealId: request.dealId, requestId: request.id, lineId: line.id })}>Prepare QTY</a>
-                    : clientQuotations.find((quotation) => quotation.sourceLineId === line.id)?.reference ?? '—'}</td>
-                </tr>)}</tbody>
+              {renderQrsPicker('comparison')}
+              {quotationSections.some(({ lines }) => lines.length) ? <div className="max-w-full overflow-x-auto overscroll-x-contain"><table className="w-full min-w-72 text-left text-xs">
+                <thead className="text-[10px] text-muted"><tr><th className="pb-2 font-medium">Section / insurer line</th><th className="pb-2 text-right font-medium">Premium by option</th><th className="pb-2 text-right font-medium">Rate / validity</th></tr></thead>
+                <tbody>{quotationSections.flatMap(({ request, section, lines }) => [
+                  <tr key={`${section.id}-section`} className="border-t border-ink-700 bg-ink-900/40">
+                    <td colSpan={3} className="py-2 font-medium text-white">
+                      <a className="hover:text-brand-300" href={dashboardHref('qslips', {
+                        request: request.id,
+                        deal: request.dealId,
+                        dealView: workspaceView,
+                      })} title={`Open ${request.reference} details`}>
+                        {section.title} · {formatAmount(section.data.totalSumInsured, request.currency)}
+                      </a>
+                    </td>
+                  </tr>,
+                  ...lines.map(({ line, vendor }) => {
+                    const displayStatus = getQuotationLineDisplayStatus(line);
+                    const statusDetails = displayStatus === 'Declined'
+                      ? `Declined: ${line.declineReason || line.remarks || 'No reason provided'}`
+                      : displayStatus === 'Requested' || displayStatus === 'Sent'
+                        ? 'Awaiting quote'
+                        : displayStatus === 'Cancelled' || displayStatus === 'Expired'
+                          ? displayStatus
+                          : undefined;
+                    const visibleQuotes = displayStatus === 'Quoted' ? line.quotes : [];
+                    return <tr key={line.id} className={`border-t border-ink-700/60 ${displayStatus === 'Cancelled' ? 'text-muted opacity-60' : 'text-white'}`}>
+                      <td className="py-2">{vendor?.name ?? 'Unknown insurer'}
+                        <div className="font-mono text-[10px] text-muted">{formatQuotationLineReference(line)} · {displayStatus}</div>
+                        {displayStatus === 'Quoted' && (activeRole === 'admin' || activeRole === 'sales') && <a className="text-[10px] text-brand-300 hover:text-white" href={dashboardHref('quotations', { dealId: request.dealId, requestId: request.id, lineId: line.id })}>Prepare QTY</a>}
+                      </td>
+                      <td className="py-2 text-right text-brand-300">{visibleQuotes.length ? visibleQuotes.map((quote) => <div key={quote.optionId}>
+                        {section.data.options.find((option) => option.id === quote.optionId)?.label ?? 'Premium'}: {formatAmount(quote.premium, quote.currency)}
+                      </div>) : <span className="text-muted">{statusDetails ?? 'Awaiting quote'}</span>}</td>
+                      <td className="py-2 text-right text-muted">{visibleQuotes.length ? visibleQuotes.map((quote) => <div key={quote.optionId}>
+                        {quote.ratePct === undefined ? '—' : `${quote.ratePct}%`} · {quote.validUntil ? formatDate(quote.validUntil) : '—'}
+                      </div>) : statusDetails ?? 'Awaiting quote'}</td>
+                    </tr>;
+                  }),
+                ])}</tbody>
               </table></div> : <p className="text-xs text-muted">No insurer quotes recorded. Add quotes to compare premium and terms.</p>}
             </div>
             <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
               <h2 className="text-sm font-semibold text-white">Binding actions</h2>
               <div className="mt-3 grid grid-cols-2 gap-2">
-                {selectedDeal && (activeRole === 'admin' || activeRole === 'sales') && <a className="btn-ghost !px-2 !py-2 text-center text-xs" href={dashboardHref('qslips', { dealId: selectedDeal.id })}>Manage QRS</a>}
+                {selectedDeal && (activeRole === 'admin' || activeRole === 'sales') && (selectedDealRequests.length
+                  ? <button type="button" className="btn-ghost !px-2 !py-2 text-center text-xs" onClick={() => manageQrs('binding')}>Manage QRS</button>
+                  : <a className="btn-ghost !px-2 !py-2 text-center text-xs" href={dashboardHref('qslips', { deal: selectedDeal.id, action: 'create' })}>Create QRS</a>)}
                 <button type="button" className="btn-primary !px-2 !py-2 text-xs" disabled={!selectedDeal || !stages.find((stage) => isBoundStage(stage))} onClick={() => {
                   const finalStage = stages.find((stage) => isBoundStage(stage));
                   if (finalStage) requestStageChange(finalStage);
                 }}><ShieldCheck size={13} /> Bind policy</button>
               </div>
+                {renderQrsPicker('binding')}
+                {selectedDeal && selectedDealRequests.length > 0 && (activeRole === 'admin' || activeRole === 'sales') && <a className="btn-ghost mt-2 inline-flex !px-2 !py-1 text-xs" href={dashboardHref('qslips', { deal: selectedDeal.id, action: 'create' })}>Add another request</a>}
               {selectedDeal?.linkedInvoiceId && <p className="mt-2 text-xs text-win">Invoice generated for this bound deal.</p>}
             </div>
           </section>}

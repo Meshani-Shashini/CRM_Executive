@@ -15,16 +15,22 @@ export function canTransitionQuotationRequestStatus(
   current: QuotationRequestStatus,
   next: QuotationRequestStatus,
   role: Role,
+  canManageAllStatuses = false,
 ) {
   if (current === next) return false;
+  if (role === 'admin' || canManageAllStatuses) return true;
   if (ALLOWED_TRANSITIONS[current].includes(next)) return true;
-  return role === 'admin' && current !== 'Cancelled' && (next === 'Requested' || next === 'Sent');
+  return false;
 }
 
-export function quotationRequestStatusOptions(current: QuotationRequestStatus, role: Role) {
+export function quotationRequestStatusOptions(
+  current: QuotationRequestStatus,
+  role: Role,
+  canManageAllStatuses = false,
+) {
   const statuses: QuotationRequestStatus[] = ['Requested', 'Sent', 'Quoted', 'Declined', 'Expired', 'Cancelled'];
   const allowed = statuses.filter((status) => status !== current
-    && canTransitionQuotationRequestStatus(current, status, role));
+    && canTransitionQuotationRequestStatus(current, status, role, canManageAllStatuses));
   return [
     { status: current, label: current, disabled: true },
     ...allowed.map((status) => ({
