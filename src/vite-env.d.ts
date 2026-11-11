@@ -7,6 +7,7 @@ interface ImportMetaEnv {
   readonly VITE_ADMIN_LOGIN_EMAIL?: string;
   readonly VITE_DEMO_ADMIN_USERNAME?: string;
   readonly VITE_DEMO_ADMIN_PASSWORD?: string;
+  readonly VITE_DEMO_LEADS?: string;
 }
 
 interface ImportMeta {

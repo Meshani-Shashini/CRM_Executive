@@ -1,4 +1,4 @@
-import type { Activity, Client, Deal, Lead, PipelineStage, StageHistoryAudit } from '../types';
+import type { Activity, Client, ClientQuotation, Deal, Lead, PipelineStage, StageHistoryAudit } from '../types';
 import { buildLeadStageHistoryRecords, isLeadLifecycleStage } from './leadLifecycle';
 import { isTerminalDealStage } from './stageSla';
 import { normalizeDateInput } from './date';
@@ -12,7 +12,7 @@ const DEFAULT_LEAD_STAGE_SLA_DAYS: Partial<Record<string, number>> = {
   'Meetings Ongoing': 10,
 };
 
-export type CalendarEventKind = 'activity' | 'meeting' | 'deal' | 'lead' | 'renewal' | 'sla';
+export type CalendarEventKind = 'activity' | 'meeting' | 'deal' | 'lead' | 'renewal' | 'sla' | 'quotation';
 
 export interface CalendarEvent {
   id: string;
@@ -20,7 +20,7 @@ export interface CalendarEvent {
   title: string;
   client: string;
   kind: CalendarEventKind;
-  category: 'activity' | 'deal' | 'lead' | 'renewal' | 'sla';
+  category: 'activity' | 'deal' | 'lead' | 'renewal' | 'sla' | 'quotation';
   ownerId: string;
   pipelineId?: string;
   target: { route: 'leads' | 'deals' | 'clients'; id: string };
@@ -33,6 +33,7 @@ export interface CalendarData {
   leads: Lead[];
   pipelineStages: PipelineStage[];
   stageHistory: StageHistoryAudit[];
+  clientQuotations?: ClientQuotation[];
 }
 
 function storedDate(value?: string) {
@@ -190,6 +191,22 @@ export function buildCalendarEvents(data: CalendarData): CalendarEvent[] {
         });
       }
     }
+  }
+
+  for (const quotation of data.clientQuotations ?? []) {
+    if (quotation.status !== 'Issued' || !quotation.validUntil) continue;
+    const deal = data.deals.find((item) => item.id === quotation.dealId);
+    add({
+      id: `client-quotation-validity:${quotation.id}`,
+      date: storedDate(quotation.validUntil),
+      title: `Client quotation validity · ${quotation.reference}`,
+      client: deal?.client ?? data.clients.find((item) => item.id === quotation.clientId)?.name ?? '',
+      kind: 'quotation',
+      category: 'quotation',
+      ownerId: deal?.ownerId ?? '',
+      pipelineId: deal?.pipelineId,
+      target: { route: 'deals', id: quotation.dealId },
+    });
   }
 
   for (const client of data.clients) {

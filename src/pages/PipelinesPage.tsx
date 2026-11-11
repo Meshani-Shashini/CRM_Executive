@@ -6,7 +6,7 @@ import { AUTH_BYPASS, TENANT_ID } from '../lib/supabase';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
 import PageToolbar from '../components/ui/PageToolbar';
-import type { Client, Deal, Pipeline, PipelineStage, StageHistoryAudit } from '../types';
+import type { Deal, Pipeline, PipelineStage, StageHistoryAudit } from '../types';
 import { formatAmount, toMvr } from '../utils/currency';
 import { formatDate } from '../utils/date';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
@@ -18,6 +18,7 @@ import { promptQuotationRequestForDeal } from '../utils/navigation';
 import { linkDealToLead } from '../utils/dealFactory';
 import { getNextActivity } from '../utils/nextActivity';
 import { nextLocalReference } from '../utils/references';
+import { validateDealBaseForProgression } from '../utils/monthlyDealSummary';
 
 const legacyStageNames: Record<string, string> = {
   'Lead Identified': 'Identified',
@@ -82,42 +83,6 @@ function pipelineShortLabel(pipeline?: Pipeline) {
     : code === 'SME_VELOCITY' ? 'SME'
       : code === 'RENEWALS' ? 'Renewals'
         : pipeline?.name ?? 'Unknown pipeline';
-}
-
-function renewalHorizonDate(from: Date) {
-  const targetMonth = new Date(from.getFullYear(), from.getMonth() + 3, 1);
-  const targetLastDay = new Date(targetMonth.getFullYear(), targetMonth.getMonth() + 1, 0).getDate();
-  targetMonth.setDate(Math.min(from.getDate(), targetLastDay));
-  return targetMonth;
-}
-
-function buildRenewalDeal(client: Client, pipeline: Pipeline, firstStage: PipelineStage, today: Date): Omit<Deal, 'leadId'> {
-  const expiry = client.expiry;
-  const value = client.premium;
-  return {
-    id: `renewal-${crypto.randomUUID()}`,
-    pipelineId: pipeline.id,
-    createdAt: today.toISOString(),
-    stageChangedAt: today.toISOString(),
-    renewalForClientId: client.id,
-    renewalExpiry: expiry,
-    policyExpiry: expiry,
-    clientId: client.id,
-    client: client.name,
-    product: client.productCode || client.class || 'Insurance renewal',
-    productCode: client.productCode || undefined,
-    value,
-    weighted: Math.round(value * firstStage.winProbabilityPct) / 100,
-    currency: 'MVR',
-    stage: firstStage.name,
-    probability: firstStage.winProbabilityPct,
-    ownerId: client.ownerId,
-    closeDate: expiry,
-    insurer: client.insurer || 'Not assigned',
-    nextActivityAt: expiry ? new Date(`${expiry}T00:00:00`).toISOString() : undefined,
-    nextActivityTitle: 'Review renewal requirements',
-    nextActivityCreatedAt: today.toISOString(),
-  };
 }
 
 function subtractDays(date: string, days: number): string {
@@ -211,7 +176,7 @@ function makeId() {
 export default function PipelinesPage() {
   const {
     user, deals, setDeals, setLeads, clients, pipelines, setPipelines, pipelineStages, setPipelineStages,
-    stageHistory, setStageHistory, invoices, setInvoices, quotationRequests, activities, company, leads,
+    stageHistory, setStageHistory, invoices, setInvoices, quotationRequests, clientQuotations, activities, company, leads,
   } = useApp();
   const [pipelineId, setPipelineId] = useState(pipelines.find((pipeline) => pipeline.isActive)?.id ?? '');
   const [pipelineModalOpen, setPipelineModalOpen] = useState(false);
@@ -264,44 +229,6 @@ export default function PipelinesPage() {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
-  useEffect(() => {
-    const renewalPipeline = pipelines.find((pipeline) => pipeline.isActive && isRenewalPipeline(pipeline));
-    const firstStage = renewalPipeline
-      && pipelineStages.filter((stage) => stage.pipelineId === renewalPipeline.id).sort((a, b) => a.stageOrder - b.stageOrder)[0];
-    if (!renewalPipeline || !firstStage) return;
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const horizon = renewalHorizonDate(today);
-    const upcomingRenewals = clients.filter((client) => {
-      if (!client.expiry || client.accountStatus === 'draft') return false;
-      const expiry = new Date(client.expiry.length === 10 ? `${client.expiry}T00:00:00` : client.expiry);
-      return Number.isFinite(expiry.getTime())
-        && expiry >= today
-        && expiry <= horizon
-        && !deals.some((deal) => deal.renewalForClientId === client.id && deal.renewalExpiry === client.expiry);
-    });
-    if (upcomingRenewals.length) {
-      const knownRenewals = new Set(deals
-        .filter((deal) => deal.renewalForClientId)
-        .map((deal) => `${deal.renewalForClientId}:${deal.renewalExpiry}`));
-      const linkedAdditions = upcomingRenewals
-        .filter((client) => !knownRenewals.has(`${client.id}:${client.expiry}`))
-        .map((client) => linkDealToLead(
-          buildRenewalDeal(client, renewalPipeline, firstStage, today),
-          undefined,
-          { source: 'Renewal automation', client },
-        ));
-      if (linkedAdditions.length) {
-        setDeals((current) => [...linkedAdditions.map((item) => item.deal), ...current]);
-        setLeads((current) => [
-          ...linkedAdditions.filter((item) => !current.some((lead) => lead.id === item.lead.id)).map((item) => item.lead),
-          ...current,
-        ]);
-      }
-    }
-  }, [clients, deals, pipelines, pipelineStages, setDeals, setLeads]);
-
   const stageForDeal = (deal: typeof deals[number]) => {
     const dealStages = pipelineStages.filter((stage) => stage.pipelineId === (deal.pipelineId ?? defaultPipelineId))
       .sort((left, right) => left.stageOrder - right.stageOrder);
@@ -319,6 +246,11 @@ export default function PipelinesPage() {
   const moveDeal = (dealId: string, target: PipelineStage) => {
     const deal = deals.find((item) => item.id === dealId);
     if (!deal || isTerminalDealStage(deal.stage, deal.disposition, stageForDeal(deal))) return;
+    if (isWonStage(target) && !clientQuotations.some((quotation) =>
+      quotation.dealId === deal.id && quotation.status === 'Accepted')) {
+      window.alert('Issue and accept a client quotation before marking this deal Won.');
+      return;
+    }
     const current = stageForDeal(deal);
     if (!current || current.id === target.id) return;
     if (requiresCommunicationChannels(target.name) && !hasCompleteCommunicationChannels(deal)) {
@@ -337,8 +269,6 @@ export default function PipelinesPage() {
     const nextActivity = getNextActivity(activities, {
       dealId: deal.id,
       leadId: linkedLeadId ?? deal.leadId,
-      legacyDueDate: deal.nextActivityAt,
-      legacyTitle: deal.nextActivityTitle,
     });
     const renewalWin = isRenewalPipeline(pipelines.find((pipeline) => pipeline.id === (deal.pipelineId ?? defaultPipelineId))) && isWonStage(target);
     const needsMoveDialog = requiresCommunicationChannels(target.name)
@@ -368,12 +298,20 @@ export default function PipelinesPage() {
     const now = new Date().toISOString();
     const movingDeal = deals.find((deal) => deal.id === dealId);
     if (!movingDeal || isTerminalDealStage(movingDeal.stage, movingDeal.disposition, stageForDeal(movingDeal))) return;
+    if ((disposition === 'won' || isWonStage(to)) && !clientQuotations.some((quotation) =>
+      quotation.dealId === movingDeal.id && quotation.status === 'Accepted')) {
+      window.alert('Issue and accept a client quotation before marking this deal Won.');
+      return;
+    }
+    const progressionErrors = validateDealBaseForProgression(movingDeal, { leads, clients });
+    if (progressionErrors.length) {
+      window.alert(progressionErrors.join(' '));
+      return;
+    }
     const linkedLeadId = leads.find((lead) => lead.id === movingDeal.leadId || lead.dealId === movingDeal.id)?.id;
     if (company.requireNextActivityForStageChange && getNextActivity(activities, {
       dealId: movingDeal.id,
       leadId: linkedLeadId ?? movingDeal.leadId,
-      legacyDueDate: movingDeal.nextActivityAt,
-      legacyTitle: movingDeal.nextActivityTitle,
     }).state === 'none') return;
     const reachesPolicyBound = Boolean(movingDeal && isWonStage(to) && !isWonStage(stageForDeal(movingDeal) ?? movingDeal.stage));
     const boundClient = movingDeal && clients.find((client) => client.name.trim().toLowerCase() === movingDeal.client.trim().toLowerCase());
@@ -410,7 +348,9 @@ export default function PipelinesPage() {
       }
       if (renewalPipeline && renewalStage && policyExpiry && !deals.some((deal) => deal.id === renewalDealId)) {
         const renewalCloseDate = subtractDays(policyExpiry, 90);
-        const renewalValue = boundClient?.premium ?? movingDeal.value;
+        const renewalValue = boundClient?.premium && boundClient.premium > 0
+          ? boundClient.premium
+          : movingDeal.value;
         const linkedRenewal = linkDealToLead({
           id: renewalDealId,
           pipelineId: renewalPipeline.id,
@@ -433,10 +373,7 @@ export default function PipelinesPage() {
           ownerId: movingDeal.ownerId,
           closeDate: renewalCloseDate,
           insurer: movingDeal.insurer,
-          nextActivityAt: renewalCloseDate,
-          nextActivityTitle: 'Start 90-day renewal retention review',
-          nextActivityCreatedAt: now,
-        }, undefined, { source: 'Renewal automation', client: boundClient });
+        }, leads.find((lead) => lead.id === movingDeal.leadId || lead.dealId === movingDeal.id));
         setDeals((current) => current.some((deal) => deal.id === renewalDealId)
           ? current
           : [...current, linkedRenewal.deal]);
@@ -523,8 +460,6 @@ export default function PipelinesPage() {
     if (company.requireNextActivityForStageChange && getNextActivity(activities, {
       dealId: deal.id,
       leadId: linkedLeadId ?? deal.leadId,
-      legacyDueDate: deal.nextActivityAt,
-      legacyTitle: deal.nextActivityTitle,
     }).state === 'none') return;
     const current = stageForDeal(deal);
     if (!current) return;
@@ -844,8 +779,6 @@ export default function PipelinesPage() {
                     const nextActivity = nextActivityBadge(getNextActivity(activities, {
                       dealId: deal.id,
                       leadId: linkedLeadId ?? deal.leadId,
-                      legacyDueDate: deal.nextActivityAt,
-                      legacyTitle: deal.nextActivityTitle,
                     }));
                     return (
                       <article
@@ -957,8 +890,6 @@ export default function PipelinesPage() {
             && getNextActivity(activities, {
               dealId: pendingMoveDeal.id,
               leadId: leads.find((lead) => lead.id === pendingMoveDeal.leadId || lead.dealId === pendingMoveDeal.id)?.id ?? pendingMoveDeal.leadId,
-              legacyDueDate: pendingMoveDeal.nextActivityAt,
-              legacyTitle: pendingMoveDeal.nextActivityTitle,
             }).state === 'none')}>
             <Check size={14} /> {activityWarningOnly && !company.requireNextActivityForStageChange
               ? 'Continue without activity'
@@ -970,8 +901,6 @@ export default function PipelinesPage() {
           {pendingMoveDeal && getNextActivity(activities, {
             dealId: pendingMoveDeal.id,
             leadId: leads.find((lead) => lead.id === pendingMoveDeal.leadId || lead.dealId === pendingMoveDeal.id)?.id ?? pendingMoveDeal.leadId,
-            legacyDueDate: pendingMoveDeal.nextActivityAt,
-            legacyTitle: pendingMoveDeal.nextActivityTitle,
           }).state === 'none' && <p role="status" className="rounded-lg border border-warm/30 bg-warm/5 p-3 text-xs text-warm">
             <Clock3 size={13} className="mr-1 inline" />No next activity is scheduled. {company.requireNextActivityForStageChange
               ? 'Settings require a scheduled activity before this change. Open the deal details to schedule one.'

@@ -43,7 +43,7 @@ describe('Deal list row accessibility', () => {
       pipelineStages: [{ id: 'stage-1', pipelineId: 'pipeline-1', name: 'New', stageOrder: 1, winProbabilityPct: 10, stagnationDaysThreshold: 5 }],
       stageHistory: [], setStageHistory: vi.fn(), invoices: [], setInvoices: vi.fn(),
       user: { id: 'user-1', name: 'QA User', email: 'qa@example.com', role: 'sales' },
-      users: [], vendors: [], viewAsRole: null, quotationRequests: [],
+      users: [], vendors: [], viewAsRole: null, quotationRequests: [], clientQuotations: [],
       company: { requireNextActivityForStageChange: false },
     });
   });
@@ -75,6 +75,49 @@ describe('Deal list row accessibility', () => {
     expect(backButton).not.toBeNull();
     act(() => backButton?.click());
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('routes lead detail view icons back to the primary Leads views without rendering the legacy workspace tabs', () => {
+    mockUseApp.mockReturnValue({
+      activities: [], setActivities: vi.fn(), clients: [], setClients: vi.fn(),
+      deals: [], setDeals: vi.fn(), leads: [{
+        id: 'lead-1',
+        client: 'Acme',
+        title: 'Acme lead',
+        contact: 'A Contact',
+        country: 'Maldives',
+        insuranceClass: 'Property',
+        productCode: 'PR',
+        temperature: 'WARM',
+        status: 'IN-PROGRESS',
+        funnelStage: 'Lead Identified',
+        renewalDate: '',
+        sumInsured: 1000,
+        premium: 0,
+        ownerId: 'user-1',
+        lastActivity: '',
+      }], setLeads: vi.fn(), products: [], pipelines: [], pipelineStages: [],
+      stageHistory: [], setStageHistory: vi.fn(), invoices: [], setInvoices: vi.fn(),
+      user: { id: 'user-1', name: 'QA User', email: 'qa@example.com', role: 'sales' },
+      users: [], vendors: [], viewAsRole: null, quotationRequests: [], clientQuotations: [],
+      company: { requireNextActivityForStageChange: false },
+    });
+    const onLeadViewChange = vi.fn();
+
+    act(() => root.render(<DealWorkspace
+      deals={[]}
+      initialSelectedKey="lead:lead-1"
+      onLeadViewChange={onLeadViewChange}
+    />));
+
+    const viewButtons = [...container.querySelectorAll<HTMLButtonElement>('[data-view-option]')];
+    expect(viewButtons.map((button) => button.getAttribute('data-view-option'))).toEqual(['list', 'kanban']);
+    expect(container.textContent).not.toContain('Deals pipeline');
+    expect(container.textContent).not.toContain('Inspection');
+
+    act(() => viewButtons[0].click());
+    act(() => viewButtons[1].click());
+    expect(onLeadViewChange.mock.calls).toEqual([['list'], ['kanban']]);
   });
 
   it('shows an empty Inspection state without a record selector when nothing is selected', () => {
@@ -170,7 +213,7 @@ describe('Deal list row accessibility', () => {
       deals, setDeals: vi.fn(), leads: [], setLeads: vi.fn(), products: [], pipelines, pipelineStages: stages,
       stageHistory: [], setStageHistory: vi.fn(), invoices: [], setInvoices: vi.fn(),
       user: { id: 'user-1', name: 'QA User', email: 'qa@example.com', role: 'sales' },
-      users: [], vendors: [], viewAsRole: null, quotationRequests: [],
+      users: [], vendors: [], viewAsRole: null, quotationRequests: [], clientQuotations: [],
       company: { requireNextActivityForStageChange: false },
     });
 

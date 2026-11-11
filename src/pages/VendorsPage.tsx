@@ -30,7 +30,9 @@ function getVendorDeals(vendor: Vendor, deals: ReturnType<typeof useApp>['deals'
 }
 
 function getVendorRequests(vendor: Vendor, quotationRequests: ReturnType<typeof useApp>['quotationRequests']) {
-  return quotationRequests.filter((request) => request.vendorIds.includes(vendor.id));
+  return quotationRequests.flatMap((request) => request.lines
+    .filter((line) => line.vendorId === vendor.id)
+    .map((line) => ({ request, line })));
 }
 
 const EMPTY_VENDOR_FORM = {
@@ -407,7 +409,7 @@ export default function VendorsPage() {
                   {!contact.name && !contact.phone && !contact.email ? '—' : <span className="block truncate text-[10px] text-muted">{[contact.phone, contact.email].filter(Boolean).join(' · ')}</span>}
                 </span></td>
                 <td data-label="Linked Deals" className="px-1.5 py-2"><button type="button" className="text-left text-brand-300 hover:text-white" title={vendorDeals.map((deal) => deal.client).join(', ') || 'No linked deals'} aria-label={`${vendorDeals.length} linked deals for ${vendor.name}`} onClick={(event) => openRowDetails(event.currentTarget)}>{vendorDeals.length} linked {vendorDeals.length === 1 ? 'deal' : 'deals'}</button></td>
-                <td data-label="Quotation Requests" className="px-1.5 py-2"><button type="button" className="text-left text-brand-300 hover:text-white" title={vendorRequests.map((request) => request.ref || request.reference || 'Quotation request').join(', ') || 'No quotation requests'} aria-label={`${vendorRequests.length} quotation requests for ${vendor.name}`} onClick={(event) => openRowDetails(event.currentTarget)}>{vendorRequests.length} requests</button></td>
+                <td data-label="Quotation Requests" className="px-1.5 py-2"><button type="button" className="text-left text-brand-300 hover:text-white" title={vendorRequests.map(({ line }) => line.reference).join(', ') || 'No quotation requests'} aria-label={`${vendorRequests.length} quotation request lines for ${vendor.name}`} onClick={(event) => openRowDetails(event.currentTarget)}>{vendorRequests.length} lines</button></td>
                 <td data-label="Status" className="px-1.5 py-2"><Badge variant={statusVariant} compact>{vendor.status}</Badge></td>
                 <td data-label="Actions" className="px-1 py-2 text-right" onClick={(event) => event.stopPropagation()}>
                   <button type="button" aria-label={`Actions for ${vendor.name}`} aria-haspopup="menu" aria-expanded={actionMenu?.id === vendor.id && Boolean(actionMenu.anchor.closest('table[aria-label="Vendors"]'))} className="btn-ghost !p-1.5" onClick={(event) => setActionMenu(actionMenu?.id === vendor.id ? null : { id: vendor.id, anchor: event.currentTarget })}><MoreHorizontal size={15} /></button>
@@ -472,7 +474,7 @@ export default function VendorsPage() {
                   ['Phone', contact.phone || '—'],
                   ['Email', contact.email || '—'],
                   ['Linked Deals', <button type="button" className="text-left text-brand-300 hover:text-white" title={vendorDeals.map((deal) => deal.client).join(', ') || 'No linked deals'} onClick={(event) => { event.stopPropagation(); openDetails(event.currentTarget); }}>{vendorDeals.length} linked {vendorDeals.length === 1 ? 'deal' : 'deals'}</button>],
-                  ['Quotation Requests', <button type="button" className="text-left text-brand-300 hover:text-white" title={vendorRequests.map((request) => request.ref || request.reference || 'Quotation request').join(', ') || 'No quotation requests'} onClick={(event) => { event.stopPropagation(); openDetails(event.currentTarget); }}>{vendorRequests.length} {vendorRequests.length === 1 ? 'request' : 'requests'}</button>],
+                  ['Quotation Requests', <button type="button" className="text-left text-brand-300 hover:text-white" title={vendorRequests.map(({ line }) => line.reference).join(', ') || 'No quotation requests'} onClick={(event) => { event.stopPropagation(); openDetails(event.currentTarget); }}>{vendorRequests.length} {vendorRequests.length === 1 ? 'line' : 'lines'}</button>],
                   ['Status', <Badge variant={statusVariant} compact>{vendor.status}</Badge>],
                   ...(vendor.address ? [['Address', vendor.address] as const] : []),
                   ...(vendor.taxId ? [['Tax ID', vendor.taxId] as const] : []),
@@ -599,11 +601,11 @@ export default function VendorsPage() {
             <section className="glass rounded-xl p-4">
               <h3 className="mb-3 text-[10px] uppercase tracking-[0.12em] text-muted">Quotation Requests</h3>
               {getVendorRequests(selectedVendor, quotationRequests).length === 0 ? <p className="text-sm text-muted">No quotation requests yet.</p> : <div className="space-y-2">
-                {getVendorRequests(selectedVendor, quotationRequests).map((request) => {
+                {getVendorRequests(selectedVendor, quotationRequests).map(({ request, line }) => {
                   const deal = deals.find((item) => item.id === request.dealId);
-                  return <div key={request.id} className="rounded-lg border border-ink-700 bg-ink-900/40 p-3 text-xs">
-                    <div className="flex items-center justify-between gap-2"><p className="font-medium text-white">{request.ref || request.reference || 'Quotation request'}</p><Badge variant={request.status === 'Responses received' ? 'win' : 'muted'} compact>{request.status}</Badge></div>
-                    <p className="mt-1 text-muted">{deal ? `${deal.client} · ${deal.product}` : request.productCode}</p>
+                  return <div key={line.id} className="rounded-lg border border-ink-700 bg-ink-900/40 p-3 text-xs">
+                    <div className="flex items-center justify-between gap-2"><p className="font-medium text-white">{line.reference}</p><Badge variant={line.status === 'Quoted' ? 'win' : 'muted'} compact>{line.status}</Badge></div>
+                    <p className="mt-1 text-muted">Batch {request.reference} · {deal ? `${deal.client} · ${deal.product}` : 'Deal unavailable'}</p>
                     {deal && <p className="mt-0.5 text-muted">{deal.stage}</p>}
                   </div>;
                 })}

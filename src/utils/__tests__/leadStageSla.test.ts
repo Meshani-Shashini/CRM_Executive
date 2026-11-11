@@ -53,4 +53,15 @@ describe('lead stage SLAs', () => {
     expect(getLeadStageSla(record, 'Contact Made', { 'Contact Made': 8 }, now)?.overdue).toBe(false);
     expect(getLeadStageSla(record, 'Lost', undefined, now)).toBeUndefined();
   });
+
+  it('calculates stage SLA without a client link', () => {
+    const record = lead({ clientId: undefined });
+
+    expect(getLeadStageSla(record, 'Contact Made', undefined, now)).toMatchObject({
+      enteredAt: record.stageChangedAt,
+      elapsedDays: 6,
+      targetDays: 5,
+      overdue: true,
+    });
+  });
 });

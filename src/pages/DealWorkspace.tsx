@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertTriangle, Archive, ArrowLeft, ArrowRight, Building2, CalendarDays, Check,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Clock3, Columns3, Filter, FileText, List,
-  MoreHorizontal, Pencil, Plus, Search, ShieldCheck, Wallet, Trash2, TrendingUp, X,
+  MoreHorizontal, Pencil, Plus, Search, ShieldCheck, Trash2, TrendingUp, X,
 } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
@@ -28,6 +28,7 @@ import {
 } from '../utils/stageSla';
 import { linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
 import { linkDealToLead } from '../utils/dealFactory';
+import { isQuotationExpired } from '../utils/clientQuotations';
 import { DEAL_PIPELINE_STAGES, getPipelineLossReasons } from '../data/pipelineStageTemplates';
 import {
   appendLeadStageTransition, buildLeadTelemetryStages, LEAD_LIFECYCLE_STAGES,
@@ -40,6 +41,14 @@ import { buildLeadConversion } from '../utils/leadConversion';
 import { getNextActivity } from '../utils/nextActivity';
 import { dashboardHref, hashParams, promptQuotationRequestForDeal } from '../utils/navigation';
 import { nextLocalReference } from '../utils/references';
+import {
+  classifyDealOutcome,
+  isValidDealCloseDate,
+  summarizeDealValues,
+  validateDealBaseForProgression,
+  validateDealForMonthlySummary,
+  type DealSummaryFilter,
+} from '../utils/monthlyDealSummary';
 
 interface TimelineEntry {
   key: string;
@@ -328,9 +337,9 @@ export default function DealWorkspace({
   pipelineFilter,
   onPipelineFilterChange,
   dealsPageMode = false,
-  onLegacyImport,
   initialSelectedKey,
   onClose,
+  onLeadViewChange,
 }: {
   deals: Deal[];
   onEditDeal?: (deal: Deal) => void;
@@ -341,14 +350,14 @@ export default function DealWorkspace({
   pipelineFilter?: string;
   onPipelineFilterChange?: (pipelineId: string) => void;
   dealsPageMode?: boolean;
-  onLegacyImport?: () => void;
   initialSelectedKey?: string;
   onClose?: () => void;
+  onLeadViewChange?: (view: 'list' | 'kanban') => void;
 }) {
   const {
     activities, setActivities, clients, setClients, deals: allDeals, setDeals, leads, setLeads,
     products, pipelines, pipelineStages, stageHistory, setStageHistory, invoices, setInvoices, user, users, vendors, viewAsRole,
-    quotationRequests, company,
+    quotationRequests, clientQuotations, company,
   } = useApp();
   const [selectedKey, setSelectedKey] = useState(() => {
     const dealId = dealsPageMode ? hashParams().get('id') : null;
@@ -380,11 +389,12 @@ export default function DealWorkspace({
   const [archiveFilter, setArchiveFilter] = useState<'all' | 'won' | 'lost'>('all');
   const [forecastMode, setForecastMode] = useState<'month' | 'quarter'>('month');
   const [forecastOffset, setForecastOffset] = useState(0);
+  const [forecastOutcomeFilter, setForecastOutcomeFilter] = useState<DealSummaryFilter>('all');
   const [openDealActionsId, setOpenDealActionsId] = useState('');
   const [dealActionsAnchor, setDealActionsAnchor] = useState<HTMLButtonElement | null>(null);
   const [openStageMenuId, setOpenStageMenuId] = useState('');
   const [stageMenuAnchor, setStageMenuAnchor] = useState<HTMLButtonElement | null>(null);
-  const [activityModal, setActivityModal] = useState<'meeting' | 'note' | 'quote' | 'task' | 'schedule' | null>(null);
+  const [activityModal, setActivityModal] = useState<'meeting' | 'note' | 'task' | 'schedule' | null>(null);
   const [moveStage, setMoveStage] = useState<PipelineStage | null>(null);
   const [moveOutcome, setMoveOutcome] = useState<'won' | 'lost' | null>(null);
   const [lossReason, setLossReason] = useState('');
@@ -435,6 +445,8 @@ export default function DealWorkspace({
   const activeRole = viewAsRole ?? user.role;
   const dealHasInvoice = Boolean(selectedDeal && (selectedDeal.linkedInvoiceId
     || invoices.some((invoice) => invoice.linkedDealId === selectedDeal.id)));
+  const selectedDealHasAcceptedQuotation = Boolean(selectedDeal && clientQuotations.some((quotation) =>
+    quotation.dealId === selectedDeal.id && quotation.status === 'Accepted'));
   const selectedClient = selectedItem ? clientForItem(selectedItem, clients) : undefined;
   const relevantLeadId = selectedLead?.id;
   const relevantDealId = selectedDeal?.id ?? selectedLead?.dealId;
@@ -511,7 +523,11 @@ export default function DealWorkspace({
     ]
       .find((timestamp): timestamp is string => Boolean(timestamp && Number.isFinite(Date.parse(timestamp))))
     : undefined;
-  const quotes = selectedActivities.filter((activity) => activity.type === 'quote' && activity.quoteAmount !== undefined);
+  const quotationLines = linkedQuotationRequests.flatMap((request) => request.lines.map((line) => ({
+    request,
+    line,
+    vendor: vendors.find((item) => item.id === line.vendorId),
+  })));
   const selectedHistory = progressDeal
     ? stageHistory.filter((entry) => entry.dealId === progressDeal.id).sort((left, right) => Date.parse(left.enteredAt) - Date.parse(right.enteredAt))
     : [];
@@ -745,8 +761,6 @@ export default function DealWorkspace({
     return getNextActivity(activities, {
       dealId: deal.id,
       leadId: linkedLeadId ?? deal.leadId,
-      legacyDueDate: deal.nextActivityAt,
-      legacyTitle: deal.nextActivityTitle,
     });
   };
   const productForDeal = (deal: Deal) => products.find((product) => product.code === deal.productCode)
@@ -863,10 +877,7 @@ export default function DealWorkspace({
         - (Number.isFinite(rightDate) ? rightDate : Number.POSITIVE_INFINITY);
     });
   const forecastData = useMemo(() => forecastPeriods(forecastMode, forecastOffset, new Date(clockNow)), [forecastMode, forecastOffset, clockNow]);
-  const forecastDeals = listDeals.filter((deal) => {
-    const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
-    return !stage?.isClosedLost && deal.disposition !== 'lost' && !isLostPipelineStage(deal.stage);
-  });
+  const forecastDeals = listDeals;
   const baseListColumns = dealsPageMode ? dealListColumns : workspaceListColumns;
   const archiveColumns = [
     ...baseListColumns.slice(0, -1),
@@ -900,15 +911,6 @@ export default function DealWorkspace({
       origin: 'Deal' as const,
       actor: users.find((person) => person.id === selectedDeal.ownerId)?.name ?? formatStaffIdentifier(selectedDeal.ownerId),
     }] : []),
-    ...(selectedDeal?.nextActivityAt ? [{
-      key: `deal-follow-up-${selectedDeal.id}`,
-      title: selectedDeal.nextActivityTitle ?? 'Scheduled follow-up',
-      description: 'Scheduled task',
-      date: selectedDeal.nextActivityAt,
-      category: 'task' as const,
-      origin: 'Deal' as const,
-      actor: users.find((person) => person.id === selectedDeal.ownerId)?.name ?? formatStaffIdentifier(selectedDeal.ownerId),
-    }] : []),
     ...leadStageTimelineEntries,
     ...selectedHistory.map((entry) => {
       const fromStage = pipelineStages.find((stage) => stage.id === entry.fromStageId)?.name ?? 'Start';
@@ -930,34 +932,6 @@ export default function DealWorkspace({
         origin: 'Deal' as const,
         actor,
       };
-    }),
-    ...linkedQuotationRequests.flatMap((request) => {
-      const creator = users.find((person) => person.id === request.createdBy)?.name
-        ?? (request.createdBy === user.id ? user.name : formatStaffIdentifier(request.createdBy));
-      const created = [{
-        key: `quotation-created-${request.id}`,
-        title: `Quotation request created: ${request.ref}`,
-        description: `Status: ${request.status}`,
-        date: request.createdAt,
-        category: 'proposal' as const,
-        origin: 'Quotation' as const,
-        actor: creator,
-      }];
-      const updatedAt = Date.parse(request.updatedAt);
-      const createdAt = Date.parse(request.createdAt);
-      if (!Number.isFinite(updatedAt) || !Number.isFinite(createdAt) || updatedAt <= createdAt) return created;
-      const updater = request.updatedBy
-        ? users.find((person) => person.id === request.updatedBy)?.name ?? formatStaffIdentifier(request.updatedBy)
-        : creator;
-      return [...created, {
-        key: `quotation-status-${request.id}-${request.updatedAt}`,
-        title: `Quotation request status changed: ${request.ref}`,
-        description: `Current status: ${request.status}`,
-        date: request.updatedAt,
-        category: 'proposal' as const,
-        origin: 'Quotation' as const,
-        actor: updater,
-      }];
     }),
     ...selectedActivities
       .filter((activity) => !((selectedLead || linkedLead) && activity.id.startsWith('audit-') && activity.title === 'Lead created'))
@@ -1117,14 +1091,10 @@ export default function DealWorkspace({
     const type = activityModal === 'schedule'
       ? String(data.get('activityType')) as Activity['type']
       : activityModal === 'meeting' ? 'meeting'
-      : activityModal === 'quote' ? 'quote'
         : activityModal === 'task' ? 'task' : 'note';
     const scheduledDueDate = activityModal === 'schedule'
       ? String(data.get('dueDate') ?? '')
       : type === 'task' || type === 'meeting' ? String(data.get('activityDate') ?? '') : '';
-    const amount = type === 'quote' ? Number(data.get('quoteAmount')) : undefined;
-    const currency = type === 'quote' ? String(data.get('quoteCurrency')) as 'MVR' | 'USD' : undefined;
-    const insurer = String(data.get('insurer') ?? '').trim();
     const activityDate = String(data.get('activityDate') ?? '');
     const meetingMode = String(data.get('meetingMode') ?? '') as Activity['meetingMode'];
     const durationMinutes = type === 'meeting' ? Number(data.get('durationMinutes')) : undefined;
@@ -1134,7 +1104,6 @@ export default function DealWorkspace({
       clientId: selectedClient?.id ?? selectedItem.clientId ?? '',
       ...(selectedLead ? { leadId: selectedLead.id } : selectedDeal?.leadId ? { leadId: selectedDeal.leadId } : {}),
       ...(selectedDeal ? { dealId: selectedDeal.id } : {}),
-      ...(insurer ? { insurer } : {}),
       type,
       title: String(data.get('title') ?? '').trim(),
       description: String(data.get('description') ?? '').trim(),
@@ -1154,7 +1123,6 @@ export default function DealWorkspace({
         followUpAction: String(data.get('followUpAction') ?? '').trim(),
         durationMinutes,
       } : {}),
-      ...(amount !== undefined && currency ? { quoteAmount: amount, quoteCurrency: currency } : {}),
     };
     setActivities([activity, ...activities]);
     setActivityModal(null);
@@ -1307,6 +1275,11 @@ export default function DealWorkspace({
       setMoveError('The deal’s current stage is not configured in its pipeline.');
       return;
     }
+    const progressionErrors = validateDealBaseForProgression(selectedDeal, { leads, clients });
+    if (progressionErrors.length) {
+      setMoveError(progressionErrors.join(' '));
+      return;
+    }
     if (company.requireNextActivityForStageChange && activityForDeal(selectedDeal).state === 'none') {
       setMoveError('Schedule a next activity before moving this deal to another stage.');
       return;
@@ -1314,6 +1287,11 @@ export default function DealWorkspace({
     const now = new Date().toISOString();
     const lost = outcome === 'lost' || isLostStage(target);
     const bound = outcome === 'won' || isBoundStage(target);
+    if (bound && !clientQuotations.some((quotation) =>
+      quotation.dealId === selectedDeal.id && quotation.status === 'Accepted')) {
+      setMoveError('A client quotation must be accepted before this deal can be marked Won.');
+      return;
+    }
     if (lost && !reason?.trim()) {
       setMoveError('A loss reason is mandatory.');
       return;
@@ -1398,8 +1376,11 @@ export default function DealWorkspace({
     const renewalStage = pipelineStages.filter((stage) => stage.pipelineId === renewalPipeline?.id)
       .sort((left, right) => left.stageOrder - right.stageOrder)[0];
     const renewalDealId = `renewal-for-${selectedDeal.id}`;
-    const renewalValue = selectedClient?.premium ?? selectedDeal.value;
-    const linkedRenewal = bound && policyExpiry && renewalPipeline && renewalStage && !allDeals.some((deal) => deal.id === renewalDealId)
+    const renewalValue = selectedClient?.premium && selectedClient.premium > 0
+      ? selectedClient.premium
+      : selectedDeal.value;
+    const linkedLead = leads.find((lead) => lead.id === selectedDeal.leadId || lead.dealId === selectedDeal.id);
+    const linkedRenewal = bound && policyExpiry && renewalPipeline && renewalStage && linkedLead && !allDeals.some((deal) => deal.id === renewalDealId)
       ? linkDealToLead({
         id: renewalDealId,
         pipelineId: renewalPipeline.id,
@@ -1422,10 +1403,7 @@ export default function DealWorkspace({
         ownerId: selectedDeal.ownerId,
         closeDate: dateBefore(policyExpiry, 90),
         insurer: selectedDeal.insurer,
-        nextActivityAt: dateBefore(policyExpiry, 90),
-        nextActivityTitle: 'Start 90-day renewal retention review',
-        nextActivityCreatedAt: now,
-      }, undefined, { source: 'Renewal automation', client: selectedClient })
+      }, linkedLead)
       : undefined;
     setDeals((current) => {
       const updated = current.map((deal) => deal.id === selectedDeal.id
@@ -1563,6 +1541,11 @@ export default function DealWorkspace({
   };
 
   const requestDealOutcome = (outcome: 'won' | 'lost', deal: Deal) => {
+    if (outcome === 'won' && !clientQuotations.some((quotation) =>
+      quotation.dealId === deal.id && quotation.status === 'Accepted')) {
+      window.alert('Issue and accept a client quotation before marking this deal Won.');
+      return;
+    }
     const currentStage = pipelineStages.find((stage) => stage.pipelineId === deal.pipelineId && stage.name === deal.stage);
     if (!currentStage) {
       window.alert('Configure this deal’s current pipeline stage before closing the deal.');
@@ -1576,11 +1559,6 @@ export default function DealWorkspace({
       winProbabilityPct: outcome === 'won' ? 100 : 0,
     }, deal, outcome);
   };
-
-  const visibleQuotes = quotes.map((quote) => ({
-    ...quote,
-    insurer: quote.insurer ?? quote.description.match(/Insurer:\s*([^;]+)/i)?.[1] ?? 'Insurer',
-  }));
 
   const assignContactProfile = (profileId: string) => {
     const profile = detailContacts.find((contact) => contact.id === profileId);
@@ -1772,7 +1750,7 @@ export default function DealWorkspace({
 
   return (
     <div className="space-y-2">
-      {(dealsPageMode ? !selectedItem : workspaceView === 'list' || workspaceView === 'kanban' || !selectedItem) && <div className="space-y-2">
+      {!onLeadViewChange && (dealsPageMode ? !selectedItem : workspaceView === 'list' || workspaceView === 'kanban' || !selectedItem) && <div className="space-y-2">
         <PageToolbar name={dealsPageMode ? 'deals' : undefined} testId={dealsPageMode ? 'deals-toolbar' : undefined} className="justify-between">
           <div className="flex flex-wrap items-center gap-2">
           {dealsPageMode ? <ViewModeSwitcher<DealsView>
@@ -1805,7 +1783,6 @@ export default function DealWorkspace({
             ]}
             onChange={setWorkspaceView}
           />}
-          {dealsPageMode && onLegacyImport && <button type="button" className="btn-primary !px-3 !py-1.5 !text-xs" onClick={onLegacyImport}><Plus size={13} /> Legacy deal</button>}
           {!dealsPageMode && onClose && <button type="button" className="btn-ghost !py-1.5" onClick={onClose}>Back to leads</button>}
           </div>
           {dealsPageMode && <div data-testid="deals-toolbar-controls" className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
@@ -2248,7 +2225,22 @@ export default function DealWorkspace({
               <button type="button" className={`rounded-md px-3 py-1 text-xs ${forecastMode === 'month' ? 'bg-ink-700 text-white' : 'text-muted'}`} aria-pressed={forecastMode === 'month'} onClick={() => { setForecastMode('month'); setForecastOffset(0); }}>Month</button>
               <button type="button" className={`rounded-md px-3 py-1 text-xs ${forecastMode === 'quarter' ? 'bg-ink-700 text-white' : 'text-muted'}`} aria-pressed={forecastMode === 'quarter'} onClick={() => { setForecastMode('quarter'); setForecastOffset(0); }}>Quarter</button>
             </div>
+            <div className="inline-flex rounded-lg border border-ink-600 bg-ink-900/50 p-1" role="group" aria-label="Forecast outcome">
+              {(['won', 'open', 'all'] as const).map((outcome) => (
+                <button key={outcome} type="button"
+                  className={`rounded-md px-3 py-1 text-xs capitalize ${forecastOutcomeFilter === outcome ? 'bg-ink-700 text-white' : 'text-muted'}`}
+                  aria-pressed={forecastOutcomeFilter === outcome}
+                  onClick={() => setForecastOutcomeFilter(outcome)}>
+                  {outcome}
+                </button>
+              ))}
+            </div>
           </div>
+          {forecastDeals.some((deal) => !isValidDealCloseDate(deal.closeDate)) && (
+            <p role="status" className="rounded-lg border border-amber-400/25 bg-amber-400/5 px-3 py-2 text-xs text-amber-100">
+              Deals with a missing or invalid expected close date cannot be grouped into a forecast period.
+            </p>
+          )}
           <div className="forecast-periods grid min-w-0 gap-3">
             {forecastData.map((period) => {
               const periodDeals = forecastDeals.filter((deal) => {
@@ -2256,13 +2248,14 @@ export default function DealWorkspace({
                 const close = dateAtLocalMidnight(deal.closeDate);
                 return close >= period.start && close < period.end;
               });
-              const wonDeals = periodDeals.filter((deal) => {
+              const summaryContext = { leads, clients, stageHistory };
+              const summary = summarizeDealValues(periodDeals, pipelineStages, summaryContext);
+              const periodDisplayDeals = periodDeals.filter((deal) => {
                 const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
-                return isWonDeal(deal, stage);
+                const outcome = classifyDealOutcome(deal, stage, stageHistory);
+                return (forecastOutcomeFilter === 'all' || outcome === forecastOutcomeFilter)
+                  && validateDealForMonthlySummary(deal, outcome, summaryContext).length === 0;
               });
-              const openDeals = periodDeals.filter((deal) => !wonDeals.includes(deal));
-              const mvrTotal = (items: Deal[]) => items.reduce((total, deal) =>
-                total + toMvr(deal.value, deal.currency, deal.exchangeRate), 0);
               return <section key={period.key} data-period-start={period.startDate}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => {
@@ -2273,22 +2266,35 @@ export default function DealWorkspace({
                 className="min-w-0 rounded-xl border border-ink-700 bg-ink-900/55 p-2.5">
                 <header className="mb-2 min-w-0 border-b border-ink-700 pb-2">
                   <h3 className="truncate text-sm font-semibold text-white">{period.label}</h3>
-                  <p className="mt-1 truncate text-[10px] text-muted">Total {formatAmount(mvrTotal(periodDeals), 'MVR')}</p>
-                  <p className="mt-1 flex flex-wrap gap-x-3 text-[10px]">
-                    <span className="text-emerald-300">Won {formatAmount(mvrTotal(wonDeals), 'MVR')}</span>
-                    <span className="text-brand-300">Open {formatAmount(mvrTotal(openDeals), 'MVR')}</span>
-                  </p>
+                  {forecastOutcomeFilter !== 'open' && <p className="mt-1 text-[10px] text-emerald-300">Won · closed value {formatAmount(summary.wonValueMvr, 'MVR')}</p>}
+                  {forecastOutcomeFilter !== 'won' && <>
+                    <p className="mt-1 text-[10px] text-brand-300">Open · total value {formatAmount(summary.openValueMvr, 'MVR')}</p>
+                    <p className="mt-1 text-[10px] text-brand-300">Open · weighted {formatAmount(summary.openWeightedValueMvr, 'MVR')}</p>
+                    <ul className="mt-1 space-y-0.5 text-[10px] text-muted">
+                      {summary.open.map((stage) => <li key={stage.stageName} className="flex justify-between gap-2">
+                        <span className="truncate">{stage.stageName} · {stage.probabilityPct}%</span>
+                        <span className="shrink-0">{formatAmount(stage.weightedValueMvr, 'MVR')}</span>
+                      </li>)}
+                    </ul>
+                  </>}
+                  {forecastOutcomeFilter === 'all' && <p className="mt-1 text-[10px] text-hot">Lost · closed value {formatAmount(summary.lostValueMvr, 'MVR')}</p>}
+                  {summary.validationIssues.length > 0 && <p role="status" className="mt-1 text-[10px] text-amber-200">
+                    {summary.validationIssues.length} invalid deal{summary.validationIssues.length === 1 ? '' : 's'} excluded from totals.
+                  </p>}
                 </header>
                 <div className="max-h-[calc(100vh-360px)] min-h-40 space-y-2 overflow-y-auto">
-                  {periodDeals.map((deal) => {
-                    const probability = Math.max(0, Math.min(100, deal.probability));
+                  {periodDisplayDeals.map((deal) => {
+                    const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
+                    const probability = Math.max(0, Math.min(100, stage?.winProbabilityPct ?? deal.probability));
                     const ownerName = ownerNameForDeal(deal);
+                    const outcome = classifyDealOutcome(deal, stage);
                     return <article key={deal.id} draggable data-deal-id={deal.id} data-expected-close={deal.closeDate ?? ''}
                       onDragStart={(event) => { event.dataTransfer.setData('text/deal-id', deal.id); event.dataTransfer.effectAllowed = 'move'; }}
                       className="flex min-w-0 items-start gap-2 rounded-lg border border-ink-700 bg-ink-800/80 p-2.5">
                       <button type="button" onClick={() => openDealRecord(deal)} className="min-w-0 flex-1 text-left">
                         <span className="block truncate text-xs font-semibold text-white" title={dealTitle(deal)}>{dealTitle(deal)}</span>
                         <span className="mt-0.5 block truncate text-[10px] text-muted">{deal.client}</span>
+                        <span className={`mt-1 block text-[10px] uppercase ${outcome === 'won' ? 'text-emerald-300' : outcome === 'lost' ? 'text-hot' : 'text-brand-300'}`}>{outcome}</span>
                         <span className="mt-1 block truncate text-[10px] font-semibold text-brand-300">{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
                         <span className="mt-1 flex min-w-0 items-center gap-1.5">
                           <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#1E2024] text-[9px] font-semibold text-[#D0D3D9]" title={ownerName}>{avatarCode(ownerName)}</span>
@@ -2301,7 +2307,7 @@ export default function DealWorkspace({
                       <span className="mt-0.5 shrink-0"><DealActivityIndicator activity={activityForDeal(deal)} /></span>
                     </article>;
                   })}
-                  {!periodDeals.length && <p className="py-7 text-center text-[11px] text-muted/60">Drop deals here</p>}
+                  {!periodDisplayDeals.length && <p className="py-7 text-center text-[11px] text-muted/60">No valid deals for this view and period.</p>}
                 </div>
               </section>;
             })}
@@ -2358,6 +2364,17 @@ export default function DealWorkspace({
                   const next = (current + (event.key === 'ArrowRight' ? 1 : -1) + names.length) % names.length;
                   changeDealsView(names[next]);
                   requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-view-option="${names[next]}"]`)?.focus());
+                }}
+              /> : onLeadViewChange ? <ViewModeSwitcher<'list' | 'kanban' | 'inspection'>
+                label="Lead list navigation"
+                value="inspection"
+                role="group"
+                options={[
+                  { value: 'list', label: 'List view', Icon: List },
+                  { value: 'kanban', label: 'Kanban view', Icon: Columns3 },
+                ]}
+                onChange={(view) => {
+                  if (view !== 'inspection') onLeadViewChange(view);
                 }}
               /> : <ViewModeSwitcher<'kanban' | 'inspection'>
                 label="Deal workspace views"
@@ -2644,7 +2661,6 @@ export default function DealWorkspace({
               <div className="flex flex-wrap gap-2">
                 <button type="button" className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('schedule')}><CalendarDays size={13} /> Schedule next activity</button>
                 <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('meeting')}><CalendarDays size={13} /> Appointment</button>
-                <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('quote')}><FileText size={13} /> Proposal</button>
                 <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('note')}><Plus size={13} /> Note</button>
                 <button type="button" className="btn-ghost !px-2.5 !py-1.5 text-xs" onClick={() => setActivityModal('task')}><Check size={13} /> Task</button>
               </div>
@@ -2721,6 +2737,9 @@ export default function DealWorkspace({
             <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><ShieldCheck size={15} className="text-brand-300" /> Compliance alerts</h2>
               <div className="mt-3 space-y-2 text-xs">
+                {selectedDeal && clientQuotations.some((quotation) => quotation.dealId === selectedDeal.id
+                  && quotation.status === 'Issued' && isQuotationExpired(quotation))
+                  && <p className="flex items-start gap-2 rounded-lg border border-hot/30 bg-hot/10 p-2 text-hot"><AlertTriangle size={14} className="shrink-0" /> A client quotation has expired without acceptance.</p>}
                 {selectedItem && !hasCompleteCommunicationChannels(selectedItem)
                   ? <p className="flex gap-2 text-warm"><AlertTriangle size={14} className="shrink-0" /> Phone, WhatsApp and Telegram must be complete before tender or quotation.</p>
                   : <p className="flex gap-2 text-win"><Check size={14} /> Communication details are complete.</p>}
@@ -2731,18 +2750,26 @@ export default function DealWorkspace({
               </div>
             </div>
             <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
-              <div className="mb-3 flex items-center justify-between gap-2"><h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Wallet size={15} className="text-brand-300" /> Quotes comparison</h2>
-                <button type="button" className="btn-ghost !px-2 !py-1" onClick={() => setActivityModal('quote')}><Plus size={12} /> Quote</button>
+              <div className="mb-3 flex items-center justify-between gap-2"><h2 className="text-sm font-semibold text-white">Quotation comparison</h2>
+                {selectedDeal && (activeRole === 'admin' || activeRole === 'sales') && <a className="btn-ghost !px-2 !py-1 text-xs" href={dashboardHref('qslips', { dealId: selectedDeal.id })}><Plus size={12} /> Create QRS</a>}
               </div>
-              {visibleQuotes.length ? <div className="max-w-full overflow-x-auto overscroll-x-contain"><table className="w-full min-w-52 text-left text-xs">
-                <thead className="text-[10px] text-muted"><tr><th className="pb-2 font-medium">Insurer</th><th className="pb-2 text-right font-medium">Premium</th><th className="pb-2 text-right font-medium">Date</th></tr></thead>
-                <tbody>{visibleQuotes.map((quote) => <tr key={quote.id} className="border-t border-ink-700/60"><td className="py-2 text-white">{quote.insurer}</td><td className="py-2 text-right text-brand-300">{formatAmount(quote.quoteAmount ?? 0, quote.quoteCurrency ?? 'MVR')}</td><td className="py-2 text-right text-muted">{formatDate(quote.date)}</td></tr>)}</tbody>
+              {quotationLines.length ? <div className="max-w-full overflow-x-auto overscroll-x-contain"><table className="w-full min-w-72 text-left text-xs">
+                <thead className="text-[10px] text-muted"><tr><th className="pb-2 font-medium">Insurer / line</th><th className="pb-2 text-right font-medium">Premium</th><th className="pb-2 text-right font-medium">Rate</th><th className="pb-2 text-right font-medium">Valid until</th><th className="pb-2 text-right font-medium">Client QTY</th></tr></thead>
+                <tbody>{quotationLines.map(({ request, line, vendor }) => <tr key={line.id} className="border-t border-ink-700/60">
+                  <td className="py-2 text-white">{vendor?.name ?? 'Unknown insurer'}<div className="font-mono text-[10px] text-muted">{line.reference} · {line.status}</div></td>
+                  <td className="py-2 text-right text-brand-300">{line.quotedPremium === undefined ? '—' : formatAmount(line.quotedPremium, line.quotedCurrency ?? request.currency)}</td>
+                  <td className="py-2 text-right text-muted">{line.quotedRatePct === undefined ? '—' : `${line.quotedRatePct}%`}</td>
+                  <td className="py-2 text-right text-muted">{line.validUntil ? formatDate(line.validUntil) : '—'}</td>
+                  <td className="py-2 text-right">{line.status === 'Quoted' && (activeRole === 'admin' || activeRole === 'sales')
+                    ? <a className="text-brand-300 hover:text-white" href={dashboardHref('quotations', { dealId: request.dealId, requestId: request.id, lineId: line.id })}>Prepare QTY</a>
+                    : clientQuotations.find((quotation) => quotation.sourceLineId === line.id)?.reference ?? '—'}</td>
+                </tr>)}</tbody>
               </table></div> : <p className="text-xs text-muted">No insurer quotes recorded. Add quotes to compare premium and terms.</p>}
             </div>
             <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
               <h2 className="text-sm font-semibold text-white">Binding actions</h2>
               <div className="mt-3 grid grid-cols-2 gap-2">
-                <button type="button" className="btn-ghost !px-2 !py-2 text-xs" disabled={!selectedDeal} onClick={() => setActivityModal('quote')}><FileText size={13} /> Add quote</button>
+                {selectedDeal && (activeRole === 'admin' || activeRole === 'sales') && <a className="btn-ghost !px-2 !py-2 text-center text-xs" href={dashboardHref('qslips', { dealId: selectedDeal.id })}>Manage QRS</a>}
                 <button type="button" className="btn-primary !px-2 !py-2 text-xs" disabled={!selectedDeal || !stages.find((stage) => isBoundStage(stage))} onClick={() => {
                   const finalStage = stages.find((stage) => isBoundStage(stage));
                   if (finalStage) requestStageChange(finalStage);
@@ -2803,13 +2830,12 @@ export default function DealWorkspace({
       </Modal>
       <Modal open={Boolean(activityModal)} onClose={() => setActivityModal(null)}
         title={activityModal === 'meeting' ? 'Schedule / Log Meeting'
-          : activityModal === 'quote' ? 'Add insurer quote'
-            : activityModal === 'schedule' ? 'Schedule next activity'
+          : activityModal === 'schedule' ? 'Schedule next activity'
               : activityModal === 'task' ? 'Schedule task' : 'Add note'}
         subtitle={selectedItem?.client}
         footer={<><button type="button" className="btn-ghost" onClick={() => setActivityModal(null)}>Cancel</button><button type="submit" form="workspace-activity-form" className="btn-primary">{activityModal === 'meeting' ? 'Save Meeting' : activityModal === 'schedule' ? 'Schedule activity' : activityModal === 'task' ? 'Save task' : 'Save activity'}</button></>}>
         <form id="workspace-activity-form" onSubmit={addActivity} className="space-y-3">
-          <Field label={activityModal === 'task' || activityModal === 'schedule' ? 'Activity title' : 'Title'}><input className="input" name="title" required maxLength={120} placeholder={activityModal === 'meeting' ? 'Client placement review' : activityModal === 'quote' ? 'Commercial terms' : activityModal === 'task' || activityModal === 'schedule' ? 'Follow up with client' : 'Activity note'} /></Field>
+          <Field label={activityModal === 'task' || activityModal === 'schedule' ? 'Activity title' : 'Title'}><input className="input" name="title" required maxLength={120} placeholder={activityModal === 'meeting' ? 'Client placement review' : activityModal === 'task' || activityModal === 'schedule' ? 'Follow up with client' : 'Activity note'} /></Field>
           {activityModal === 'meeting' && <>
             <Field label="Date & Time *"><input className="input" name="activityDate" type="datetime-local" required defaultValue={localDateTimeInput()} /></Field>
             <Field label="Mode *"><select className="input" name="meetingMode" required defaultValue=""><option value="" disabled>Select meeting mode</option><option>Call</option><option>Online</option><option>Site Visit</option><option>Physical Meeting</option></select></Field>
@@ -2824,22 +2850,19 @@ export default function DealWorkspace({
             <Field label="Due date & time *"><input className="input" name="activityDate" type="datetime-local" required defaultValue={localDateTimeInput()} /></Field>
             <Field label="Task details"><textarea className="input min-h-24" name="description" required placeholder="Describe the action, owner, or expected outcome." /></Field>
           </>}
-          {activityModal === 'quote' && <>
-            <Field label="Insurer"><input className="input" name="insurer" required placeholder="Insurer name" /></Field>
-            <div className="grid grid-cols-2 gap-3"><Field label="Premium"><input className="input" name="quoteAmount" type="number" min="0" step="0.01" required /></Field><Field label="Currency"><select className="input" name="quoteCurrency" defaultValue="MVR"><option>MVR</option><option>USD</option></select></Field></div>
-          </>}
           {activityModal === 'schedule' && <>
             <Field label="Activity type"><select className="input" name="activityType" defaultValue="task"><option value="task">Task</option><option value="meeting">Meeting</option><option value="call">Call</option><option value="email">Email</option></select></Field>
             <Field label="Due date *"><input className="input" name="dueDate" type="datetime-local" required defaultValue={localDateTimeInput()} /></Field>
             <Field label="Assignee"><select className="input" name="assigneeId" defaultValue={selectedItem?.ownerId ?? ''}><option value="">Unassigned</option>{users.filter((person) => person.role === 'admin' || person.role === 'sales').map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></Field>
           </>}
-          {activityModal !== 'meeting' && activityModal !== 'task' && activityModal !== 'schedule' && <Field label={activityModal === 'quote' ? 'Terms / coverage notes' : 'Note'}><textarea className="input min-h-24" name="description" required placeholder="Record the terms, coverage, or next steps." /></Field>}
+          {activityModal !== 'meeting' && activityModal !== 'task' && activityModal !== 'schedule' && <Field label="Note"><textarea className="input min-h-24" name="description" required placeholder="Record the note or next steps." /></Field>}
           {activityModal === 'schedule' && <Field label="Note (optional)"><textarea className="input min-h-20" name="description" placeholder="Add context or expected outcome." /></Field>}
         </form>
       </Modal>
 
       <Modal open={Boolean(moveStage)} onClose={() => { setMoveStage(null); setMoveOutcome(null); setMoveError(''); setWinReason(''); }} title={moveOutcome ? `Mark deal ${moveOutcome}` : 'Update deal stage'} subtitle={`${selectedDeal?.client} · ${moveOutcome ? 'Outcome' : moveStage?.name}`} size="lg"
-        footer={<><button type="button" className="btn-ghost" onClick={() => { setMoveStage(null); setMoveOutcome(null); setMoveError(''); setWinReason(''); }}>Cancel</button><button type="button" className="btn-primary" disabled={Boolean(company.requireNextActivityForStageChange && selectedDeal && activityForDeal(selectedDeal).state === 'none')} onClick={() => moveStage && applyStageChange(moveStage, lossReason, moveOutcome ?? undefined)}>{moveOutcome ? `Mark ${moveOutcome}` : 'Save stage'}</button></>}>
+        footer={<><button type="button" className="btn-ghost" onClick={() => { setMoveStage(null); setMoveOutcome(null); setMoveError(''); setWinReason(''); }}>Cancel</button><button type="button" className="btn-primary" disabled={Boolean(company.requireNextActivityForStageChange && selectedDeal && activityForDeal(selectedDeal).state === 'none') || Boolean(moveStage && isBoundStage(moveStage) && !selectedDealHasAcceptedQuotation)} onClick={() => moveStage && applyStageChange(moveStage, lossReason, moveOutcome ?? undefined)}>{moveOutcome ? `Mark ${moveOutcome}` : 'Save stage'}</button></>}
+      >
         <div className="space-y-3">
           <Field label={moveOutcome ? 'Current stage' : 'New stage'}><input className="input" value={moveOutcome ? selectedDeal?.stage ?? '' : moveStage?.name ?? ''} readOnly aria-readonly="true" /></Field>
           {selectedDeal && activityForDeal(selectedDeal).state === 'none' && <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warm/30 bg-warm/5 p-3 text-xs text-warm">
@@ -2866,7 +2889,8 @@ export default function DealWorkspace({
           </>}
           {moveStage && isLostStage(moveStage) && <Field label="Loss reason (required)"><select className="input" value={lossReason} onChange={(event) => setLossReason(event.target.value)}><option value="">Select a reason</option>{getPipelineLossReasons(selectedPipeline?.code).map((reason) => <option key={reason}>{reason}</option>)}</select></Field>}
           {moveStage && isBoundStage(moveStage) && <>
-            <p className="rounded-lg border border-win/30 bg-win/5 p-3 text-sm text-muted">Confirm that the policy is bound. A pending premium invoice will be created automatically.</p>
+            <p className="rounded-lg border border-win/30 bg-win/5 p-3 text-sm text-muted">Confirm that the policy is bound. An accepted client quotation is required. A pending premium invoice will be created automatically.</p>
+            {!selectedDealHasAcceptedQuotation && <p role="status" className="text-xs text-warm">Accept a client quotation before marking this deal Won.</p>}
             <Field label="Win reason (required)"><textarea className="input min-h-20" value={winReason} onChange={(event) => { setWinReason(event.target.value); setMoveError(''); }} placeholder="Record why the client selected this placement." maxLength={2000} /></Field>
           </>}
           <Field label="Remarks / Notes (optional)"><textarea className="input min-h-20" value={stageChangeRemarks} onChange={(event) => setStageChangeRemarks(event.target.value)} placeholder="Add stage-change notes for the activity timeline." maxLength={2000} /></Field>

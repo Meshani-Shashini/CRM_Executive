@@ -39,6 +39,7 @@ const PRODUCT_MATRIX_METADATA: Record<string, ProductMatrixMetadata> = {
   OP: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Annual turnover, shipment schedule, cargo profile, routes and loss history' },
   RJ: { salesCycleVelocity: '7–14 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Cargo description, rejection terms, survey requirements and transit documents' },
   SH: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Vessel particulars, valuation, class certificate, survey and loss history' },
+  MV: { salesCycleVelocity: '7–14 Days', riskLevel: 'Medium', keyUnderwritingIntakeArtifacts: 'Vehicle schedule, registration documents, usage details and claims history' },
   ZZ: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Marine risk questionnaire, cargo/vessel schedule, route and loss history' },
   AL: { salesCycleVelocity: '14–30 Days', riskLevel: 'High', keyUnderwritingIntakeArtifacts: 'Airport operations profile, passenger/flight data, contracts and claims history' },
   AP: { salesCycleVelocity: '3–7 Days', riskLevel: 'Low', keyUnderwritingIntakeArtifacts: 'Proposal form, age and occupation schedule, prior claims history' },
@@ -107,6 +108,7 @@ export const PRODUCT_CODES: ProductCode[] = [
   { code: 'HE', name: 'Surgical and Hospital Expenses', category: 'Miscellaneous', classType: 'EMPLOYEE_BENEFITS', defaultPipelineCode: 'EMPLOYEE_BENEFITS', standardBrokerageRatePct: 10, isStatutoryMandatory: false },
   { code: 'HR', name: 'Hull All Risk', category: 'Miscellaneous', classType: 'MARINE_AVIATION', defaultPipelineCode: 'MARINE_CARGO', standardBrokerageRatePct: 12.5, isStatutoryMandatory: false },
   { code: 'MR', name: 'All Risks', category: 'Miscellaneous', classType: 'PROPERTY', defaultPipelineCode: 'SME_VELOCITY', standardBrokerageRatePct: 15, isStatutoryMandatory: false },
+  { code: 'MV', name: 'Motor Fleet', category: 'Motor', classType: 'MOTOR', defaultPipelineCode: 'COMMERCIAL', standardBrokerageRatePct: 12.5, isStatutoryMandatory: false },
   { code: 'MT', name: 'Money in Transit', category: 'Miscellaneous', classType: 'PROPERTY', defaultPipelineCode: 'COMMERCIAL_ENG', standardBrokerageRatePct: 12.5, isStatutoryMandatory: false },
   { code: 'PL', name: 'Product Liability', category: 'Miscellaneous', classType: 'CASUALTY_LIABILITY', defaultPipelineCode: 'CASUALTY_LIABILITY', standardBrokerageRatePct: 17.5, isStatutoryMandatory: false },
   { code: 'PN', name: 'Professional Indemnity Insurance', category: 'Miscellaneous', classType: 'CASUALTY_LIABILITY', defaultPipelineCode: 'CASUALTY_LIABILITY', standardBrokerageRatePct: 20, isStatutoryMandatory: false },
@@ -139,6 +141,27 @@ export const COMPANY = {
   phone: '',
   registration: '',
   requireNextActivityForStageChange: false,
+  quotationValidityDays: 5,
+  requireDifferentQuotationAuthorizer: true,
+  quotationClauses: {
+    default: {
+      perils: ['Fire, lightning, explosion, and aircraft damage', 'Storm, tempest, and flood', 'Earthquake and volcanic eruption', 'Impact by vehicles or animals'],
+      deductibles: [{ label: 'Standard deductible', text: 'As specified in the policy schedule.' }],
+      warranties: [{ title: 'Risk safeguards', text: 'The insured will maintain all declared safeguards and notify the insurer of material changes.' }],
+      exclusions: ['War and terrorism, unless specifically endorsed'],
+      disclaimer: 'This quotation is indicative, subject to underwriting review and the insurer’s policy wording.',
+      communicableDiseaseExclusion: 'Communicable disease exclusion applies as specified in the insurer’s policy wording.',
+      sanctionClause: 'No insurer is deemed to provide cover or pay a claim where doing so would expose it to applicable sanctions.',
+    },
+  } as Record<string, {
+    perils: string[];
+    deductibles: Array<{ label: string; text: string }>;
+    warranties: Array<{ title: string; text: string }>;
+    exclusions: string[];
+    disclaimer: string;
+    communicableDiseaseExclusion: string;
+    sanctionClause: string;
+  }>,
   leadStageSlaDays: {
     'Lead Identified': 3,
     'Contact Made': 5,

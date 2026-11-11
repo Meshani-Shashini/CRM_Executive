@@ -6,6 +6,7 @@ import { useApp } from '../store/AppContext';
 import Badge from '../components/ui/Badge';
 import PageToolbar from '../components/ui/PageToolbar';
 import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
+import MonthlyDealSummaryPanel from '../components/deal/MonthlyDealSummaryPanel';
 import { formatAmount, toMvr } from '../utils/currency';
 import { dashboardHref } from '../utils/navigation';
 import { formatDate } from '../utils/date';
@@ -19,7 +20,7 @@ type DashboardTab = typeof tabs[number];
 
 export default function DashboardPage() {
   const [tab, setTab] = useState<DashboardTab>('Company');
-  const { deals, leads, clients, activities, invoices, payments, pipelineStages, viewAsRole } = useApp();
+  const { deals, leads, clients, activities, invoices, payments, pipelineStages, stageHistory, viewAsRole } = useApp();
   useEffect(() => {
     setTab(viewAsRole === 'sales' ? 'Leads' : 'Company');
   }, [viewAsRole]);
@@ -81,6 +82,15 @@ export default function DashboardPage() {
               <MetricLink href={dashboardHref('payments')} label="Payments received" value={`MVR ${payments.reduce((sum, payment) => sum + payment.amount, 0).toLocaleString()}`} />
             </div>
           </div>
+
+          <MonthlyDealSummaryPanel
+            deals={deals}
+            pipelineStages={pipelineStages}
+            leads={leads}
+            clients={clients}
+            stageHistory={stageHistory}
+            title="Monthly company deal summary"
+          />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="glass rounded-2xl p-5">
@@ -224,7 +234,7 @@ function LeadsDashboard() {
 }
 
 function DealsDashboard() {
-  const { deals, pipelineStages, stageHistory } = useApp();
+  const { deals, leads, clients, pipelineStages, stageHistory } = useApp();
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
@@ -297,6 +307,14 @@ function DealsDashboard() {
           </div>}
         </div>
       </div>
+      <MonthlyDealSummaryPanel
+        deals={deals}
+        pipelineStages={pipelineStages}
+        leads={leads}
+        clients={clients}
+        stageHistory={stageHistory}
+        title="Monthly deals forecast"
+      />
     </>
   );
 }

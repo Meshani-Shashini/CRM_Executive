@@ -25,6 +25,8 @@ Key persisted collections include:
 - clients
 - activities
 - deals
+- quotation-requests
+- client-quotations
 - invoices
 - payments
 - pipelines
@@ -35,6 +37,18 @@ Key persisted collections include:
 - email templates
 - customer lookup values
 - products
+
+### Recent UX and operational refinements
+The system has recently been refined to present a more consistent broker-portal experience across modules. The most visible changes include:
+- compact, responsive page toolbars and tighter spacing across the main operational views, especially Leads, Deals, Calendar, Renewals, Pipelines, Funnels, and QSlips.
+- a calendar layout optimized to fit the viewport without clipping, with dense month/week/agenda navigation for sales teams working in narrow screens.
+- a simplified pipelines board that uses single-row column layouts to improve scanning and reduce vertical crowding.
+- unified page-header styling so Deals and Leads share the same layout patterns, while duplicate headings and redundant chrome were removed.
+- standardised notifications and message treatment, including app-wide alerts for persistence issues and role-aware navigation feedback.
+- improved dashboard/forecast value presentation with consistent currency formatting and cleaner KPI cards.
+- a role-preview control in the sidebar so admins can review the experience as sales, finance, or client roles without leaving the current workspace.
+
+These refinements are aimed at reducing visual noise, improving operational scan speed, and making the system behave as a single coherent CRM rather than a collection of standalone pages.
 
 ---
 
@@ -86,6 +100,7 @@ The code supports a development bypass (`AUTH_BYPASS`) when `VITE_AUTH_BYPASS=tr
 - `activities`
 - `vendors`
 - `quotationRequests`
+- `clientQuotations`
 - `deals`
 - `invoices`
 - `payments`
@@ -160,16 +175,19 @@ Activities are timeline entries created for operational events. Allowed types in
 - `email`
 - `upload`
 - `note`
-- `quote`
 - `task`
+- `quote` (used only for deal-linked insurer quote comparison records, not as a standalone client quote record)
 
 Each activity includes a date, associated client/lead/deal, actor info, and often a title/description. Activities are used for both user actions and audit records.
 
 ### Deal
-Deals represent already-qualified sales opportunities or bound placements. Every deal has a required lead link; conversion, legacy imports, and renewal automation share the deal/lead linking helper. An idempotent migration and the AppContext load normalizer backfill legacy deals without a linked lead.
+Deals represent already-qualified sales opportunities or bound placements. Every deal has a required lead link, and the runtime enforces that rule rather than backfilling orphan deals. Legacy import branches, legacy deal follow-up fields, and other orphan creation paths were removed so the supported flow is Lead -> Converted Deal -> Stage progression -> Deal-linked Quotation Request -> Client Quotation -> Won -> Invoice -> Payment.
 
 ### QuotationRequest
-Quotation requests are persisted as `quotation-requests` tenant records and link an open deal, its lead and client, and one or more active insurers or reinsurers. Each request records its required-by date, insured amount and currency, status, creator, and timestamps. Creation and status changes are added to the linked activity timeline.
+Quotation requests are persisted as `quotation-requests` tenant records and link an open deal, its lead and client, and one or more active insurers or reinsurers. They are created only from an eligible deal-driven workflow and record the required-by date, insured amount and currency, creator, and timestamps. Each request is a batch with a sequential yearly `QRS-YYYY-NNNN` reference and one ordered line per insurer/reinsurer; line references append a two-digit suffix and remain retired when cancelled. Line status drives the derived batch status, and each line carries its own response, premium, validity, terms, and status history. Creation and line status changes create activities linked to the source lead and deal.
+
+### ClientQuotation
+Client quotations are persisted as `client-quotations` tenant records. A quotation can only be created from a Quoted line in a deal-linked request; it carries a sequential yearly `QTY-YYYY-NNNN` reference and version number, source line, client addressee, risk/coverage terms, premium, validity, and acceptance details. Product-specific clause libraries, default validity, and the different-authorizer policy are configurable in Settings. Drafts are validated before issue; expiry is derived from `validUntil`, and revisions supersede the earlier version while retaining the same reference. Client acceptance advances the linked deal to its next open stage and records an activity. Won is gated on an accepted client quotation; invoice/payment processing follows the Won deal workflow. The document can be printed or saved as PDF; sending it by email is not implemented.
 
 ### ProductCode
 The product catalog includes fields like:
@@ -307,7 +325,7 @@ The app records both normal user activity and structural change audits.
 
 ### Activity timeline
 `activities` store timeline events such as meetings, calls, notes, emails, quotes, tasks, and uploads.
-The Lead and Deal inspection workspace combines events by linked `leadId` and `dealId` without copying them or falling back to client-wide activity. It also includes both records' stage histories and linked quotation-request creation/status events. Timeline entries are newest-first, identify their Lead, Deal, or Quotation origin and actor, can be filtered by event type, and avoid duplicating stage changes already represented in stage history.
+The Lead and Deal inspection workspace combines events by linked `leadId` and `dealId` without copying them or falling back to client-wide activity. It also includes both records' stage histories, QRS creation/line status events, and QTY creation, issue, revision, and client-response events. Timeline entries are newest-first, identify their Lead, Deal, or Quotation origin and actor, can be filtered by event type, and avoid duplicating stage changes already represented in stage history.
 
 Users can schedule an optional next activity with a type, due date, assignee, and note, then mark scheduled activities done. Optional activity due dates, completion flags, and assignee IDs are stored on the activity record, preserving compatibility with existing records. Lead and deal list, funnel, forecast, and pipeline indicators show overdue, due-today/no-activity, or future states. A stage move without an upcoming activity warns and can be continued unless an administrator enables the hard requirement in Settings.
 
@@ -351,6 +369,7 @@ Every active deal pipeline uses the same fixed nine-stage sequence: Identified, 
 This makes the CRM useful both as a lead tracker and as a commercial pipeline performance tool.
 
 The Funnels page also reports average and median days spent in each stage and between consecutive stages for the selected deal pipeline and the lead funnel. It counts distinct records currently beyond their configured stage target as stagnating.
+Monthly deal summaries now separate closed-won value, open work in progress grouped by current pipeline stage with stage-probability-weighted values, and lost value. Dashboard Company/Deals, Funnels, and month/quarter Deals Forecast use the shared aggregation and eligibility rules. Records missing a valid expected close date, positive value, linked lead/client, or a required terminal outcome reason are excluded from totals and surfaced with validation details; stage progression enforces the open-deal requirements before a move is saved.
 
 ---
 
@@ -362,7 +381,7 @@ The broader system includes finance-related modules:
 - quotation request slips
 - MIRA-style reporting surfaces
 
-The implemented invoice and payment pages create and track financial records, update invoice payment status, show financial summaries, and export invoice or receipt data. Quotation request slips track requests to insurers; they are not a system for sending email or producing insurer quotation documents. The MIRA page currently provides a report layout and print/CSV controls, but its report rows are empty in the current implementation.
+The implemented invoice and payment pages create and track financial records, update invoice payment status, show financial summaries, and export invoice or receipt data. A Quotation Request Slip is a deal-linked batch with one independently tracked line per insurer or reinsurer. Batch references use `QRS-YYYY-NNNN`; ordered line references append a two-digit suffix. Line status drives the derived batch status, and cancelled lines remain in place so their references are retired. The deal workspace compares insurer lines by premium, rate, and validity; QRS activity is linked to both the source lead and deal. A load-time normalizer converts legacy single-reference requests into lines. Client quotations use a distinct `QTY-YYYY-NNNN` reference and are created only from a Quoted QRS line; the QTY module supports drafting, product clause templates, issue, revision, client response, expiry, and print/save-PDF. QRS records are not a system for sending insurer emails or producing insurer quotation documents, and QTY does not send emails. The MIRA page currently provides a report layout and print/CSV controls, but its report rows are empty in the current implementation.
 
 The app also includes utility functions for:
 - currency parsing and formatting
@@ -393,9 +412,10 @@ A normal operational flow in this system looks like this:
 5. The lead appears in the pipeline or board with a lifecycle stage, owner, product, and value.
 6. Sales moves the lead through stages and adds notes/activity.
 7. Once qualified, the lead is associated with a deal workspace.
-8. The deal progresses through pricing, quote, and policy binding steps.
-9. Finance records invoices and payments based on the bound policy.
-10. Runtime audit history and activity notes track all major changes.
+8. Sales moves the deal to Quotation / Underwriting and creates a QRS batch from the deal, with a separate line for each selected insurer/reinsurer.
+9. A Quoted QRS line can seed a client quotation. Sales issues the validated QTY, and the client accepts or rejects it before the deal can be marked Won.
+10. The Won deal creates the invoice; Finance records payments against that invoice.
+11. Runtime audit history and activity notes track all major changes.
 
 ---
 
@@ -415,7 +435,7 @@ The current implementation assumes:
 
 ## 18. Summary
 
-This is an insurance brokerage CRM with implemented lead, deal, client, vendor, pipeline, quotation-request, invoice, and payment workflows. The application connects authentication, role-aware navigation, business records, and audit/activity tracking in a React single-page application backed by Supabase. Some navigation items are placeholders, and the Calendar and MIRA screens are not yet connected to populated event/report data; the module inventory below records these limitations.
+This is an insurance brokerage CRM with implemented lead, deal, client, vendor, pipeline, insurer quotation-request, client quotation, invoice, and payment workflows. The application connects authentication, role-aware navigation, business records, and audit/activity tracking in a React single-page application backed by Supabase. The shell has recently been tightened into a more uniform, compact, responsive layout with improved navigation, dashboard formatting, and pipeline/calendar scanning, while a limited number of placeholder routes remain. The Calendar and MIRA screens are still not yet connected to fully populated live event/report data; the module inventory below records these current limitations.
 
 ---
 
@@ -429,14 +449,14 @@ Placeholder routes remain valid, but appear only in the admin-only collapsed Com
 | `#/dashboard` | Admin, Sales, Finance | Company KPIs and financial totals, plus Leads, Deals, and Staff dashboard views. Metric links open the corresponding filtered module. |
 | `#/plans` | Admin, Sales | Placeholder for personal sales plans and targets. |
 | `#/leads` | Admin, Sales | Lead list, funnel/board, and forecast; search and filters; create/edit; lead inspection; lifecycle/stage changes; conversion to a linked deal; and protected deletion. |
-| `#/deals` | Admin, Sales | Pipeline board, list, forecast, archive, deal inspection, search/filter/sort, stage changes, linked activity, and record management. Closed deals are included in pipeline and list views by default; the Archive view focuses on terminal deals. |
-| `#/clients` | Admin, Sales, Finance, Client | Client search and profile/details; contact associations; activity logging and quote records for staff; admin client management; and client self-profile editing. |
+| `#/deals` | Admin, Sales | Pipeline board, list, forecast, archive, deal inspection, search/filter/sort, stage changes, linked activity, QRS line comparison, QTY preparation, and record management. Deal Won is gated on an accepted client quotation; expired unaccepted quotations appear in deal health. Closed deals are included in pipeline and list views by default; the Archive view focuses on terminal deals. |
+| `#/clients` | Admin, Sales, Finance, Client | Client search and profile/details; contact associations; activity logging; admin client management; and client self-profile editing. |
 | `#/vendors` | Admin, Sales, Finance | Vendor search and filtering by type, country, and status; vendor creation/editing; admin deletion; vendor contact details; and linked-deal/request context. Finance is read-only. |
-| `#/calendar` | Admin, Sales | Read-only calendar derived from scheduled activity due dates, deal/lead close dates, policy and renewal dates, and lead/deal SLA deadlines. Supports month, week, and agenda views, mine/all, type, and pipeline filters, upcoming events, and linked-record navigation; phones use agenda view. |
+| `#/calendar` | Admin, Sales | Read-only calendar derived from scheduled activity due dates, deal/lead close dates, policy and renewal dates, lead/deal SLA deadlines, and issued client quotation validity dates. Supports month, week, and agenda views, mine/all, type, and pipeline filters, upcoming events, and linked-record navigation; phones use agenda view. |
 | `#/reports` | Admin, Finance | Placeholder for custom brokerage reports. |
 | `#/documents` | Admin, Sales, Finance, Client | Placeholder for policy documents, endorsements, and certificates. |
-| `#/quotations` | Admin, Sales | Placeholder for tracking quotations issued to clients and insurers. This is separate from the implemented Quotation Request Slips page. |
-| `#/qslips` | Admin, Sales | Create and search quotation requests for open deals; select active insurers/reinsurers and required-by dates; filter by status/vendor/client; and progress request status with role-aware transitions. |
+| `#/quotations` | Admin, Sales, Client | Client-facing QTY list and workflow. Admin/Sales create drafts only from Quoted QRS lines, edit terms and product clauses, issue, revise, print/save PDF, or record response status. Clients can view their quotations and accept/reject issued quotations; acceptance advances the linked deal. |
+| `#/qslips` | Admin, Sales | Search and progress deal-linked quotation request batches and insurer/reinsurer lines; filter by line status/vendor/client; and record per-insurer premiums, rates, validity, response references, and decline reasons. New batches are launched from an eligible deal workspace. |
 | `#/internal-slips` | Admin, Sales | Placeholder for internal underwriting slips and cover notes. |
 | `#/invoices` | Admin, Finance, Client | Create, filter, inspect, print, and CSV-export invoices; show outstanding/overdue/collected totals; apply configured GST; and display invoice payment state. |
 | `#/payments` | Admin, Finance, Client | Record payments against unpaid or partially paid invoices; categorize by premium/commission/fee; update invoice payment status; filter by type; view totals; and export receipt CSVs. |
@@ -444,7 +464,7 @@ Placeholder routes remain valid, but appear only in the admin-only collapsed Com
 | `#/renewals` | Admin, Sales | Read-only renewal list for overdue policies and policies due within 120 days, grouped by T-90/T-60/T-30/T-15 milestones; combines renewal-pipeline deals with existing client, lead, and policy expiry dates and links to the related deal or lead. |
 | `#/info-requests` | Admin, Sales | Placeholder for requests for additional underwriting information. |
 | `#/rate-cards` | Admin, Sales | Placeholder for insurer commission and brokerage rate cards. Product brokerage rates are configured under Settings instead. |
-| `#/settings` | Admin | Company details, tax/GST rates, product catalog, email-template text, user profiles/roles, and system/configuration audit history. |
+| `#/settings` | Admin | Company details, tax/GST rates, product catalog, email-template text, QTY validity and authorizer policy, product clause libraries, user profiles/roles, and system/configuration audit history. |
 | `#/funnels` | Admin, Sales, Finance | Stage-history analytics for a selected pipeline, including stage entry counts, inter-stage conversion, and won/lost totals. |
 | `#/pipelines` | Admin, Sales | View and progress insurance pipeline deals; review stage health/intent; and, for admins, create pipelines and configure/reorder stages and SLAs. |
 | `#/targets` | Admin | Placeholder for monthly and annual staff targets. |
@@ -453,9 +473,9 @@ Placeholder routes remain valid, but appear only in the admin-only collapsed Com
 
 ### Dashboard views
 
-- **Company** summarizes weighted deal pipeline, closed-won value, active leads, clients, invoice balances, payments, lead counts by insurance class/stage, and recent activity.
+- **Company** summarizes weighted deal pipeline, closed-won value, active leads, clients, invoice balances, payments, lead counts by insurance class/stage, recent activity, and monthly won/open/lost values.
 - **Leads** provides lead-specific progress and SLA-oriented summaries.
-- **Deals** provides deal pipeline/forecast-oriented summaries.
+- **Deals** provides deal pipeline/forecast-oriented summaries, including month-by-month won and open stage-weighted value with Won/Open/All filtering.
 - **Staff** groups operational information by staff member.
 
 Dashboard values are computed from records already loaded into application state; they are not a separate reporting or data warehouse service.
@@ -469,18 +489,20 @@ The Leads page supports list, funnel, and forecast views. Users can search, filt
 Deals can be viewed in:
 - **Pipeline:** cards grouped by configured stage, sorted by activity, value, expected close, or creation date. Stage drag-and-drop uses the validated stage-change flow.
 - **List:** searchable and sortable deal records with pipeline, owner, and additional-condition filters.
-- **Forecast:** open/won opportunity cards grouped by month or quarter; users can move an open deal to a different expected-close period.
+- **Forecast:** validated won/open/lost opportunities grouped by month or quarter with stage-probability-weighted open values and Won/Open/All filtering; users can move an open deal to a different expected-close period.
 - **Archive:** closed deals with won/lost filtering and closed-stage context.
 
-Stage changes write stage history and activity/audit entries. Deals can be explicitly marked Won or Lost from the deal actions; these outcomes can require a win or loss reason and do not add terminal stages to the fixed sequence. Marking a deal Won may create related invoice/renewal records. Deal deletion is restricted when invoices, leads, or quotation requests remain linked.
+Stage changes write stage history and activity/audit entries. Open-deal progression requires a valid expected close date, positive value, and linked lead/client. Deals can be explicitly marked Won or Lost from the deal actions; these outcomes require a win or loss reason and do not add terminal stages to the fixed sequence. Marking a deal Won may create related invoice/renewal records. Deal deletion is restricted when invoices, leads, or quotation requests remain linked.
 
 ### Client, vendor, and contact functions
 
-Client and vendor searches are performed against loaded records. Client profiles group organization, policy, account owner, insured-entity, and contact information. Staff can record client-linked activity and create a quote record with product, insurer, premium/currency, and coverage notes; the quote is an activity record, not a generated quote document. Client users can edit their own profile; admins manage client records. Vendor names are normalized to prevent duplicates, and email/phone fields are validated. Contact-profile helpers reconcile and link contacts across client, lead, and deal records.
+Client and vendor searches are performed against loaded records. Client profiles group organization, policy, account owner, insured-entity, and contact information, while client-linked activity remains part of the timeline. Client quotations cannot be created independently: each must originate from a Quoted line in a deal-linked QRS batch. Client users can view their own QTYs and respond to issued quotations; acceptance advances the deal through a dedicated database function. Client users can edit their own profile; admins manage client records. Vendor names are normalized to prevent duplicates, and email/phone fields are validated. Contact-profile helpers reconcile and link contacts across client, lead, and deal records.
 
 ### Quotation request and financial functions
 
-Quotation requests require an eligible open deal linked to a lead and client, a product and positive insured value, at least one active insurer/reinsurer, and a required-by date. Requests receive sequential yearly references and store their selected vendors, insured amount, currency, notes, status, and timestamps. Status transitions are checked according to the request workflow and role.
+Quotation requests require an eligible open deal linked to a lead and client, a product and positive insured value, at least one active insurer/reinsurer, and a required-by date. Requests receive sequential yearly batch references and store one independently tracked line per selected vendor; line references and status transitions are validated and audited.
+
+Client quotations require a Quoted source line, validated addressee and risk details, positive premium and sum insured, future validity, and an authorizer distinct from the preparer when configured. Settings holds default validity and reusable product clause libraries. Issued QTYs can be revised, printed/saved to PDF, accepted or rejected by the linked client, and shown on the calendar through their validity date.
 
 Invoices include line items, VAT, due dates, and installments. Payments are recorded against an invoice; the invoice is marked Partial or Paid based on the recorded total, and installments are marked paid when the invoice is fully settled. Invoice totals and financial dashboard summaries use their respective currency/VAT calculation helpers. CSV downloads are available for invoices and receipts.
 
@@ -490,6 +512,7 @@ Settings is admin-only and provides:
 - Company legal/contact details.
 - Tax-rate creation, editing, activation state, and deletion. Active standard rates are used by invoice creation.
 - Product catalog management, including validation against existing lead/deal usage.
+- Client quotation validity, authorizer policy, and reusable product-specific clauses.
 - Editable email-template text; this does not itself send email.
 - User profile/role management. Production user creation uses the `admin-create-user` Supabase Edge Function; registration through the login page creates client access.
 - System/configuration audit entries for settings changes.
@@ -504,14 +527,14 @@ Pipeline configuration defines the fixed stage names/order and adjustable win pr
 
 - `App.tsx` maps hash routes to pages and checks the active role against a route access map. Unknown hashes return to the dashboard. Routes that are listed but not implemented render a descriptive placeholder.
 - The shell tracks viewport/device information for responsive layout, provides mobile sidebar navigation, surfaces authentication/loading and persistence errors, and includes a sign-out control.
-- `AppContext` owns the shared records and synchronizes permitted resources through Supabase. Writes are debounced and serialized; save errors are logged and surfaced in the shell. Admin can write all registered resources, Sales writes sales-domain records, and Finance writes invoices/payments. Client has no generic bulk-record write set; permitted self-profile updates use a dedicated Supabase function.
-- The Supabase migrations define tenant records, user profiles/roles, permissions, workflow resources, and database functions. The `admin-create-user` Edge Function handles privileged user creation. Local auth bypass and seeded demo data are intended for development/testing; they do not represent production authentication or persistence behavior.
+- `AppContext` owns the shared records and synchronizes permitted resources through Supabase. Writes are debounced and serialized; save errors are logged and surfaced in the shell. Admin can write all registered resources, Sales writes sales-domain records, and Finance writes invoices/payments. Client has no generic bulk-record write set; permitted self-profile updates and QTY acceptance/rejection use dedicated Supabase functions.
+- The Supabase migrations define tenant records, user profiles/roles, permissions, workflow resources, and database functions. The `admin-create-user` Edge Function handles privileged user creation. Local auth bypass remains for development/testing, but the demo seed is intentionally neutral and does not create leads, deals, quotation requests, invoices, or payments; it only provides scaffolding for local UI testing. This preserves demo mode without seeding downstream business records.
 
 ### Cross-cutting business rules
 
 - Contact and communication helpers validate/normalize email, phone, and Telegram details; stage configuration can require complete communication channels.
-- Lead lifecycle and deal stage-history helpers hydrate, normalize, and derive transition timelines from current and legacy records.
-- `nextActivity` derives the earliest pending due date from lead/deal IDs and legacy deal follow-up fields. `leadStageSla` resolves configurable targets and elapsed time. `stageDuration` calculates average/median visit and transition durations and distinct stagnating counts.
+- Lead lifecycle and deal stage-history helpers hydrate, normalize, and derive transition timelines from current records without backfilling orphan deals.
+- `nextActivity` derives the earliest pending due date strictly from scheduled activities associated with the lead or deal IDs; it no longer depends on legacy deal follow-up fields. `leadStageSla` resolves configurable targets and elapsed time from stage history and record dates, and `stageDuration` calculates elapsed and transition durations without customer-link fallbacks.
 - Currency utilities parse/format MVR and USD amounts, apply exchange rates, and calculate MVR equivalents. Insurance utilities provide product brokerage calculations; invoice utilities compute VAT-inclusive totals.
 - Hash query parameters support deep links and filters for selected routes, including lead/deal records, invoice/payment views, and quotation requests.
 - Responsive table, date-input, modal, badge, owner, product, and stage controls are shared components. CSV downloads use a shared escaping/download helper.
@@ -523,7 +546,7 @@ Pipeline configuration defines the fixed stage names/order and adjustable win pr
 - MIRA's displayed rows are currently an empty array. Date inputs change the displayed period, but do not load or filter report records.
 - The quotation-request page records and tracks requests; the app does not send insurer emails or ingest quotation responses automatically.
 - Email-template settings store editable text but do not provide an email delivery service.
-- Plans, reports, documents, quotations, internal slips, payment requests, info requests, rate cards, and targets remain placeholders and should not be treated as operational capabilities merely because their routes remain available.
+- Plans, reports, documents, internal slips, payment requests, info requests, rate cards, and targets remain placeholders and should not be treated as operational capabilities merely because their routes remain available.
 
 ## 21. Local development and validation
 
@@ -536,4 +559,4 @@ The project is a Vite React/TypeScript application. The package scripts provide:
 - `npm run test:e2e` — Playwright browser tests.
 - `npm run check:demo-seed` — demo-seed integrity check.
 
-Normal operation requires `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. In local development, `VITE_AUTH_BYPASS=true` can enable auth bypass; `VITE_DEMO_SEED=true` enables in-memory sample records for UI testing. The Playwright configuration starts the dev server with these test settings. Demo mode is not a production persistence mode.
+Normal operation requires `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. In local development, `VITE_AUTH_BYPASS=true` can enable auth bypass; `VITE_DEMO_SEED=true` loads a neutral in-memory scaffold for UI testing. Add `VITE_DEMO_LEADS=true` to that environment to load six validated sample leads and their linked organization profiles across the lead lifecycle; this flag also activates the scaffold. Neither demo mode seeds deals, quotation requests, invoices, or payments. The Playwright configuration starts the dev server with these test settings. Demo mode is not a production persistence mode.

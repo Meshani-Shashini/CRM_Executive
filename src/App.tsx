@@ -10,6 +10,7 @@ import DealsPage from './pages/DealsPage';
 import InvoicesPage from './pages/InvoicesPage';
 import PaymentsPage from './pages/PaymentsPage';
 import QSlipsPage from './pages/QSlipsPage';
+import ClientQuotationsPage from './pages/ClientQuotationsPage';
 import MiraPage from './pages/MiraPage';
 import SettingsPage from './pages/SettingsPage';
 import CalendarPage from './pages/CalendarPage';
@@ -31,7 +32,7 @@ const accessMap: Record<NavKey, Role[]> = {
   calendar: ['admin', 'sales'],
   reports: ['admin', 'finance'],
   documents: ['admin', 'sales', 'finance', 'client'],
-  quotations: ['admin', 'sales'],
+  quotations: ['admin', 'sales', 'client'],
   qslips: ['admin', 'sales'],
   'internal-slips': ['admin', 'sales'],
   invoices: ['admin', 'finance', 'client'],
@@ -59,7 +60,6 @@ const placeholders: Partial<Record<NavKey, { title: string; subtitle: string }>>
   plans: { title: 'My Plans', subtitle: 'Sales targets and personal plan tracking.' },
   reports: { title: 'Reports', subtitle: 'Custom brokerage performance reports.' },
   documents: { title: 'Documents', subtitle: 'Policy documents, endorsements and certificates.' },
-  quotations: { title: 'Quotations', subtitle: 'Track quotations issued to clients and insurers.' },
   'internal-slips': { title: 'Internal Slips', subtitle: 'Internal underwriting slips and cover notes.' },
   'pay-requests': { title: 'Payment Requests', subtitle: 'Outbound payment requests to finance.' },
   'info-requests': { title: 'Info Requests', subtitle: 'Requests for additional underwriting information.' },
@@ -144,6 +144,7 @@ function Shell() {
       case 'invoices': return <InvoicesPage />;
       case 'payments': return <PaymentsPage />;
       case 'qslips': return <QSlipsPage />;
+      case 'quotations': return <ClientQuotationsPage />;
       case 'mira': return <MiraPage />;
       case 'settings': return <SettingsPage />;
       case 'audit-log': return <SettingsPage initialTab="audit" />;

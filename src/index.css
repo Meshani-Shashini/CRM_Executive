@@ -1489,5 +1489,31 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
     body.print-mira .print-report input {
       display: none !important;
     }
+
+    body.print-client-quotation * {
+      visibility: hidden;
+    }
+
+    body.print-client-quotation .client-quotation-print,
+    body.print-client-quotation .client-quotation-print * {
+      visibility: visible;
+    }
+
+    body.print-client-quotation .client-quotation-print {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      color: #000 !important;
+      background: #fff !important;
+      border: 0 !important;
+    }
+
+    body.print-client-quotation .client-quotation-print * {
+      color: #000 !important;
+      border-color: #ccc !important;
+      background-color: transparent !important;
+      box-shadow: none !important;
+      -webkit-text-fill-color: #000 !important;
+    }
   }
 }

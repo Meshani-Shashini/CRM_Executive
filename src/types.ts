@@ -213,23 +213,108 @@ export interface Vendor {
 
 export interface QuotationRequest {
   id: string;
-  ref: string;
-  reference?: string;
+  reference: string;
   dealId: string;
   leadId: string;
   clientId: string;
-  vendorIds: string[];
-  productCode: string;
-  sumInsured: number;
-  currency: 'MVR' | 'USD';
   requiredBy: string;
+  insuredAmount: number;
+  currency: 'MVR' | 'USD';
   notes: string;
-  attachments?: string[];
-  status: 'Draft' | 'Sent' | 'Responses received' | 'Closed';
   createdBy: string;
-  updatedBy?: string;
   createdAt: string;
   updatedAt: string;
+  lines: QuotationRequestLine[];
+}
+
+export type QuotationRequestLineStatus =
+  | 'Requested' | 'Sent' | 'Quoted' | 'Declined' | 'Expired' | 'Cancelled';
+
+export interface QuotationRequestLineStatusChange {
+  fromStatus?: QuotationRequestLineStatus;
+  toStatus: QuotationRequestLineStatus;
+  changedAt: string;
+  changedBy: string;
+  reason?: string;
+}
+
+export interface QuotationRequestLine {
+  id: string;
+  reference: string;
+  vendorId: string;
+  status: QuotationRequestLineStatus;
+  sentAt?: string;
+  respondedAt?: string;
+  insurerQuoteRef?: string;
+  quotedPremium?: number;
+  quotedCurrency?: 'MVR' | 'USD';
+  quotedRatePct?: number;
+  validUntil?: string;
+  insurerDeductibles?: string[];
+  insurerWarranties?: Array<{ title: string; text: string }>;
+  remarks: string;
+  statusHistory: QuotationRequestLineStatusChange[];
+}
+
+export type ClientQuotationStatus =
+  | 'Draft' | 'Issued' | 'Accepted' | 'Rejected' | 'Expired' | 'Superseded';
+
+export interface ClientQuotationSectionItem {
+  interest: string;
+  sumInsured: number;
+}
+
+export interface ClientQuotationSection {
+  title: string;
+  items: ClientQuotationSectionItem[];
+}
+
+export interface ClientQuotation {
+  id: string;
+  reference: string;
+  dealId: string;
+  leadId: string;
+  clientId: string;
+  sourceRequestId: string;
+  sourceLineId: string;
+  version: number;
+  status: ClientQuotationStatus;
+  issuedAt?: string;
+  validUntil: string;
+  validUntilOverridden?: boolean;
+  addressee: { contactId: string; name: string; designation: string };
+  policyNo: string;
+  endorsementNo: string;
+  policyPeriod: string;
+  territorialLimits: string;
+  occupation: string;
+  riskLocation: string;
+  sections: ClientQuotationSection[];
+  totalSumInsured: number;
+  currency: 'MVR' | 'USD';
+  perils: string[];
+  extensions: Array<{ name: string; limit: string }>;
+  deductibles: Array<{ label: string; text: string }>;
+  warranties: Array<{ title: string; text: string }>;
+  conditions: string[];
+  exclusions: string[];
+  disclaimer: string;
+  proposedPremium: number;
+  ratePct: number;
+  preparedBy: string;
+  authorizedBy: string;
+  acceptance?: {
+    name: string;
+    designation: string;
+    signedAt: string;
+    attachmentId?: string;
+  };
+  clientResponse?: {
+    name: string;
+    designation: string;
+    respondedAt: string;
+    respondedBy: string;
+  };
 }
 
 export interface Insurer {
@@ -352,9 +437,6 @@ export interface Deal {
   intentTier?: 'P1' | 'P2' | 'P3';
   proposalSummary?: string;
   lossReason?: string;
-  nextActivityAt?: string;
-  nextActivityTitle?: string;
-  nextActivityCreatedAt?: string;
   source?: string;
   notes?: string;
   intakeCompleted?: boolean;

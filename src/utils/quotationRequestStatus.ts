@@ -1,8 +1,15 @@
-import type { QuotationRequest, Role } from '../types';
+import type { QuotationRequestLineStatus, Role } from '../types';
 
-export type QuotationRequestStatus = QuotationRequest['status'];
+export type QuotationRequestStatus = QuotationRequestLineStatus;
 
-const STATUS_ORDER: QuotationRequestStatus[] = ['Draft', 'Sent', 'Responses received', 'Closed'];
+const ALLOWED_TRANSITIONS: Record<QuotationRequestStatus, QuotationRequestStatus[]> = {
+  Requested: ['Sent', 'Expired', 'Cancelled'],
+  Sent: ['Quoted', 'Declined', 'Expired', 'Cancelled'],
+  Quoted: ['Cancelled'],
+  Declined: ['Cancelled'],
+  Expired: ['Cancelled'],
+  Cancelled: [],
+};
 
 export function canTransitionQuotationRequestStatus(
   current: QuotationRequestStatus,
@@ -10,21 +17,19 @@ export function canTransitionQuotationRequestStatus(
   role: Role,
 ) {
   if (current === next) return false;
-  const currentIndex = STATUS_ORDER.indexOf(current);
-  const nextIndex = STATUS_ORDER.indexOf(next);
-  return nextIndex === currentIndex + 1
-    || next === 'Closed'
-    || (role === 'admin' && nextIndex < currentIndex);
+  if (ALLOWED_TRANSITIONS[current].includes(next)) return true;
+  return role === 'admin' && current !== 'Cancelled' && (next === 'Requested' || next === 'Sent');
 }
 
 export function quotationRequestStatusOptions(current: QuotationRequestStatus, role: Role) {
-  const allowed = STATUS_ORDER.filter((status) => status !== current
+  const statuses: QuotationRequestStatus[] = ['Requested', 'Sent', 'Quoted', 'Declined', 'Expired', 'Cancelled'];
+  const allowed = statuses.filter((status) => status !== current
     && canTransitionQuotationRequestStatus(current, status, role));
   return [
     { status: current, label: current, disabled: true },
     ...allowed.map((status) => ({
       status,
-      label: STATUS_ORDER.indexOf(status) < STATUS_ORDER.indexOf(current) ? `Reopen to ${status}` : status,
+      label: role === 'admin' && (status === 'Requested' || status === 'Sent') ? `Reopen to ${status}` : status,
       disabled: false,
     })),
   ];

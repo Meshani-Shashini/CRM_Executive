@@ -12,8 +12,6 @@ export interface NextActivity {
 interface ActivityRecordIds {
   leadId?: string;
   dealId?: string;
-  legacyDueDate?: string;
-  legacyTitle?: string;
 }
 
 function dueDateForActivity(activity: Activity) {
@@ -49,12 +47,6 @@ export function getNextActivity(
     .map((activity) => ({ activity, date: dueDateForActivity(activity), title: activity.title }))
     .filter((candidate): candidate is { activity: Activity; date: string; title: string } =>
       Boolean(candidate.date && Number.isFinite(Date.parse(candidate.date))));
-  if (ids.legacyDueDate && Number.isFinite(Date.parse(ids.legacyDueDate))) {
-    scheduled.push({
-      date: ids.legacyDueDate,
-      title: ids.legacyTitle ?? 'Scheduled follow-up',
-    });
-  }
   scheduled.sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
   const next = scheduled[0];
   if (next) return {

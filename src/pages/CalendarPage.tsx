@@ -16,6 +16,7 @@ const kindMeta: Record<CalendarEventKind, { label: string; color: string; dot: s
   lead: { label: 'Lead close', color: 'bg-violet-500/15 text-violet-300 border-violet-400/30', dot: 'bg-violet-400' },
   renewal: { label: 'Renewal', color: 'bg-hot/15 text-hot border-hot/30', dot: 'bg-hot' },
   sla: { label: 'SLA due', color: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30', dot: 'bg-emerald-400' },
+  quotation: { label: 'Quotation validity', color: 'bg-amber-500/15 text-amber-300 border-amber-400/30', dot: 'bg-amber-400' },
 };
 
 const categories = [
@@ -24,6 +25,7 @@ const categories = [
   ['lead', 'Lead closes'],
   ['renewal', 'Renewals'],
   ['sla', 'SLA due'],
+  ['quotation', 'Quotation validity'],
 ] as const;
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -47,7 +49,7 @@ function isPhone() {
 }
 
 export default function CalendarPage() {
-  const { activities, clients, deals, leads, pipelines, pipelineStages, stageHistory, user, users } = useApp();
+  const { activities, clients, deals, leads, clientQuotations, pipelines, pipelineStages, stageHistory, user, users } = useApp();
   const [cursor, setCursor] = useState(() => new Date());
   const [view, setView] = useState<CalendarView>('month');
   const [phone, setPhone] = useState(isPhone);
@@ -70,7 +72,8 @@ export default function CalendarPage() {
     leads,
     pipelineStages,
     stageHistory,
-  }), [activities, clients, deals, leads, pipelineStages, stageHistory]);
+    clientQuotations,
+  }), [activities, clientQuotations, clients, deals, leads, pipelineStages, stageHistory]);
 
   const filteredEvents = events.filter((event) =>
     (ownership === 'all' || event.ownerId === user.id)

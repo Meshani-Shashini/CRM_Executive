@@ -202,25 +202,10 @@ test('vendor email validation blocks invalid input and Escape closes the modal',
   await expect(page.getByRole('heading', { name: 'Add Vendor' })).toHaveCount(0);
 });
 
-test('quotation request form lists open deals only and transitions status in order', async ({ page }) => {
+test('quotation requests can only be created from a deal workspace', async ({ page }) => {
   await page.goto('/#/qslips');
-  await page.getByRole('button', { name: 'New QRS' }).click();
-  const dealSelector = page.locator('#quotation-request-form select').first();
-  await expect(dealSelector.locator('option')).toHaveCount(4);
-  await expect(dealSelector).not.toContainText('Policy Renewed');
-  await expect(dealSelector).not.toContainText('Lapsed');
-  await page.keyboard.press('Escape');
-
-  const status = page.locator('tr').filter({ hasText: 'QR-2026-0001' }).getByRole('combobox', { name: 'Status for QR-2026-0001' });
-  await expect(status.locator('option')).toContainText(['Draft', 'Sent', 'Closed']);
-  await expect(status.locator('option[value="Responses received"]')).toHaveCount(0);
-  await status.selectOption('Sent');
-  await expect(status).toHaveValue('Sent');
-  await status.selectOption('Responses received');
-  await expect(status).toHaveValue('Responses received');
-  await status.selectOption('Closed');
-  await expect(status).toHaveValue('Closed');
-  await expect(status.locator('option').filter({ hasText: 'Reopen to Draft' })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'New QRS' })).toHaveCount(0);
+  await expect(page.locator('#quotation-request-form')).toHaveCount(0);
 });
 
 test('linked lead, deal, and vendor deletion is blocked', async ({ page }) => {

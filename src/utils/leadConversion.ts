@@ -3,6 +3,7 @@ import { TENANT_ID } from '../lib/supabase';
 import { calculateBrokerageCommission } from './insurance';
 import { appendLeadStageTransition } from './leadLifecycle';
 import { linkDealToLead } from './dealFactory';
+import { isValidDealCloseDate } from './monthlyDealSummary';
 
 export interface LeadConversionInput {
   lead: Lead;
@@ -33,9 +34,14 @@ export function buildLeadConversion(input: LeadConversionInput) {
     return null;
   }
 
+  const value = lead.value ?? lead.sumInsured ?? lead.premium ?? 0;
+  const closeDate = lead.closeDate ?? lead.renewalDate;
+  if (!Number.isFinite(value) || value <= 0 || !isValidDealCloseDate(closeDate) || lead.clientId !== client.id) {
+    return null;
+  }
+
   const enteredAt = new Date().toISOString();
   const stageHistory = appendLeadStageTransition(lead, 'Converted to deal', enteredAt);
-  const value = lead.value ?? lead.sumInsured ?? lead.premium ?? 0;
   const dealDraft: Deal = {
     id: `deal-${crypto.randomUUID()}`,
     leadId: lead.id,
@@ -62,7 +68,7 @@ export function buildLeadConversion(input: LeadConversionInput) {
     stage: firstStage.name,
     probability: firstStage.winProbabilityPct,
     ownerId: lead.ownerId,
-    closeDate: lead.closeDate ?? lead.renewalDate,
+    closeDate,
     insurer: 'Not assigned',
     source: lead.source,
     notes: lead.notes,

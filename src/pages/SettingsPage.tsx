@@ -5,7 +5,7 @@ import Modal from '../components/ui/Modal';
 import PageToolbar from '../components/ui/PageToolbar';
 import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 import {
-  Settings as SettingsIcon, Percent, Mail, Users as UsersIcon, ShieldAlert,
+  Settings as SettingsIcon, Percent, Mail, Users as UsersIcon, ShieldAlert, FileText,
   Save, Plus, Pencil, Trash2, Check, Lock, Package, ClipboardList,
 } from 'lucide-react';
 import type { Activity, TaxRate, Role, User, ProductCode, Lead, Deal } from '../types';
@@ -14,7 +14,7 @@ import { formatStaffIdentifier } from '../utils/staff';
 import { resolveLeadStageSlaDays } from '../utils/leadStageSla';
 import { LEAD_ACTIVE_STAGES } from '../utils/leadLifecycle';
 
-type Tab = 'general' | 'tax' | 'products' | 'email' | 'users' | 'audit';
+type Tab = 'general' | 'tax' | 'products' | 'email' | 'quotations' | 'users' | 'audit';
 
 export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) {
   const {
@@ -33,6 +33,7 @@ export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) 
   const [templateText, setTemplateText] = useState('');
   const [notice, setNotice] = useState('');
   const [companyDetails, setCompanyDetails] = useState(company);
+  const [clauseProductCode, setClauseProductCode] = useState('default');
 
   useEffect(() => setCompanyDetails(company), [company]);
 
@@ -59,6 +60,7 @@ export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) 
     { key: 'tax', label: 'VAT / GST Config', icon: Percent },
     { key: 'products', label: 'Item / Product Management', icon: Package },
     { key: 'email', label: 'Email Templates', icon: Mail },
+    { key: 'quotations', label: 'Quotation Clauses', icon: FileText },
     { key: 'users', label: 'Users & Roles', icon: UsersIcon },
     { key: 'audit', label: 'Audit Trail', icon: ClipboardList },
   ];
@@ -239,6 +241,65 @@ export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) 
         </div>
       )}
 
+      {tab === 'quotations' && (() => {
+        const base = companyDetails.quotationClauses.default;
+        const clauses = companyDetails.quotationClauses[clauseProductCode] ?? base;
+        const updateClauses = (updates: Partial<typeof clauses>) => setCompanyDetails((current) => ({
+          ...current,
+          quotationClauses: {
+            ...current.quotationClauses,
+            [clauseProductCode]: { ...clauses, ...updates },
+          },
+        }));
+        const listText = (values: string[]) => values.join('\n');
+        const parseList = (value: string) => value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const pairText = (values: Array<{ label: string; text: string }>) =>
+          values.map(({ label, text }) => `${label} | ${text}`).join('\n');
+        const parseLabelPairs = (value: string) => value.split(/\r?\n/)
+          .map((line) => line.trim()).filter(Boolean).map((line) => {
+            const [first, ...rest] = line.split('|');
+            return { label: first.trim(), text: rest.join('|').trim() };
+          });
+        const parseTitlePairs = (value: string) => value.split(/\r?\n/)
+          .map((line) => line.trim()).filter(Boolean).map((line) => {
+            const [first, ...rest] = line.split('|');
+            return { title: first.trim(), text: rest.join('|').trim() };
+          });
+        return <div className="glass rounded-2xl p-5 space-y-4">
+          <div>
+            <h3 className="font-semibold text-white">Client quotation defaults</h3>
+            <p className="mt-1 text-xs text-muted">Clause libraries are reused by product code. Enter one clause per line; deductible and warranty rows use “label | text”.</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs text-muted">Default validity days
+              <input className="input mt-1" aria-label="Quotation validity days" type="number" min="1" max="365" value={companyDetails.quotationValidityDays}
+                onChange={(event) => setCompanyDetails({ ...companyDetails, quotationValidityDays: Number(event.target.value) })} />
+            </label>
+            <label className="flex items-center gap-2 text-sm text-white sm:mt-5">
+              <input type="checkbox" checked={companyDetails.requireDifferentQuotationAuthorizer}
+                onChange={(event) => setCompanyDetails({ ...companyDetails, requireDifferentQuotationAuthorizer: event.target.checked })} />
+              Require an authorizer different from the preparer
+            </label>
+          </div>
+          <label className="block text-xs text-muted">Product code
+            <select className="input mt-1" value={clauseProductCode} onChange={(event) => setClauseProductCode(event.target.value)}>
+              <option value="default">Default clause set</option>
+              {products.map((product) => <option key={product.code} value={product.code}>{product.code} · {product.name}</option>)}
+            </select>
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <ClauseTextarea label="Covered perils (one per line)" value={listText(clauses.perils)} onChange={(value) => updateClauses({ perils: parseList(value) })} />
+            <ClauseTextarea label="Exclusions (one per line)" value={listText(clauses.exclusions)} onChange={(value) => updateClauses({ exclusions: parseList(value) })} />
+            <ClauseTextarea label="Deductibles (label | text)" value={pairText(clauses.deductibles)} onChange={(value) => updateClauses({ deductibles: parseLabelPairs(value) })} />
+            <ClauseTextarea label="Warranties (title | text)" value={clauses.warranties.map(({ title, text }) => `${title} | ${text}`).join('\n')} onChange={(value) => updateClauses({ warranties: parseTitlePairs(value) })} />
+            <ClauseTextarea label="Communicable-disease exclusion" value={clauses.communicableDiseaseExclusion} onChange={(value) => updateClauses({ communicableDiseaseExclusion: value })} />
+            <ClauseTextarea label="Sanctions clause" value={clauses.sanctionClause} onChange={(value) => updateClauses({ sanctionClause: value })} />
+            <div className="sm:col-span-2"><ClauseTextarea label="Disclaimer" value={clauses.disclaimer} onChange={(value) => updateClauses({ disclaimer: value })} /></div>
+          </div>
+          <button className="btn-primary" onClick={saveCompany}><Save size={14} /> Save Quotation Settings</button>
+        </div>;
+      })()}
+
       {tab === 'products' && (
         <ProductManagement products={products} setProducts={setProducts} leads={leads} deals={deals} onNotice={setNotice} onAudit={logSystemAudit} />
       )}
@@ -386,6 +447,15 @@ function Labeled({ label, value, onChange }: { label: string; value: string; onC
     <label className="block">
       <div className="text-xs text-muted mb-1.5">{label}</div>
       <input className="input" value={value} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function ClauseTextarea({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="block">
+      <div className="mb-1.5 text-xs text-muted">{label}</div>
+      <textarea className="input min-h-20" value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }

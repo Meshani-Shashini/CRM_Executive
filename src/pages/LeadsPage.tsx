@@ -10,7 +10,7 @@ import { avatarCode } from '../components/table/avatar';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
 import { useApp } from '../store/AppContext';
 import { AlertTriangle, ArrowLeft, ArrowRight, CalendarDays, CheckCircle2, CircleDot, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, TrendingUp, UserRound, X } from 'lucide-react';
-import type { Client, CompanyContactProfile, Lead, LeadTemperature } from '../types';
+import type { CompanyContactProfile, Lead, LeadTemperature } from '../types';
 import {
   DEFAULT_USD_TO_MVR_RATE, formatAmount, formatCurrencyInput, formatCurrencyInputForDisplay,
   parseCurrencyInput, toMvr, type Currency,
@@ -20,7 +20,7 @@ import { formatDate, normalizeDateInput } from '../utils/date';
 import DateInput from '../components/ui/DateInput';
 import ProductSelect from '../components/ui/ProductSelect';
 import { calculateBrokerageCommission } from '../utils/insurance';
-import { INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
+import { createLeadOrganization, INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
 import { getLeadContactedAt } from '../utils/leadSla';
 import { isValidEmail, isValidPhoneNumber, isValidTelegramContact } from '../utils/communication';
 import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles, normalizeContactNumber } from '../utils/contactProfiles';
@@ -451,24 +451,7 @@ export default function LeadsPage() {
       return;
     }
 
-    const organization: Client = {
-      id: `org-${crypto.randomUUID()}`,
-      name,
-      tin: '',
-      country: '',
-      phone: '',
-      email: '',
-      address: '',
-      sumInsured: 0,
-      premium: 0,
-      expiry: '',
-      insurer: '',
-      productCode: '',
-      class: '',
-      ownerId: user.id,
-      tags: [INCOMPLETE_COMPANY_TAG],
-      accountStatus: 'draft',
-    };
+    const organization = createLeadOrganization(name, user.id);
     setClients((current) => [organization, ...current]);
     setOrganizationQuery(name);
     setNewOrganizationOpen(false);
@@ -724,7 +707,7 @@ export default function LeadsPage() {
         <div className="flex flex-wrap items-center gap-2">
           <ViewModeSwitcher label="Lead views" value={view} onChange={setView} options={[
             { value: 'list', label: 'List view', Icon: List },
-            { value: 'funnel', label: 'Funnel view', Icon: Columns3 },
+            { value: 'funnel', label: 'Kanban view', Icon: Columns3 },
             { value: 'forecast', label: 'Forecast view', Icon: TrendingUp },
           ]} />
           <button type="button" className="btn-primary !px-3 !py-1.5 !text-xs" onClick={openLeadForm} disabled={activePipelines.length === 0} title={activePipelines.length === 0 ? 'Create an active pipeline before adding a lead' : undefined}><Plus size={13} /> Lead</button>
@@ -745,6 +728,10 @@ export default function LeadsPage() {
           deals={deals}
           initialSelectedKey={`lead:${inspectedLeadId}`}
           onClose={() => setInspectedLeadId('')}
+          onLeadViewChange={(nextView) => {
+            setView(nextView === 'kanban' ? 'funnel' : 'list');
+            setInspectedLeadId('');
+          }}
           onEditLead={openEditLead}
           onDeleteLead={deleteLead}
         />

@@ -1,67 +1,80 @@
 import { createDemoSeed } from '../src/dev/demoSeed.ts';
+import { isValidEmail, isValidPhoneNumber } from '../src/utils/communication.ts';
+import { normalizeContactNumber } from '../src/utils/contactProfiles.ts';
+import { hasCompleteClientProfile } from '../src/utils/customerProfile.ts';
 
-const first = createDemoSeed(Date.UTC(2026, 0, 1));
-const second = createDemoSeed(Date.UTC(2026, 0, 1));
+const fixedDate = Date.UTC(2026, 0, 1);
+const first = createDemoSeed(fixedDate);
+const second = createDemoSeed(fixedDate);
+const withLeads = createDemoSeed(fixedDate, true);
+const withLeadsAgain = createDemoSeed(fixedDate, true);
 const issues = [];
 
-if (JSON.stringify(first) !== JSON.stringify(second)) issues.push('seed is not idempotent');
-
-const ids = (items) => new Set(items.map((item) => item.id));
-const clientIds = ids(first.clients);
-const leadIds = ids(first.leads);
-const dealIds = ids(first.deals);
-const vendorIds = ids(first.vendors);
-const pipelineIds = ids(first.pipelines);
-const productCodes = new Set(['NC', 'PR', 'DF', 'CM']);
 const check = (found, description) => {
   if (!found) issues.push(description);
 };
 
-check(first.pipelines.length === 3, 'expected exactly three pipelines');
-check(first.vendors.length === 4, 'expected four vendors');
-check(first.clients.length === 4, 'expected four clients');
-check(first.leads.length === 8, 'expected eight leads');
-check(first.deals.length === 5, 'expected five deals');
-check(first.quotationRequests.length === 3, 'expected three quotation requests');
-check(first.invoices.length === 2, 'expected two invoices');
+check(JSON.stringify(first) === JSON.stringify(second), 'seed is not idempotent');
+check(first.company && typeof first.company === 'object', 'company settings are missing');
+check(first.company.name && first.company.name.length > 0, 'company name is blank');
+check(first.users.length === 3, 'expected exactly three demo users (admin, sales, finance)');
+check(first.users.every((user) => user.role !== 'client'), 'client demo user should be omitted when no client exists');
+check(first.products.length > 0, 'products are missing');
+check(first.pipelines.length === 3, 'expected exactly three active demo pipelines');
+check(first.pipelineStages.length === 27, 'expected nine stages in each of three pipelines');
+check(first.taxRates.some((rate) => rate.category === 'Standard' && rate.active && rate.rate > 0), 'expected an active standard GST tax rate');
+check(Object.keys(first.emailTemplates).length === 5, 'expected the default five email templates');
+check(first.vendors.length >= 3, 'expected insurer/reinsurer vendors to be present');
+check(first.customerLookups && Object.keys(first.customerLookups).length > 0, 'customer lookups are missing');
+check(first.leads.length === 0, 'base seed must contain zero leads');
+check(first.clients.length === 0, 'base seed must contain zero clients');
 
-for (const lead of first.leads) {
-  check(clientIds.has(lead.clientId ?? ''), `lead ${lead.id} references missing client ${lead.clientId}`);
-  if (lead.dealId) check(dealIds.has(lead.dealId), `lead ${lead.id} references missing deal ${lead.dealId}`);
-}
-for (const deal of first.deals) {
-  check(leadIds.has(deal.leadId), `deal ${deal.id} references missing lead ${deal.leadId}`);
-  check(clientIds.has(deal.clientId ?? ''), `deal ${deal.id} references missing client ${deal.clientId}`);
-  check(vendorIds.has(deal.vendorId ?? ''), `deal ${deal.id} references missing vendor ${deal.vendorId}`);
-  check(pipelineIds.has(deal.pipelineId ?? ''), `deal ${deal.id} references missing pipeline ${deal.pipelineId}`);
-  const lead = first.leads.find((item) => item.id === deal.leadId);
-  check(lead?.dealId === deal.id, `deal ${deal.id} is not linked back from its lead`);
-  check(lead?.pipelineId === deal.pipelineId, `lead/deal pipeline mismatch for ${deal.id}`);
-}
-for (const request of first.quotationRequests) {
-  check(dealIds.has(request.dealId), `quotation request ${request.id} references missing deal ${request.dealId}`);
-  check(leadIds.has(request.leadId), `quotation request ${request.id} references missing lead ${request.leadId}`);
-  check(clientIds.has(request.clientId), `quotation request ${request.id} references missing client ${request.clientId}`);
-  check(request.vendorIds.every((id) => vendorIds.has(id)), `quotation request ${request.id} references a missing vendor`);
-  check(productCodes.has(request.productCode), `quotation request ${request.id} references unknown product ${request.productCode}`);
-}
-for (const invoice of first.invoices) {
-  check(clientIds.has(invoice.clientId), `invoice ${invoice.id} references missing client ${invoice.clientId}`);
-  if (invoice.linkedDealId) check(dealIds.has(invoice.linkedDealId), `invoice ${invoice.id} references missing deal ${invoice.linkedDealId}`);
-}
-for (const history of first.stageHistory) {
-  check(dealIds.has(history.dealId), `stage history ${history.id} references missing deal ${history.dealId}`);
-}
-for (const activity of first.activities) {
-  check(clientIds.has(activity.clientId), `activity ${activity.id} references missing client ${activity.clientId}`);
-  if (activity.leadId) check(leadIds.has(activity.leadId), `activity ${activity.id} references missing lead ${activity.leadId}`);
-  if (activity.dealId) check(dealIds.has(activity.dealId), `activity ${activity.id} references missing deal ${activity.dealId}`);
-}
-for (const client of first.clients) {
-  for (const contact of client.contacts ?? []) {
-    for (const id of contact.linkedLeadIds ?? []) check(leadIds.has(id), `contact ${contact.id} references missing lead ${id}`);
-    for (const id of contact.linkedDealIds ?? []) check(dealIds.has(id), `contact ${contact.id} references missing deal ${id}`);
+check(JSON.stringify(withLeads) === JSON.stringify(withLeadsAgain), 'optional lead seed is not idempotent');
+check(withLeads.leads.length === 6, 'optional lead seed must contain exactly six leads');
+check(withLeads.clients.length === 6, 'optional lead seed must create one organization per lead');
+check(withLeads.leads.every((lead) => withLeads.clients.some((client) => client.id === lead.clientId && client.name === lead.client)), 'every optional lead must link to its seeded organization');
+check(withLeads.leads.every((lead) => withLeads.users.some((user) => user.id === lead.ownerId)), 'every optional lead must have a valid owner');
+check(withLeads.leads.every((lead) => withLeads.products.some((product) => product.code === lead.productCode)), 'every optional lead must use a catalog product');
+
+const expectedStages = ['Lead Identified', 'Contact Made', 'Key Person Identified', 'Intro Email Sent', 'Meetings Ongoing', 'Lost'];
+check(expectedStages.every((stage) => withLeads.leads.some((lead) => lead.funnelStage === stage)), 'optional leads must cover each required lifecycle stage');
+
+for (const lead of withLeads.leads) {
+  const client = withLeads.clients.find((candidate) => candidate.id === lead.clientId);
+  const phone = lead.contactPhone ?? '';
+  const whatsapp = lead.whatsapp ?? '';
+  check(Boolean(lead.title?.trim()), `lead ${lead.id} is missing a title`);
+  check(Boolean(lead.closeDate && Number.isFinite(Date.parse(lead.closeDate))), `lead ${lead.id} is missing an expected close date`);
+  check(Boolean(lead.value !== undefined && Number.isFinite(lead.value) && lead.value >= 0), `lead ${lead.id} has an invalid value`);
+  check(lead.currency === 'MVR' || lead.currency === 'USD', `lead ${lead.id} has an invalid currency`);
+  check(Boolean(lead.ownerId), `lead ${lead.id} is missing an owner`);
+  check(isValidEmail(lead.contactEmail ?? ''), `lead ${lead.id} has an invalid primary contact email`);
+  check(isValidPhoneNumber(phone), `lead ${lead.id} has an invalid primary contact phone`);
+  check(isValidPhoneNumber(whatsapp), `lead ${lead.id} has an invalid WhatsApp number`);
+  check(phone === `+${normalizeContactNumber(phone)}`, `lead ${lead.id} phone is not normalized`);
+  check(whatsapp === `+${normalizeContactNumber(whatsapp)}`, `lead ${lead.id} WhatsApp number is not normalized`);
+  check(Boolean(client && hasCompleteClientProfile(client)), `lead ${lead.id} organization profile is incomplete`);
+  if (lead.funnelStage === 'Lost') check(Boolean(lead.lossReason?.trim()), 'the Lost lead must include a loss reason');
+  if (lead.funnelStage === 'Lead Identified') check(lead.stageHistory?.length === 0, 'Lead Identified must be the initial stage without a transition');
+  const history = lead.stageHistory ?? [];
+  for (const [index, transition] of history.entries()) {
+    const priorStage = index === 0 ? 'Lead Identified' : history[index - 1].toStage;
+    check(transition.fromStage === priorStage, `lead ${lead.id} has a discontinuous stage history`);
+    check(Number.isFinite(Date.parse(transition.enteredAt)), `lead ${lead.id} has an invalid stage transition timestamp`);
+    check(Number.isFinite(transition.durationDays) && transition.durationDays >= 0, `lead ${lead.id} has an invalid stage duration`);
   }
+  check(history.length === 0 ? lead.funnelStage === 'Lead Identified' : history.at(-1)?.toStage === lead.funnelStage, `lead ${lead.id} stage history does not match its current stage`);
+}
+
+for (const seed of [first, withLeads]) {
+  const label = seed === first ? 'base' : 'optional';
+  check(seed.deals.length === 0, `${label} seed must contain zero deals`);
+  check(seed.deals.every((deal) => Boolean(deal.leadId)), `${label} seed contains a deal without a leadId`);
+  check(seed.quotationRequests.length === 0, `${label} seed must contain zero quotation requests`);
+  check(seed.invoices.length === 0, `${label} seed must contain zero invoices`);
+  check(seed.payments.length === 0, `${label} seed must contain zero payments`);
+  check(seed.activities.length === 0, `${label} seed must contain zero activities`);
+  check(seed.stageHistory.length === 0, `${label} seed must contain zero deal stage history`);
 }
 
 if (issues.length) {
@@ -69,5 +82,5 @@ if (issues.length) {
   for (const issue of issues) console.error(`- ${issue}`);
   process.exitCode = 1;
 } else {
-  console.log('Demo seed is idempotent; all seeded references resolve.');
+  console.log('Demo seed checks passed: neutral base by default; optional mode adds six validated leads and linked organizations only.');
 }

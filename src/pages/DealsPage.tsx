@@ -19,8 +19,9 @@ import {
 import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles } from '../utils/contactProfiles';
 import DealWorkspace from './DealWorkspace';
 import { TENANT_ID } from '../lib/supabase';
-import { convertedDealsOnly, linkDealToLead } from '../utils/dealFactory';
+import { convertedDealsOnly } from '../utils/dealFactory';
 import { isTerminalDealStage, isWonPipelineStage } from '../utils/stageSla';
+import { validateDealBaseForProgression } from '../utils/monthlyDealSummary';
 
 export default function DealsPage() {
   const { deals, setDeals, leads, setLeads, clients, setClients, user, viewAsRole, pipelines, pipelineStages, products, invoices, setStageHistory, vendors, users, quotationRequests } = useApp();
@@ -39,21 +40,12 @@ export default function DealsPage() {
   const [dealProbability, setDealProbability] = useState('');
   const [dealIntent, setDealIntent] = useState<Deal['intentTier']>('P3');
   const [dealCloseDate, setDealCloseDate] = useState('');
-  const [dealNextActivityAt, setDealNextActivityAt] = useState('');
-  const [dealNextActivityTitle, setDealNextActivityTitle] = useState('');
   const [pendingLeadDeletion, setPendingLeadDeletion] = useState<Lead | null>(null);
   const [pendingDealDeletion, setPendingDealDeletion] = useState<Deal | null>(null);
   const [deletionRestriction, setDeletionRestriction] = useState<{ title: string; message: string } | null>(null);
   const [dealSource, setDealSource] = useState('');
   const [dealNotes, setDealNotes] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
-  const [legacyImportOpen, setLegacyImportOpen] = useState(false);
-  const [legacyRemark, setLegacyRemark] = useState('');
-  const [legacyError, setLegacyError] = useState('');
-  const [legacyPipelineId, setLegacyPipelineId] = useState('');
-  const [legacyClientId, setLegacyClientId] = useState('');
-  const [legacyVendorId, setLegacyVendorId] = useState('');
-  const [legacyOwnerId, setLegacyOwnerId] = useState(user.id);
   const [stageFilter, setStageFilter] = useState(() => hashParams().get('stage') ?? '');
   const [pipelineFilter, setPipelineFilter] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('');
@@ -89,11 +81,6 @@ export default function DealsPage() {
   });
   const activePipelines = pipelines.filter((pipeline) => pipeline.isActive);
   const insurerOptions = vendors.filter((vendor) => ['Insurer', 'Reinsurer'].includes(vendor.vendorType) && vendor.status === 'active');
-  useEffect(() => {
-    if (!legacyPipelineId && activePipelines[0]) setLegacyPipelineId(activePipelines[0].id);
-    if (!legacyClientId && clients[0]) setLegacyClientId(clients[0].id);
-    if (!legacyVendorId && insurerOptions[0]) setLegacyVendorId(insurerOptions[0].id);
-  }, [activePipelines, clients, insurerOptions, legacyClientId, legacyPipelineId, legacyVendorId]);
   const availableStages = pipelineStages
     .filter((stage) => stage.pipelineId === createPipelineId)
     .sort((a, b) => a.stageOrder - b.stageOrder);
@@ -111,73 +98,6 @@ export default function DealsPage() {
       setSelectedStageId(firstStage.id);
     }
   }, [availableStages, selectedStageId]);
-  const openLegacyImport = () => {
-    if (!['admin', 'sales'].includes(viewAsRole ?? user.role)) return;
-    setLegacyPipelineId(activePipelines[0]?.id ?? '');
-    setLegacyClientId(clients[0]?.id ?? '');
-    setLegacyVendorId(insurerOptions[0]?.id ?? '');
-    setLegacyOwnerId(user.id);
-    setLegacyRemark('');
-    setLegacyError('');
-    setLegacyImportOpen(true);
-  };
-
-  const submitLegacyImport = () => {
-    if (!['admin', 'sales'].includes(viewAsRole ?? user.role)) return;
-    if (!legacyClientId || !legacyPipelineId || !legacyRemark.trim()) {
-      setLegacyError('Select a client and pipeline and enter a remark before importing.');
-      return;
-    }
-    const pipeline = pipelines.find((item) => item.id === legacyPipelineId) ?? activePipelines[0];
-    const stage = pipelineStages.filter((item) => item.pipelineId === pipeline?.id).sort((left, right) => left.stageOrder - right.stageOrder)[0];
-    const client = clients.find((item) => item.id === legacyClientId);
-    if (!pipeline || !stage || !client) {
-      setLegacyError('Choose a valid client and pipeline with at least one configured stage.');
-      return;
-    }
-    const now = new Date().toISOString();
-    const dealId = `deal-${crypto.randomUUID()}`;
-    const product = products.find((item) => item.code === client.productCode);
-    const linked = linkDealToLead({
-      id: dealId,
-      pipelineId: pipeline.id,
-      client: client.name,
-      clientId: client.id,
-      product: product?.name ?? client.productCode ?? 'Legacy import',
-      productCode: product?.code ?? client.productCode ?? 'MOTOR',
-      value: 0,
-      weighted: 0,
-      currency: 'MVR',
-      stage: stage.name,
-      probability: stage.winProbabilityPct,
-      ownerId: legacyOwnerId,
-      closeDate: client.expiry ?? now.slice(0, 10),
-      insurer: insurerOptions.find((vendor) => vendor.id === legacyVendorId)?.name ?? client.insurer ?? 'Not assigned',
-      vendorId: legacyVendorId || undefined,
-      source: 'Legacy import',
-      notes: legacyRemark.trim(),
-      proposalSummary: legacyRemark.trim(),
-      createdAt: now,
-      stageChangedAt: now,
-    }, undefined, { source: 'Legacy import', client });
-    setLeads((current) => [linked.lead, ...current]);
-    setDeals((current) => [linked.deal, ...current]);
-    setStageHistory((current) => [...current, {
-      id: `stage-${crypto.randomUUID()}`,
-      tenantId: TENANT_ID,
-      dealId: dealId,
-      fromStageId: null,
-      toStageId: stage.id,
-      enteredAt: now,
-      exitedAt: null,
-      durationSeconds: null,
-      details: `Legacy import comment: ${legacyRemark.trim()}`,
-    }]);
-    setLegacyImportOpen(false);
-    setLegacyRemark('');
-    setLegacyError('');
-  };
-
   const openEditDeal = (deal: Deal) => {
     setEditingDeal(deal);
     setSelectedProduct(products.find((product) => product.code === deal.productCode || product.name === deal.product));
@@ -194,8 +114,6 @@ export default function DealsPage() {
     setDealProbability(String(deal.probability));
     setDealIntent(deal.intentTier ?? 'P3');
     setDealCloseDate(deal.closeDate);
-    setDealNextActivityAt(deal.nextActivityAt ?? '');
-    setDealNextActivityTitle(deal.nextActivityTitle ?? '');
     setDealSource(deal.source ?? '');
     setDealNotes(deal.notes ?? deal.proposalSummary ?? '');
     setCreateError('');
@@ -303,7 +221,7 @@ export default function DealsPage() {
   const createDeal = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!editingDeal) {
-      setCreateError('Deals must be created by converting a lead or importing a legacy deal.');
+      setCreateError('Deals must be created by converting a lead. Independent deal creation is not allowed.');
       return;
     }
     const data = new FormData(event.currentTarget);
@@ -323,8 +241,8 @@ export default function DealsPage() {
       setCreateError('Complete Client, Insurer, Insurance Product, Pipeline, Stage, Currency, Insured Value, Probability, and Expected Close Date.');
       return;
     }
-    if (!Number.isFinite(value) || value < 0) {
-      setCreateError('Enter a non-negative total insured value.');
+    if (!Number.isFinite(value) || value <= 0) {
+      setCreateError('Enter a positive total insured value.');
       return;
     }
     if (currency === 'USD' && (!Number.isFinite(rate) || !rate || rate <= 0)) {
@@ -353,14 +271,6 @@ export default function DealsPage() {
     }
     const now = new Date().toISOString();
     const stage = availableStages.find((item) => item.id === selectedStageId);
-    const nextActivityAt = dealNextActivityAt || undefined;
-    const nextActivityTitle = dealNextActivityTitle.trim() || undefined;
-    const hasNextActivity = Boolean(nextActivityAt || nextActivityTitle);
-    const sameNextActivity = editingDeal?.nextActivityAt === nextActivityAt
-      && editingDeal?.nextActivityTitle === nextActivityTitle;
-    const nextActivityCreatedAt = hasNextActivity
-      ? sameNextActivity ? editingDeal?.nextActivityCreatedAt ?? now : now
-      : undefined;
     const dealId = editingDeal.id;
     const dealClientRecord = clients.find((client) => client.name === dealClient.trim());
     const contactName = String(data.get('contactName') ?? '').trim();
@@ -420,10 +330,12 @@ export default function DealsPage() {
       source: dealSource.trim(),
       notes: dealNotes.trim(),
       proposalSummary: dealNotes.trim(),
-      nextActivityAt,
-      nextActivityTitle,
-      nextActivityCreatedAt,
     };
+    const progressionErrors = validateDealBaseForProgression(deal, { leads, clients });
+    if (progressionErrors.length) {
+      setCreateError(progressionErrors.join(' '));
+      return;
+    }
     setDeals(deals.map((item) => item.id === editingDeal.id ? deal : item));
     setClients((current) => current.map((client) => {
       const contacts = (client.contacts ?? []).map((contact) => ({
@@ -477,7 +389,6 @@ export default function DealsPage() {
         onDeleteLead={requestDeleteLead}
         onDeleteDeal={requestDeleteDeal}
         onOpenFilters={() => setFilterOpen(true)}
-        onLegacyImport={['admin', 'sales'].includes(viewAsRole ?? user.role) ? openLegacyImport : undefined}
         pipelineFilter={pipelineFilter}
         onPipelineFilterChange={setPipelineFilter}
       />
@@ -525,8 +436,6 @@ export default function DealsPage() {
           <Field label="Expected Close"><DateInput name="closeDate" required value={dealCloseDate} onIsoChange={setDealCloseDate} aria-label="Expected close date" /></Field>
           <Field label="Source"><select className="input" value={dealSource} onChange={(event) => setDealSource(event.target.value)}><option value="">Select source</option><option>Referral</option><option>Website</option><option>Renewal</option><option>Partner</option></select></Field>
           <Field label="Remarks / Notes"><textarea className="input min-h-20" value={dealNotes} onChange={(event) => setDealNotes(event.target.value)} placeholder="Initial scoping, client context, or missing information" /></Field>
-          <Field label="Next activity date"><DateInput name="nextActivityAt" value={dealNextActivityAt} onIsoChange={setDealNextActivityAt} aria-label="Next activity date" /></Field>
-          <Field label="Next activity"><input className="input" name="nextActivityTitle" value={dealNextActivityTitle} onChange={(event) => setDealNextActivityTitle(event.target.value)} placeholder="e.g. Call client for documents" maxLength={120} /></Field>
         </form>
       </Modal>
       <Modal open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Deals" size="sm" footer={<><button type="button" className="btn-ghost" onClick={() => { setPipelineFilter(''); setStageFilter(''); setOwnerFilter(''); setVendorFilter(''); setStatusFilter(''); }}>Clear</button><button type="button" className="btn-primary" onClick={() => setFilterOpen(false)}>Apply Filter</button></>}>
@@ -536,22 +445,6 @@ export default function DealsPage() {
           <Field label="Owner"><select className="input" value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)}><option value="">All owners</option>{users.filter((member) => member.role === 'admin' || member.role === 'sales').map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></Field>
           <Field label="Vendor"><select className="input" value={vendorFilter} onChange={(event) => setVendorFilter(event.target.value)}><option value="">All vendors</option>{vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select></Field>
           <Field label="Status"><select className="input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option><option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option></select></Field>
-        </div>
-      </Modal>
-      <Modal
-        open={legacyImportOpen}
-        onClose={() => setLegacyImportOpen(false)}
-        title="Import legacy deal"
-        subtitle="Create a deal linked to a converted lead so the historical record remains on the lead/deal lifecycle."
-        footer={<><button type="button" className="btn-ghost" onClick={() => setLegacyImportOpen(false)}>Cancel</button><button type="button" className="btn-primary" onClick={submitLegacyImport} disabled={!legacyRemark.trim()}>Create legacy deal</button></>}
-      >
-        <div className="space-y-3">
-          <Field label="Client *"><select className="input" value={legacyClientId} onChange={(event) => setLegacyClientId(event.target.value)}><option value="">Select client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></Field>
-          <Field label="Pipeline *"><select className="input" value={legacyPipelineId} onChange={(event) => setLegacyPipelineId(event.target.value)}><option value="">Select pipeline</option>{activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}</select></Field>
-          <Field label="Insurer / vendor"><select className="input" value={legacyVendorId} onChange={(event) => setLegacyVendorId(event.target.value)}><option value="">Select insurer</option>{insurerOptions.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select></Field>
-          <Field label="Owner"><select className="input" value={legacyOwnerId} onChange={(event) => setLegacyOwnerId(event.target.value)}>{users.filter((member) => member.role === 'admin' || member.role === 'sales').map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></Field>
-          <Field label="Remark *"><textarea className="input min-h-20" required aria-required="true" value={legacyRemark} onChange={(event) => { setLegacyRemark(event.target.value); setLegacyError(''); }} placeholder="Why this legacy deal is being imported" /></Field>
-          {legacyError && <p role="alert" className="text-sm text-hot">{legacyError}</p>}
         </div>
       </Modal>
       <Modal

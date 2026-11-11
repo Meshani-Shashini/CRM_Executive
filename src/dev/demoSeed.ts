@@ -1,11 +1,19 @@
 import type {
-  Activity, Client, Deal, Invoice, Lead, Pipeline, PipelineStage,
-  QuotationRequest, StageHistoryAudit, Vendor,
+  Activity, Client, Deal, Invoice, Lead, Payment, Pipeline, PipelineStage,
+  ProductCode, QuotationRequest, StageHistoryAudit, TaxRate, User, Vendor,
 } from '../types';
+import { COMPANY, PRODUCT_CODES } from '../data/catalogs.ts';
 import { DEAL_PIPELINE_STAGES, getPipelineStageTemplate } from '../data/pipelineStageTemplates.ts';
+import { createDefaultCustomerLookups, type CustomerLookups } from '../data/customerLookups.ts';
+import { appendLeadStageTransition, type LeadLifecycleStage } from '../utils/leadLifecycle.ts';
+import { createLeadOrganization } from '../utils/customerProfile.ts';
+import { isValidEmail, isValidPhoneNumber } from '../utils/communication.ts';
+import { DEFAULT_USD_TO_MVR_RATE } from '../utils/currency.ts';
 
 const TENANT_ID = 'demo-tenant';
-const OWNER_ID = 'local-development-admin';
+const DEMO_EMAIL_TEMPLATES = Object.fromEntries([
+  'Renewal Reminder (30/60/90)', 'Quotation Sent', 'Invoice Issued', 'Payment Receipt', 'Payment Overdue',
+].map((name) => [name, '']));
 
 const PIPELINE_DEFINITIONS: Array<{
   id: string;
@@ -33,23 +41,137 @@ const PIPELINE_DEFINITIONS: Array<{
   },
 ];
 
+const DEMO_LEAD_SCENARIOS: Array<{
+  organization: string;
+  title: string;
+  contact: string;
+  email: string;
+  phone: string;
+  productCode: string;
+  amount: number;
+  currency: 'MVR' | 'USD';
+  stagePath: LeadLifecycleStage[];
+  transitionDays: number[];
+  lossReason?: string;
+}> = [
+  {
+    organization: 'North Channel Transport Co.',
+    title: 'Inter-island ferry hull renewal',
+    contact: 'Aminath Shareef',
+    email: 'aminath.shareef@northchannel.example',
+    phone: '+9607771001',
+    productCode: 'HR',
+    amount: 12500000,
+    currency: 'MVR',
+    stagePath: [],
+    transitionDays: [],
+  },
+  {
+    organization: 'Lagoon Crest Resorts Pvt Ltd',
+    title: 'Resort property all-risks placement',
+    contact: 'Ibrahim Waheed',
+    email: 'ibrahim.waheed@lagooncrest.example',
+    phone: '+9607771002',
+    productCode: 'PR',
+    amount: 38500000,
+    currency: 'MVR',
+    stagePath: ['Contact Made'],
+    transitionDays: [8],
+  },
+  {
+    organization: 'Atoll Health Services Pvt Ltd',
+    title: 'Group medical cover for resort staff',
+    contact: 'Fathimath Nisha',
+    email: 'fathimath.nisha@atollhealth.example',
+    phone: '+9607771003',
+    productCode: 'SI',
+    amount: 4750000,
+    currency: 'MVR',
+    stagePath: ['Contact Made', 'Key Person Identified'],
+    transitionDays: [5, 14],
+  },
+  {
+    organization: 'Capital Island Logistics Pvt Ltd',
+    title: 'Commercial motor fleet renewal',
+    contact: 'Mohamed Rasheed',
+    email: 'mohamed.rasheed@capitalisland.example',
+    phone: '+9607771004',
+    productCode: 'MV',
+    amount: 6200000,
+    currency: 'MVR',
+    stagePath: ['Contact Made', 'Key Person Identified', 'Intro Email Sent'],
+    transitionDays: [4, 11, 18],
+  },
+  {
+    organization: 'South Reef Construction Pvt Ltd',
+    title: 'Harbour extension contractors all risks',
+    contact: 'Hassan Jaleel',
+    email: 'hassan.jaleel@southreef.example',
+    phone: '+9607771005',
+    productCode: 'NC',
+    amount: 24000000,
+    currency: 'MVR',
+    stagePath: ['Contact Made', 'Key Person Identified', 'Intro Email Sent', 'Meetings Ongoing'],
+    transitionDays: [3, 10, 17, 26],
+  },
+  {
+    organization: 'Coral Route Excursions Pvt Ltd',
+    title: 'Public liability for marine excursions',
+    contact: 'Zahra Latheef',
+    email: 'zahra.latheef@coralroute.example',
+    phone: '+9607771006',
+    productCode: 'TL',
+    amount: 2800000,
+    currency: 'MVR',
+    stagePath: ['Contact Made', 'Lost'],
+    transitionDays: [6, 21],
+    lossReason: 'Client renewed directly with the incumbent insurer.',
+  },
+];
+
 export interface DemoSeed {
+  company: typeof COMPANY;
+  users: User[];
+  products: ProductCode[];
+  taxRates: TaxRate[];
+  emailTemplates: Record<string, string>;
   pipelines: Pipeline[];
   pipelineStages: PipelineStage[];
   vendors: Vendor[];
+  customerLookups: CustomerLookups;
   clients: Client[];
   leads: Lead[];
   deals: Deal[];
   quotationRequests: QuotationRequest[];
   invoices: Invoice[];
+  payments: Payment[];
   activities: Activity[];
   stageHistory: StageHistoryAudit[];
 }
 
-export function createDemoSeed(now = Date.now()): DemoSeed {
+export function createDemoSeed(now = Date.now(), includeLeads = false): DemoSeed {
   const timestamp = new Date(now).toISOString();
-  const day = (offset: number) => new Date(now + offset * 86400000).toISOString().slice(0, 10);
-  const enteredDaysAgo = (days: number) => new Date(now - days * 86400000).toISOString();
+  const company = {
+    ...COMPANY,
+    name: 'CRM Executive Demo',
+    legalName: 'CRM Executive Demo Limited',
+    address: 'Male, Republic of Maldives',
+    email: 'hello@crm-executive.demo',
+    phone: '+960 300 0000',
+    registration: 'DEM-0001',
+    requireNextActivityForStageChange: true,
+    leadStageSlaDays: { ...COMPANY.leadStageSlaDays },
+  };
+  const users: User[] = [
+    { id: 'demo-admin', name: 'Demo Administrator', email: 'admin@crm-executive.demo', role: 'admin', title: 'System Administrator' },
+    { id: 'demo-sales', name: 'Demo Sales Lead', email: 'sales@crm-executive.demo', role: 'sales', title: 'Sales Manager' },
+    { id: 'demo-finance', name: 'Demo Finance Lead', email: 'finance@crm-executive.demo', role: 'finance', title: 'Finance Manager' },
+  ];
+  const products: ProductCode[] = PRODUCT_CODES.map((product) => ({ ...product, id: product.code }));
+  const taxRates: TaxRate[] = [
+    { id: 'demo-tax-standard-gst', name: 'GST 8%', rate: 8, category: 'Standard', active: true },
+  ];
+  const emailTemplates = { ...DEMO_EMAIL_TEMPLATES };
   const pipelines: Pipeline[] = PIPELINE_DEFINITIONS.map(({ id, code, name }) => ({
     id, code, name, tenantId: TENANT_ID, isActive: true,
   }));
@@ -72,184 +194,141 @@ export function createDemoSeed(now = Date.now()): DemoSeed {
     { id: 'demo-vendor-reinsure', name: 'Island Reinsurance', vendorType: 'Reinsurer', country: 'Singapore', currency: 'USD', address: 'Singapore', email: 'island-re@example.test', phone: '+960 7770003', status: 'active', createdAt: timestamp, contacts: [] },
     { id: 'demo-vendor-inactive', name: 'Inactive Carrier', vendorType: 'Insurer', country: 'United Arab Emirates', currency: 'USD', address: 'Dubai', email: 'inactive@example.test', phone: '+960 7770004', status: 'inactive', createdAt: timestamp, contacts: [] },
   ];
-  const clients: Client[] = Array.from({ length: 4 }, (_, index) => {
-    const number = index + 1;
-    return {
-      id: `demo-client-${number}`,
-      name: ['Bonavista Maldives', 'Atoll Trading', 'Lagoon Resorts', 'Coral Construction'][index],
-      tin: `TIN-DEMO-${number}`,
-      country: ['Maldives', 'Sri Lanka', 'Singapore', 'Maldives'][index],
-      phone: `+960 77700${number}1`,
-      email: `client${number}@example.test`,
-      address: `Demo address ${number}, Male`,
-      contactPerson: `Contact ${number}`,
-      contacts: [{
-        id: `demo-contact-${number}`,
-        name: `Contact ${number}`,
-        role: 'Decision Maker',
-        email: `client${number}@example.test`,
-        phone: `+960 77700${number}1`,
-        whatsapp: `+960 77700${number}1`,
-        telegram: `@demoContact${number}`,
-        linkedLeadIds: [],
-        linkedDealIds: [],
-      }],
-      sumInsured: 250000 + number * 50000,
-      premium: 12500 + number * 2500,
-      expiry: day(120 + number),
-      insurer: vendors[number % 3].name,
-      productCode: ['NC', 'PR', 'DF', 'CM'][index],
-      class: ['Engineering', 'Fire', 'Fire', 'Engineering'][index],
-      ownerId: OWNER_ID,
-      tags: ['demo'],
-      accountStatus: 'active',
-    };
-  });
-  const leadTitles = [
-    'Bonavista Maldives - Contractors All Risks',
-    'Atoll Trading Property Renewal',
-    'Lagoon Resort Fire Cover',
-    'Coral Construction Machinery Cover',
-    'Male Retail Package',
-    'North Harbour Cargo Cover',
-    'South Atoll Liability Review',
-    'Island Engineering Survey',
-  ];
-  const clientForLead = [0, 0, 1, 1, 2, 2, 3, 3];
-  const pipelineForLead = [0, 0, 1, 1, 1, 2, 2, 0];
-  const leads: Lead[] = leadTitles.map((title, index) => {
-    const client = clients[clientForLead[index]];
-    const contact = client.contacts?.[0];
-    return {
-      id: `demo-lead-${index + 1}`,
-      createdAt: enteredDaysAgo(30 - index),
-      client: client.name,
-      clientId: client.id,
-      title,
-      value: 250000 + index * 35000,
-      ...(index !== 7 ? { currency: index % 2 ? 'USD' as const : 'MVR' as const } : {}),
-      ...(index % 2 ? { exchangeRate: 15.42 } : {}),
-      pipelineId: pipelines[pipelineForLead[index]].id,
-      closeDate: day(45 + index),
-      contact: contact?.name ?? '',
-      contactProfileId: contact?.id,
-      contactRole: contact?.role,
-      contactEmail: contact?.email,
-      contactPhone: contact?.phone,
-      whatsapp: contact?.whatsapp,
-      telegram: contact?.telegram,
-      contacts: [],
-      source: 'Demo seed',
-      notes: 'Seeded only for local UI verification.',
-      country: client.country,
-      insuranceClass: client.class,
-      productCode: client.productCode,
-      temperature: index === 0 ? 'HOT' : index < 4 ? 'WARM' : 'COLD',
-      status: 'IN-PROGRESS',
-      funnelStage: 'L3: Qualified Opportunity',
-      renewalDate: day(120 + index),
-      sumInsured: client.sumInsured,
-      premium: client.premium,
-      ownerId: OWNER_ID,
-      lastActivity: enteredDaysAgo(index),
-    };
-  });
-  const deals: Deal[] = [
-    {
-      id: 'demo-deal-1', pipelineId: pipelines[0].id, createdAt: enteredDaysAgo(50),
-      stageChangedAt: enteredDaysAgo(25), client: clients[0].name, clientId: clients[0].id,
-      product: 'Contractors All Risks', productCode: 'NC', value: 500000, weighted: 200000,
-      currency: 'MVR', stage: 'Quotation / Underwriting', probability: 70,
-      ownerId: OWNER_ID, closeDate: day(30), insurer: vendors[0].name, vendorId: vendors[0].id,
-      leadId: leads[0].id, contactName: leads[0].contact, contactEmail: leads[0].contactEmail,
-      contactPhone: leads[0].contactPhone, whatsapp: leads[0].whatsapp, telegram: leads[0].telegram,
-      proposalSummary: leads[0].title, source: 'Demo seed', notes: 'Stagnating deal for SLA checks.',
-    },
-    {
-      id: 'demo-deal-2', pipelineId: pipelines[0].id, createdAt: enteredDaysAgo(9),
-      stageChangedAt: enteredDaysAgo(3), client: clients[1].name, clientId: clients[1].id,
-      product: 'Property All Risk', productCode: 'PR', value: 320000, weighted: 192000,
-      currency: 'USD', exchangeRate: 15.42, stage: 'Quoted / Proposed', probability: 80,
-      ownerId: OWNER_ID, closeDate: day(40), insurer: vendors[1].name, vendorId: vendors[1].id,
-      leadId: leads[1].id, contactName: leads[1].contact, contactEmail: leads[1].contactEmail,
-      contactPhone: leads[1].contactPhone, whatsapp: leads[1].whatsapp, telegram: leads[1].telegram,
-      proposalSummary: leads[1].title, source: 'Demo seed',
-    },
-    {
-      id: 'demo-deal-3', pipelineId: pipelines[1].id, createdAt: enteredDaysAgo(60),
-      stageChangedAt: enteredDaysAgo(18), client: clients[2].name, clientId: clients[2].id,
-      product: 'Dwelling Fire', productCode: 'DF', value: 280000, weighted: 280000,
-      currency: 'MVR', stage: 'Review and Follow up', probability: 100,
-      ownerId: OWNER_ID, closeDate: day(-5), insurer: vendors[0].name, vendorId: vendors[0].id,
-      leadId: leads[2].id, disposition: 'won', proposalSummary: leads[2].title, source: 'Demo seed',
-    },
-    {
-      id: 'demo-deal-4', pipelineId: pipelines[2].id, createdAt: enteredDaysAgo(55),
-      stageChangedAt: enteredDaysAgo(35), client: clients[3].name, clientId: clients[3].id,
-      product: 'Comprehensive Machinery', productCode: 'CM', value: 175000, weighted: 0,
-      currency: 'USD', exchangeRate: 15.42, stage: 'Review and Follow up', probability: 0,
-      ownerId: OWNER_ID, closeDate: day(-12), insurer: vendors[2].name, vendorId: vendors[2].id,
-      leadId: leads[3].id, disposition: 'lost', lossReason: 'Demo loss reason',
-      proposalSummary: leads[3].title, source: 'Demo seed',
-    },
-    {
-      id: 'demo-deal-5', pipelineId: pipelines[1].id, createdAt: enteredDaysAgo(5),
-      stageChangedAt: enteredDaysAgo(1), client: clients[2].name, clientId: clients[2].id,
-      product: 'Dwelling Fire', productCode: 'DF', value: 90000, weighted: 45000,
-      currency: 'MVR', stage: 'Quoted / Proposed', probability: 80,
-      ownerId: OWNER_ID, closeDate: day(20), insurer: vendors[2].name, vendorId: vendors[2].id,
-      leadId: leads[4].id, contactName: leads[4].contact, contactEmail: leads[4].contactEmail,
-      contactPhone: leads[4].contactPhone, whatsapp: leads[4].whatsapp, telegram: leads[4].telegram,
-      proposalSummary: leads[4].title, source: 'Demo seed',
-    },
-  ];
-  for (const deal of deals) {
-    const lead = leads.find((item) => item.id === deal.leadId);
-    if (lead) {
-      lead.dealId = deal.id;
-      lead.pipelineId = deal.pipelineId;
-      lead.disposition = deal.disposition === 'won' ? 'converted' : lead.disposition;
-      if (deal.disposition === 'won') lead.funnelStage = 'Converted to deal';
+  const customerLookups = createDefaultCustomerLookups();
+  const salesOwner = users.find((user) => user.role === 'sales');
+  if (!salesOwner) throw new Error('Demo seed must include a sales owner.');
+  const { clients, leads } = includeLeads
+    ? createDemoLeads(now, products, salesOwner)
+    : { clients: [] as Client[], leads: [] as Lead[] };
+  const deals: Deal[] = [];
+  const quotationRequests: QuotationRequest[] = [];
+  const invoices: Invoice[] = [];
+  const payments: Payment[] = [];
+  const activities: Activity[] = [];
+  const stageHistory: StageHistoryAudit[] = [];
+
+  return {
+    company,
+    users,
+    products,
+    taxRates,
+    emailTemplates,
+    pipelines,
+    pipelineStages,
+    vendors,
+    customerLookups,
+    clients,
+    leads,
+    deals,
+    quotationRequests,
+    invoices,
+    payments,
+    activities,
+    stageHistory,
+  };
+}
+
+function createDemoLeads(now: number, products: ProductCode[], owner: User) {
+  if (owner.role !== 'sales') throw new Error('Demo lead owner must have the sales role.');
+  const createdAt = new Date(now - 60 * 86400000).toISOString();
+  const expectedCloseDate = new Date(now + 90 * 86400000).toISOString().slice(0, 10);
+  const records = DEMO_LEAD_SCENARIOS.map((scenario, index) => {
+    const product = products.find((candidate) => candidate.code === scenario.productCode);
+    if (!product) throw new Error(`Demo lead product ${scenario.productCode} is missing from the catalog.`);
+    if (!isValidEmail(scenario.email) || !isValidPhoneNumber(scenario.phone)) {
+      throw new Error(`Demo lead contact details are invalid for ${scenario.organization}.`);
     }
-  }
-  const quotationRequests: QuotationRequest[] = [
-    { id: 'demo-qr-1', ref: 'QR-2026-0001', dealId: deals[0].id, leadId: leads[0].id, clientId: clients[0].id, vendorIds: [vendors[0].id], productCode: deals[0].productCode ?? 'NC', sumInsured: deals[0].value, currency: deals[0].currency, requiredBy: day(14), notes: 'Draft request.', status: 'Draft', createdBy: OWNER_ID, createdAt: timestamp, updatedAt: timestamp },
-    { id: 'demo-qr-2', ref: 'QR-2026-0002', dealId: deals[1].id, leadId: leads[1].id, clientId: clients[1].id, vendorIds: [vendors[1].id], productCode: deals[1].productCode ?? 'PR', sumInsured: deals[1].value, currency: deals[1].currency, requiredBy: day(10), notes: 'Sent request.', status: 'Sent', createdBy: OWNER_ID, createdAt: timestamp, updatedAt: timestamp },
-    { id: 'demo-qr-3', ref: 'QR-2026-0003', dealId: deals[4].id, leadId: leads[4].id, clientId: clients[2].id, vendorIds: [vendors[2].id], productCode: deals[4].productCode ?? 'DF', sumInsured: deals[4].value, currency: deals[4].currency, requiredBy: day(7), notes: 'Responses received.', status: 'Responses received', createdBy: OWNER_ID, createdAt: timestamp, updatedAt: timestamp },
-  ];
-  const invoices: Invoice[] = [
-    { id: 'demo-invoice-1', number: 'INV-DEMO-001', clientId: clients[0].id, clientName: clients[0].name, insurer: vendors[0].name, policyNo: 'NC-DEMO-1', issueDate: day(-20), dueDate: day(10), status: 'Pending', items: [{ description: 'Commercial premium', qty: 1, unitPrice: 125000, vatRate: 8 }], installments: [], currency: 'MVR', linkedDealId: deals[0].id },
-    { id: 'demo-invoice-2', number: 'INV-DEMO-002', clientId: clients[1].id, clientName: clients[1].name, insurer: vendors[1].name, policyNo: 'PR-DEMO-2', issueDate: day(-10), dueDate: day(20), status: 'Paid', items: [{ description: 'Property premium', qty: 1, unitPrice: 2500, vatRate: 8 }], installments: [], currency: 'USD', linkedDealId: deals[1].id },
-  ];
-  const stageHistory: StageHistoryAudit[] = deals.map((deal) => {
-    const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
-    return {
-      id: `demo-history-${deal.id}`,
-      tenantId: TENANT_ID,
-      dealId: deal.id,
-      userId: OWNER_ID,
-      userName: 'Demo Administrator',
-      fromStageId: null,
-      toStageId: stage?.id ?? '',
-      enteredAt: deal.stageChangedAt ?? timestamp,
-      exitedAt: deal.disposition ? deal.stageChangedAt ?? timestamp : null,
-      durationSeconds: deal.disposition ? 86400 : null,
-      ...(deal.disposition === 'won' ? { outcome: 'won' as const } : {}),
-      ...(deal.disposition === 'lost' ? { outcome: 'lost' as const, lossReason: deal.lossReason } : {}),
+
+    const leadId = `demo-lead-${index + 1}`;
+    const contactProfileId = `demo-contact-${index + 1}`;
+    const contactProfile = {
+      id: contactProfileId,
+      name: scenario.contact,
+      role: 'Decision Maker',
+      email: scenario.email,
+      phone: scenario.phone,
+      whatsapp: scenario.phone,
+      linkedLeadIds: [leadId],
+      linkedDealIds: [],
     };
+    const client = createLeadOrganization(
+      scenario.organization,
+      owner.id,
+      {
+        tin: `DEMO-${10001 + index}`,
+        country: 'Maldives',
+        phone: scenario.phone,
+        email: scenario.email,
+        address: `Boduthakurufaanu Magu, Male, Maldives`,
+        contactPerson: scenario.contact,
+        contacts: [contactProfile],
+        productCode: product.code,
+        class: product.category,
+        tags: [],
+        accountStatus: 'active',
+      },
+      `demo-client-${index + 1}`,
+    );
+    const valueMvr = scenario.currency === 'USD'
+      ? scenario.amount * DEFAULT_USD_TO_MVR_RATE
+      : scenario.amount;
+    let lead: Lead = {
+      id: leadId,
+      createdAt,
+      updatedAt: new Date(now).toISOString(),
+      stageChangedAt: createdAt,
+      stageHistory: [],
+      person: owner.name,
+      personId: owner.id,
+      contactProfileId,
+      contactRole: contactProfile.role,
+      clientId: client.id,
+      client: client.name,
+      title: scenario.title,
+      value: scenario.amount,
+      valueMvr,
+      currency: scenario.currency,
+      ...(scenario.currency === 'USD' ? { exchangeRate: DEFAULT_USD_TO_MVR_RATE } : {}),
+      pipelineId: 'demo-pipeline-commercial',
+      closeDate: expectedCloseDate,
+      visibility: 'individual',
+      contact: scenario.contact,
+      contactEmail: scenario.email,
+      contactPhone: scenario.phone,
+      whatsapp: scenario.phone,
+      telegram: '',
+      contacts: [contactProfile],
+      source: 'Referral',
+      notes: `${scenario.title} - initial scoping discussion.`,
+      country: client.country,
+      insuranceClass: product.category,
+      productCode: product.code,
+      temperature: 'WARM',
+      status: 'TO-DO',
+      funnelStage: 'Lead Identified',
+      ...(scenario.lossReason ? { lossReason: scenario.lossReason } : {}),
+      renewalDate: expectedCloseDate,
+      sumInsured: valueMvr,
+      premium: valueMvr,
+      ownerId: owner.id,
+      lastActivity: 'Seeded demo lead',
+      routedAt: createdAt,
+    };
+
+    for (const [transitionIndex, toStage] of scenario.stagePath.entries()) {
+      const enteredAt = new Date(
+        Date.parse(createdAt) + scenario.transitionDays[transitionIndex] * 86400000,
+      ).toISOString();
+      const stageHistory = appendLeadStageTransition(lead, toStage, enteredAt);
+      lead = { ...lead, funnelStage: toStage, stageChangedAt: enteredAt, stageHistory };
+    }
+    if (scenario.lossReason) lead = { ...lead, disposition: 'lost' };
+
+    return { client, lead };
   });
-  const activities: Activity[] = [{
-    id: 'demo-activity-seed',
-    clientId: clients[0].id,
-    dealId: deals[0].id,
-    leadId: leads[0].id,
-    type: 'note',
-    title: 'Demo seed',
-    description: 'Local-only data for browser QA.',
-    date: timestamp,
-    createdAt: timestamp,
-    userId: OWNER_ID,
-    actorName: 'Demo Administrator',
-  }];
-  return { pipelines, pipelineStages, vendors, clients, leads, deals, quotationRequests, invoices, activities, stageHistory };
+
+  return {
+    clients: records.map(({ client }) => client),
+    leads: records.map(({ lead }) => lead),
+  };
 }

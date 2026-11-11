@@ -4,7 +4,7 @@ import {
 } from 'react';
 import type {
   Activity, Client, Deal, Invoice, Lead, LeadStageHistoryRecord, Payment, Pipeline, PipelineStage,
-  QuotationRequest, Role, StageHistoryAudit, TaxRate, User, ProductCode, Vendor,
+  ClientQuotation, QuotationRequest, Role, StageHistoryAudit, TaxRate, User, ProductCode, Vendor,
 } from '../types';
 import { COMPANY, PRODUCT_CODES } from '../data/catalogs';
 import { DEAL_PIPELINE_STAGES } from '../data/pipelineStageTemplates';
@@ -25,8 +25,8 @@ import {
 import { reconcileContactAssociations } from '../utils/contactProfiles';
 import { isLostPipelineStage, isWonPipelineStage } from '../utils/stageSla';
 import { buildLeadStageHistoryRecords, hydrateLeadStageHistory } from '../utils/leadLifecycle';
-import { migrateDealLeadLinks } from '../utils/dealFactory';
 import { createDemoSeed } from '../dev/demoSeed';
+import { normalizeQuotationRequests } from '../utils/quotationRequests';
 
 interface AppState {
   user: User;
@@ -51,11 +51,13 @@ interface AppState {
   products: ProductCode[];
   setProducts: Dispatch<SetStateAction<ProductCode[]>>;
   activities: Activity[];
-  setActivities: (items: Activity[]) => void;
+  setActivities: Dispatch<SetStateAction<Activity[]>>;
   vendors: Vendor[];
   setVendors: Dispatch<SetStateAction<Vendor[]>>;
   quotationRequests: QuotationRequest[];
   setQuotationRequests: Dispatch<SetStateAction<QuotationRequest[]>>;
+  clientQuotations: ClientQuotation[];
+  setClientQuotations: Dispatch<SetStateAction<ClientQuotation[]>>;
   deals: Deal[];
   setDeals: Dispatch<SetStateAction<Deal[]>>;
   invoices: Invoice[];
@@ -209,7 +211,10 @@ const DEMO_USER: User = {
   role: 'admin',
   title: 'Development Demo Session',
 };
-const DEMO_SEED_ENABLED = AUTH_BYPASS && import.meta.env.VITE_DEMO_SEED === 'true';
+const DEMO_LEADS_ENABLED = AUTH_BYPASS && import.meta.env.VITE_DEMO_LEADS === 'true';
+const DEMO_SEED_ENABLED = AUTH_BYPASS && (
+  import.meta.env.VITE_DEMO_SEED === 'true' || DEMO_LEADS_ENABLED
+);
 const DEMO_ADMIN_USERNAME = import.meta.env.VITE_DEMO_ADMIN_USERNAME;
 const DEMO_ADMIN_PASSWORD = import.meta.env.VITE_DEMO_ADMIN_PASSWORD;
 const normalizeProduct = (product: ProductCode): ProductCode => {
@@ -427,25 +432,28 @@ function customerLookupRecord(options: CustomerLookups) {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [demoSeed] = useState(() => DEMO_SEED_ENABLED ? createDemoSeed() : null);
-  const [user, setUser] = useState<User>(demoSeed ? DEMO_USER : GUEST_USER);
+  const [demoSeed] = useState(() => DEMO_SEED_ENABLED
+    ? createDemoSeed(Date.now(), DEMO_LEADS_ENABLED)
+    : null);
+  const [user, setUser] = useState<User>(demoSeed?.users.find((entry) => entry.role === 'admin') ?? DEMO_USER);
   const [viewAsRole, setViewAsRoleState] = useState<Role | null>(null);
   const [authLoading, setAuthLoading] = useState(!AUTH_BYPASS);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [taxRates, setTaxRates] = useState<TaxRate[]>([]);
+  const [taxRates, setTaxRates] = useState<TaxRate[]>(demoSeed?.taxRates ?? []);
   const [leads, setLeads] = useState<Lead[]>(demoSeed?.leads ?? []);
   const [clients, setClients] = useState<Client[]>(demoSeed?.clients ?? []);
-  const [customerLookups, setCustomerLookups] = useState<CustomerLookups>(createDefaultCustomerLookups);
-  const [products, setProducts] = useState<ProductCode[]>(() => PRODUCT_CODES.map((product) => ({ ...product, id: product.code })));
+  const [customerLookups, setCustomerLookups] = useState<CustomerLookups>(demoSeed?.customerLookups ?? createDefaultCustomerLookups);
+  const [products, setProducts] = useState<ProductCode[]>(demoSeed?.products ?? (() => PRODUCT_CODES.map((product) => ({ ...product, id: product.code }))));
   const [activities, setActivities] = useState<Activity[]>(demoSeed?.activities ?? []);
   const [vendors, setVendors] = useState<Vendor[]>(demoSeed?.vendors ?? []);
   const [quotationRequests, setQuotationRequests] = useState<QuotationRequest[]>(demoSeed?.quotationRequests ?? []);
+  const [clientQuotations, setClientQuotations] = useState<ClientQuotation[]>([]);
   const [deals, setDeals] = useState<Deal[]>(demoSeed?.deals ?? []);
   const [invoices, setInvoices] = useState<Invoice[]>(demoSeed?.invoices ?? []);
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [users, setUsers] = useState<User[]>(demoSeed ? [DEMO_USER] : []);
-  const [company, setCompany] = useState<typeof COMPANY>(COMPANY);
-  const [emailTemplates, setEmailTemplates] = useState<Record<string, string>>(DEFAULT_EMAIL_TEMPLATES);
+  const [payments, setPayments] = useState<Payment[]>(demoSeed?.payments ?? []);
+  const [users, setUsers] = useState<User[]>(demoSeed?.users ?? []);
+  const [company, setCompany] = useState<typeof COMPANY>(demoSeed?.company ?? COMPANY);
+  const [emailTemplates, setEmailTemplates] = useState<Record<string, string>>(demoSeed?.emailTemplates ?? DEFAULT_EMAIL_TEMPLATES);
   const [pipelines, setPipelines] = useState<Pipeline[]>(demoSeed?.pipelines ?? []);
   const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>(demoSeed?.pipelineStages ?? []);
   const [stageHistory, setStageHistory] = useState<StageHistoryAudit[]>(demoSeed?.stageHistory ?? []);
@@ -458,7 +466,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     deals: Deal[];
     clients: Client[];
     vendors: Vendor[];
-    quotationRequests: QuotationRequest[];
   } | null>(null);
   const auditUserId = useRef('');
   const setViewAsRole = useCallback((role: Role | null) => {
@@ -555,6 +562,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setActivities([]);
       setVendors([]);
       setQuotationRequests([]);
+      setClientQuotations([]);
+      setClientQuotations([]);
       setPipelines([]);
       setPipelineStages([]);
       setStageHistory([]);
@@ -612,6 +621,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setActivities([]);
     setVendors([]);
     setQuotationRequests([]);
+    setClientQuotations([]);
     setDeals([]);
     setInvoices([]);
     setPayments([]);
@@ -677,8 +687,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           loadedDeals,
           asArray<StageHistoryAudit>(records, 'stage-history'),
         );
-        const linkedRecords = migrateDealLeadLinks(migrated.deals, leadsWithHistory, loadedClients);
-        const contactsReconciled = reconcileContactAssociations(linkedRecords.leads, loadedClients, linkedRecords.deals);
+        const contactsReconciled = reconcileContactAssociations(leadsWithHistory, loadedClients, migrated.deals);
         setLeads(contactsReconciled.leads);
         setClients(contactsReconciled.clients);
         const customerLookupsRecord = records.find((record) => record.resource === 'customer-lookups');
@@ -686,9 +695,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const savedProducts = asArray<ProductCode>(records, 'products');
         setProducts(savedProducts.length > 0 ? savedProducts.map(normalizeProduct) : PRODUCT_CODES.map((product) => ({ ...product, id: product.code })));
         const rawVendors = asArray<Vendor>(records, 'vendors');
-        setQuotationRequests(asArray<QuotationRequest>(records, 'quotation-requests'));
+        setQuotationRequests(normalizeQuotationRequests(asArray<unknown>(records, 'quotation-requests')));
+        setClientQuotations(asArray<ClientQuotation>(records, 'client-quotations'));
         setActivities(asArray<Activity>(records, 'activities'));
-        const vendorMigration = migrateVendorData(rawVendors, linkedRecords.deals, loadedClients);
+        const vendorMigration = migrateVendorData(rawVendors, migrated.deals, loadedClients);
         setDeals(vendorMigration.deals);
         setVendors(vendorMigration.vendors);
         setPipelines(rawPipelines);
@@ -711,6 +721,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
               ? savedLeadStageSlaDays as Partial<typeof COMPANY.leadStageSlaDays>
               : {}),
           },
+            quotationValidityDays: Number.isInteger(savedCompany?.quotationValidityDays)
+              ? Number(savedCompany?.quotationValidityDays)
+              : COMPANY.quotationValidityDays,
+            requireDifferentQuotationAuthorizer: typeof savedCompany?.requireDifferentQuotationAuthorizer === 'boolean'
+              ? savedCompany.requireDifferentQuotationAuthorizer
+              : COMPANY.requireDifferentQuotationAuthorizer,
+            quotationClauses: savedCompany && savedCompany.quotationClauses && typeof savedCompany.quotationClauses === 'object'
+              ? savedCompany.quotationClauses as typeof COMPANY.quotationClauses
+              : COMPANY.quotationClauses,
         });
         const templatesRecord = records.find((record) => record.resource === 'email-templates');
         setEmailTemplates(templatesRecord
@@ -741,6 +760,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       activities,
       vendors,
       'quotation-requests': quotationRequests,
+      'client-quotations': clientQuotations,
       deals,
       invoices,
       payments,
@@ -753,7 +773,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     const writableByRole: Record<Role, string[]> = {
       admin: Object.keys(allResources),
-      sales: ['leads', 'clients', 'customer-lookups', 'activities', 'vendors', 'quotation-requests', 'deals', 'stage-history', 'lead-stage-history'],
+      sales: ['leads', 'clients', 'customer-lookups', 'activities', 'vendors', 'quotation-requests', 'client-quotations', 'deals', 'stage-history', 'lead-stage-history'],
       finance: ['invoices', 'payments'],
       client: [],
     };
@@ -762,12 +782,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const resources = writableByRole[user.role];
         const upsertOrder = [
           'clients', 'vendors', 'pipelines', 'pipeline-stages', 'leads', 'deals',
-          'invoices', 'quotation-requests', 'payments', 'activities', 'stage-history',
+          'invoices', 'quotation-requests', 'client-quotations', 'payments', 'activities', 'stage-history',
           'lead-stage-history', 'tax-rates', 'customer-lookups', 'products', 'policy-types',
           'company', 'email-templates',
         ].filter((resource) => resources.includes(resource));
         const deleteOrder = [
-          'payments', 'activities', 'audit-log', 'quotation-requests', 'invoices', 'deals',
+          'payments', 'activities', 'audit-log', 'client-quotations', 'quotation-requests', 'invoices', 'deals',
           'stage-history', 'lead-stage-history', 'leads', 'clients', 'vendors',
           'pipeline-stages', 'pipelines', 'customer-lookups', 'tax-rates', 'products',
           'policy-types', 'company', 'email-templates',
@@ -797,7 +817,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setQuotationRequests((current) => reconcilePersistedFields(
           current,
           savedRecords.get('quotation-requests') ?? new Map(),
-          ['reference', 'ref'],
+          ['reference'],
         ));
         setInvoices((current) => reconcilePersistedFields(
           current,
@@ -816,7 +836,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }, 500);
     return () => window.clearTimeout(timer);
   }, [
-    dataReady, user.id, user.role, taxRates, leads, clients, activities, vendors, quotationRequests, deals,
+    dataReady, user.id, user.role, taxRates, leads, clients, activities, vendors, quotationRequests, clientQuotations, deals,
     invoices, payments, pipelines, pipelineStages, stageHistory, company, emailTemplates, customerLookups, products,
   ]);
 
@@ -828,7 +848,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     if (!auditSnapshot.current || auditUserId.current !== user.id) {
-      auditSnapshot.current = { leads, deals, clients, vendors, quotationRequests };
+      auditSnapshot.current = { leads, deals, clients, vendors };
       auditUserId.current = user.id;
       return;
     }
@@ -910,34 +930,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }];
     });
 
-    const quotationRequestAudits = quotationRequests.flatMap((request) => {
-      const previousRequest = previous.quotationRequests.find((item) => item.id === request.id);
-      if (previousRequest && previousRequest.status === request.status) return [];
-      const isCreated = !previousRequest;
-      const vendorNames = request.vendorIds
-        .map((vendorId) => vendors.find((vendor) => vendor.id === vendorId)?.name)
-        .filter((name): name is string => Boolean(name));
-      return [{
-        id: `audit-${crypto.randomUUID()}`,
-        clientId: request.clientId,
-        leadId: request.leadId,
-        dealId: request.dealId,
-        type: 'note' as const,
-        title: isCreated ? 'Quotation request created' : 'Quotation request status changed',
-        description: isCreated
-          ? `${request.ref} created with status ${request.status}${vendorNames.length ? ` for ${vendorNames.join(', ')}` : ''}.`
-          : `${request.ref}: ${previousRequest.status} → ${request.status}`,
-        date: now,
-        createdAt: now,
-        userId: user.id,
-        actorName: user.name,
-      }];
-    });
-
-    auditSnapshot.current = { leads, deals, clients, vendors, quotationRequests };
-    const audits = [...leadAudits, ...dealAudits, ...contactAudits, ...vendorAudits, ...quotationRequestAudits];
+    auditSnapshot.current = { leads, deals, clients, vendors };
+    const audits = [...leadAudits, ...dealAudits, ...contactAudits, ...vendorAudits];
     if (audits.length) setActivities((current) => [...audits, ...current]);
-  }, [clients, dataReady, deals, leads, quotationRequests, user, vendors, setActivities]);
+  }, [clients, dataReady, deals, leads, user, vendors, setActivities]);
 
   useEffect(() => {
     if (AUTH_BYPASS || authLoading || user.role !== 'admin' || user.id === DEMO_USER.id) return;
@@ -1004,12 +1000,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     signIn, register, signOut, initializeSampleLeads, hasAccess, dataReady,
     taxRates, setTaxRates, leads, setLeads, clients, setClients, customerLookups, setCustomerLookups, products, setProducts,
     activities, setActivities, vendors, setVendors, quotationRequests, setQuotationRequests,
+    clientQuotations, setClientQuotations,
     deals, setDeals, invoices, setInvoices, payments, setPayments, users, setUsers,
     createUser, updateUserProfile, company, setCompany, emailTemplates, setEmailTemplates, persistenceError,
     pipelines, setPipelines, pipelineStages, setPipelineStages, stageHistory, setStageHistory,
   }), [
     user, authLoading, authError, viewAsRole, setViewAsRole, signIn, register, signOut, initializeSampleLeads, hasAccess, dataReady,
-    taxRates, leads, clients, customerLookups, products, activities, vendors, quotationRequests, deals, invoices, payments, users,
+    taxRates, leads, clients, customerLookups, products, activities, vendors, quotationRequests, clientQuotations, deals, invoices, payments, users,
     createUser, updateUserProfile, company, emailTemplates, persistenceError, pipelines, pipelineStages, stageHistory,
   ]);
 

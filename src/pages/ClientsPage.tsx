@@ -6,12 +6,12 @@ import ActivityTimelineItem from '../components/ActivityTimelineItem';
 import { useApp } from '../store/AppContext';
 import { supabase } from '../lib/supabase';
 import {
-  Phone, Mail, MapPin, Calendar, FileText, List, Columns3,
+  Phone, Mail, MapPin, Calendar, List, Columns3,
   Building2, Briefcase, ShieldCheck, Plus, Search, Pencil, Trash2,
   Filter, MoreHorizontal, X, ArrowUpDown,
 } from 'lucide-react';
 import type { Activity, Client, CompanyContactProfile } from '../types';
-import { DEFAULT_USD_TO_MVR_RATE, formatAmount, toMvr, type Currency } from '../utils/currency';
+import { DEFAULT_USD_TO_MVR_RATE, toMvr } from '../utils/currency';
 import { formatDate } from '../utils/date';
 import DateInput from '../components/ui/DateInput';
 import { hasCompleteClientProfile, INCOMPLETE_COMPANY_TAG } from '../utils/customerProfile';
@@ -29,7 +29,7 @@ type ClientStatus = 'Active' | 'Draft' | 'Renewal Due' | 'Info incomplete';
 type ClientSortKey = 'name' | 'tin' | 'country' | 'class' | 'contactPerson' | 'phone' | 'email' | 'address' | 'owner' | 'activity' | 'status';
 
 export default function ClientsPage() {
-  const { clients, setClients, leads, setLeads, deals, setDeals, invoices, activities, setActivities, user, users, vendors, dataReady } = useApp();
+  const { clients, setClients, leads, setLeads, deals, setDeals, invoices, activities, setActivities, user, users, dataReady } = useApp();
   const [selectedId, setSelectedId] = useState('');
   const [portalClientId, setPortalClientId] = useState(user.clientId ?? '');
   const [view, setView] = useState<'list' | 'kanban'>(() => localStorage.getItem('clientsView') === 'kanban' ? 'kanban' : 'list');
@@ -65,11 +65,7 @@ export default function ClientsPage() {
   const [isPortalEdit, setIsPortalEdit] = useState(false);
   const [profileError, setProfileError] = useState('');
   const [activityOpen, setActivityOpen] = useState(false);
-  const [quoteOpen, setQuoteOpen] = useState(false);
   const [activityClientId, setActivityClientId] = useState('');
-  const [quoteCurrency, setQuoteCurrency] = useState<Currency | ''>('');
-  const [quoteAmount, setQuoteAmount] = useState('');
-  const [quoteExchangeRate, setQuoteExchangeRate] = useState('');
   useEffect(() => {
     const syncSelectedClient = () => {
       const requestedId = hashParams().get('id') ?? '';
@@ -87,7 +83,7 @@ export default function ClientsPage() {
     : clients;
   const selected = visibleClients.find((c) => c.id === selectedId);
   const activityClient = visibleClients.find((client) => client.id === activityClientId) ?? selected;
-  const modalOpen = Boolean(editingClient || pendingDeletion || deleteBlockedMessage || activityOpen || quoteOpen || createOpen || filterOpen);
+  const modalOpen = Boolean(editingClient || pendingDeletion || deleteBlockedMessage || activityOpen || createOpen || filterOpen);
   useEffect(() => {
     localStorage.setItem('clientsView', view);
   }, [view]);
@@ -499,34 +495,20 @@ export default function ClientsPage() {
     if (!activityClient) return;
     const data = new FormData(event.currentTarget);
     const description = String(data.get('description')).trim();
-    const amount = type === 'quote' ? Number(data.get('premium')) : undefined;
-    const currency = type === 'quote' ? String(data.get('currency')) as Currency : undefined;
-    const exchangeRate = currency === 'USD' ? Number(data.get('exchangeRate')) : undefined;
-    const quoteSummary = currency === 'USD'
-      ? `Premium ${formatAmount(amount ?? 0, 'USD')} (equivalent ${formatAmount(toMvr(amount ?? 0, 'USD', exchangeRate), 'MVR')} at ${exchangeRate} MVR per USD).`
-      : currency === 'MVR' ? `Premium ${formatAmount(amount ?? 0, 'MVR')}.` : '';
     const now = new Date().toISOString();
     const activity: Activity = {
       id: `a-${Date.now()}`,
       clientId: activityClient.id,
       type,
       title: String(data.get('title')).trim(),
-      description: type === 'quote'
-        ? `Insurer: ${String(data.get('insurer'))}; ${quoteSummary} ${description}`
-        : description,
+      description,
       date: now,
       createdAt: now,
       userId: user.id,
       actorName: user.name,
-      ...(type === 'quote' && currency ? {
-        quoteAmount: amount,
-        quoteCurrency: currency,
-        ...(exchangeRate ? { quoteExchangeRate: exchangeRate } : {}),
-      } : {}),
     };
     setActivities([activity, ...activities]);
-    if (type === 'quote') setQuoteOpen(false);
-    else setActivityOpen(false);
+    setActivityOpen(false);
   };
 
   return (
@@ -654,7 +636,6 @@ export default function ClientsPage() {
                     <TableRowActionsMenu open={actionMenu?.id === client.id && Boolean(actionMenu.anchor.closest('table[aria-label="Clients"]'))} anchor={actionMenu?.id === client.id ? actionMenu.anchor : null} label={`${client.name} actions`}>
                       {(user.role === 'admin' || user.role === 'client') && <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { setIsPortalEdit(user.role === 'client'); setEditingClient(client); setActionMenu(null); }}><Pencil size={13} /> {user.role === 'client' ? 'Edit My Profile' : 'Edit Client'}</button>}
                       {user.role !== 'client' && <>
-                        <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { setActivityClientId(client.id); setQuoteCurrency(''); setQuoteAmount(''); setQuoteExchangeRate(''); setQuoteOpen(true); setActionMenu(null); }}><FileText size={13} /> New Quote</button>
                         <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { setActivityClientId(client.id); setActivityOpen(true); setActionMenu(null); }}><Plus size={13} /> Log Activity</button>
                       </>}
                       {user.role === 'admin' && <button type="button" role="menuitem" className="table-row-actions-item text-hot" onClick={() => { deleteClient(client); setActionMenu(null); }}><Trash2 size={13} /> Delete Client</button>}
@@ -701,7 +682,6 @@ export default function ClientsPage() {
                   <TableRowActionsMenu open={actionMenu?.id === client.id && Boolean(actionMenu.anchor.closest('[data-testid="clients-card-grid"]'))} anchor={actionMenu?.id === client.id ? actionMenu.anchor : null} label={`${client.name} actions`}>
                     {(user.role === 'admin' || user.role === 'client') && <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { setIsPortalEdit(user.role === 'client'); setEditingClient(client); setActionMenu(null); }}><Pencil size={13} /> {user.role === 'client' ? 'Edit My Profile' : 'Edit Client'}</button>}
                     {user.role !== 'client' && <>
-                      <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { setActivityClientId(client.id); setQuoteCurrency(''); setQuoteAmount(''); setQuoteExchangeRate(''); setQuoteOpen(true); setActionMenu(null); }}><FileText size={13} /> New Quote</button>
                       <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { setActivityClientId(client.id); setActivityOpen(true); setActionMenu(null); }}><Plus size={13} /> Log Activity</button>
                     </>}
                     {user.role === 'admin' && <button type="button" role="menuitem" className="table-row-actions-item text-hot" onClick={() => { deleteClient(client); setActionMenu(null); }}><Trash2 size={13} /> Delete Client</button>}
@@ -812,7 +792,6 @@ export default function ClientsPage() {
               </>}
               {user.role === 'client' && <button type="button" className="btn-primary !py-2" onClick={() => { setProfileError(''); setIsPortalEdit(true); setEditingClient(selected); }}><Pencil size={14} /> Edit My Profile</button>}
               {user.role !== 'client' && <>
-                <button type="button" className="btn-ghost !py-2" onClick={() => { setActivityClientId(selected.id); setQuoteCurrency(''); setQuoteAmount(''); setQuoteExchangeRate(''); setQuoteOpen(true); }}><FileText size={14} /> New Quote</button>
                 <button type="button" className="btn-primary !py-2" onClick={() => { setActivityClientId(selected.id); setActivityOpen(true); }}><Plus size={14} /> Log Activity</button>
               </>}
               <button ref={drawerCloseRef} type="button" aria-label="Close client details" className="btn-ghost !p-2" onClick={closeDrawer}><X size={16} /></button>
@@ -943,17 +922,6 @@ export default function ClientsPage() {
                 <Field label="Activity type"><select className="input" name="type"><option value="call">Call</option><option value="meeting">Meeting</option><option value="email">Email</option><option value="note">Note</option><option value="task">Task</option><option value="upload">Upload</option></select></Field>
                 <Field label="Title"><input className="input" name="title" required /></Field>
                 <Field label="Details"><textarea className="input min-h-24" name="description" required /></Field>
-              </form>
-            </Modal>
-            <Modal open={quoteOpen} onClose={() => setQuoteOpen(false)} title="Create Quote" subtitle={`Prepare a quote for ${activityClient?.name ?? ''}.`} footer={<><button type="button" className="btn-ghost" onClick={() => setQuoteOpen(false)}>Cancel</button><button type="submit" form="new-quote-form" className="btn-primary">Save Quote</button></>}>
-              <form id="new-quote-form" onSubmit={(event) => addActivity(event, 'quote')} className="space-y-3">
-                <Field label="Product"><select className="input" name="title" required defaultValue=""><option value="">Select product</option>{PRODUCT_CODES.map((product) => <option key={product.code} value={`${product.name} quote`}>{product.code} · {product.name}</option>)}</select></Field>
-                <Field label="Insurer"><select className="input" name="insurer" required defaultValue=""><option value="">Select insurer</option>{vendors.filter((vendor) => ['Insurer', 'Reinsurer'].includes(vendor.vendorType) && vendor.status === 'active').map((vendor) => <option key={vendor.id} value={vendor.name}>{vendor.name}</option>)}</select></Field>
-                <Field label="Currency"><select className="input" name="currency" required value={quoteCurrency} onChange={(event) => { const currency = event.target.value as Currency | ''; setQuoteCurrency(currency); setQuoteAmount(''); setQuoteExchangeRate(currency === 'USD' ? String(DEFAULT_USD_TO_MVR_RATE) : ''); }}><option value="">Select currency</option><option value="MVR">MVR</option><option value="USD">USD</option></select></Field>
-                <Field label={`Premium${quoteCurrency ? ` (${quoteCurrency})` : ''}`}><input className="input" name="premium" type="number" min="0" step="0.01" required value={quoteAmount} onChange={(event) => setQuoteAmount(event.target.value)} /></Field>
-                {quoteCurrency === 'USD' && <Field label="Exchange rate (1 USD = MVR)"><input className="input" name="exchangeRate" type="number" min="0.000001" step="any" required value={quoteExchangeRate} onChange={(event) => setQuoteExchangeRate(event.target.value)} /></Field>}
-                {quoteCurrency === 'USD' && Number(quoteAmount) > 0 && Number(quoteExchangeRate) > 0 && <p className="text-sm text-muted">Equivalent: {formatAmount(toMvr(Number(quoteAmount), 'USD', Number(quoteExchangeRate)), 'MVR')}</p>}
-                <Field label="Coverage / notes"><textarea className="input min-h-24" name="description" placeholder="Enter coverage and terms" required /></Field>
               </form>
             </Modal>
             <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Add Client" subtitle="Create a draft client profile." footer={<><button type="button" className="btn-ghost" onClick={() => setCreateOpen(false)}>Cancel</button><button type="submit" form="new-client-form" className="btn-primary">Create Client</button></>}>

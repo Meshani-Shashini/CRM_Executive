@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { BarChart3, TrendingDown } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import PageToolbar from '../components/ui/PageToolbar';
+import MonthlyDealSummaryPanel from '../components/deal/MonthlyDealSummaryPanel';
 import { useApp } from '../store/AppContext';
 import { isLostPipelineStage } from '../utils/stageSla';
 import { resolveLeadStageSlaDays } from '../utils/leadStageSla';
@@ -28,7 +29,7 @@ function isCombinedDispositionStage(stage: Parameters<typeof isLostPipelineStage
 }
 
 export default function FunnelsPage() {
-  const { pipelines, pipelineStages, stageHistory, deals, leads, company } = useApp();
+  const { pipelines, pipelineStages, stageHistory, deals, leads, clients, company } = useApp();
   const [pipelineId, setPipelineId] = useState(pipelines.find((pipeline) => pipeline.isActive)?.id ?? '');
   useEffect(() => {
     if (!pipelines.some((pipeline) => pipeline.id === pipelineId && pipeline.isActive)) {
@@ -138,6 +139,16 @@ export default function FunnelsPage() {
         <Metric label="Closed won" value={wonCount} icon={<Badge variant="win">Won</Badge>} />
         <Metric label="Closed lost" value={lostCount} icon={<TrendingDown size={16} className="text-hot" />} />
       </div>
+
+      <MonthlyDealSummaryPanel
+        deals={deals}
+        pipelineStages={pipelineStages}
+        leads={leads}
+        clients={clients}
+        stageHistory={stageHistory}
+        pipelineId={pipelineId}
+        title="Monthly value by outcome and open stage"
+      />
 
       {totalTracked === 0 ? (
         <div className="glass rounded-2xl p-8 text-center">

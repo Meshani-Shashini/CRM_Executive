@@ -55,7 +55,7 @@ const GROUPS: NavGroup[] = [
       { key: 'plans', label: 'Plans', icon: Target, roles: ['admin', 'sales'] },
       { key: 'reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'finance'] },
       { key: 'documents', label: 'Documents', icon: Files, roles: ['admin', 'sales', 'finance', 'client'] },
-      { key: 'quotations', label: 'Quotations', icon: FileText, roles: ['admin', 'sales'] },
+      { key: 'quotations', label: 'Quotations', icon: FileText, roles: ['admin', 'sales', 'client'] },
       { key: 'internal-slips', label: 'Internal Slips', icon: BookUser, roles: ['admin', 'sales'] },
       { key: 'pay-requests', label: 'Pay Requests', icon: Send, roles: ['admin', 'finance'] },
       { key: 'info-requests', label: 'Info Requests', icon: Info, roles: ['admin', 'sales'] },

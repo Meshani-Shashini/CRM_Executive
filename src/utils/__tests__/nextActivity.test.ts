@@ -36,13 +36,7 @@ describe('next activity', () => {
       .toBe('earlier');
   });
 
-  it('supports legacy task dates and deal-level next-activity fields', () => {
-    const legacyTask = activity({ dueDate: undefined, date: new Date(2026, 10, 8).toISOString() });
-    expect(getNextActivity([legacyTask], { leadId: 'lead-1' }, now).state).toBe('overdue');
-    expect(getNextActivity([], {
-      dealId: 'deal-1',
-      legacyDueDate: new Date(2026, 10, 12).toISOString(),
-      legacyTitle: 'Renewal review',
-    }, now)).toMatchObject({ title: 'Renewal review', state: 'future' });
+  it('returns no activity when no scheduled activity matches the record ids', () => {
+    expect(getNextActivity([], { dealId: 'deal-1' }, now)).toMatchObject({ state: 'none' });
   });
 });

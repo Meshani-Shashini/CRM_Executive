@@ -118,16 +118,15 @@ describe('requested CRM fixes', () => {
   });
 
   it('enforces next-step and admin-only reopen transitions', () => {
-    expect(canTransitionQuotationRequestStatus('Draft', 'Sent', 'sales')).toBe(true);
-    expect(canTransitionQuotationRequestStatus('Draft', 'Closed', 'sales')).toBe(true);
-    expect(canTransitionQuotationRequestStatus('Responses received', 'Sent', 'sales')).toBe(false);
-    expect(canTransitionQuotationRequestStatus('Responses received', 'Sent', 'admin')).toBe(true);
-    expect(canTransitionQuotationRequestStatus('Closed', 'Closed', 'admin')).toBe(false);
+    expect(canTransitionQuotationRequestStatus('Requested', 'Sent', 'sales')).toBe(true);
+    expect(canTransitionQuotationRequestStatus('Sent', 'Quoted', 'sales')).toBe(true);
+    expect(canTransitionQuotationRequestStatus('Sent', 'Requested', 'sales')).toBe(false);
+    expect(canTransitionQuotationRequestStatus('Quoted', 'Sent', 'admin')).toBe(true);
+    expect(canTransitionQuotationRequestStatus('Cancelled', 'Sent', 'admin')).toBe(false);
     expect(quotationRequestStatusOptions('Sent', 'sales').map(({ status }) => status))
-      .toEqual(['Sent', 'Responses received', 'Closed']);
-    expect(quotationRequestStatusOptions('Sent', 'admin').find(({ status }) => status === 'Draft')?.label)
-      .toBe('Reopen to Draft');
-
+      .toEqual(['Sent', 'Quoted', 'Declined', 'Expired', 'Cancelled']);
+    expect(quotationRequestStatusOptions('Quoted', 'admin').find(({ status }) => status === 'Sent')?.label)
+      .toBe('Reopen to Sent');
   });
 
   it('marks a stage overdue only after the threshold is exceeded', () => {
