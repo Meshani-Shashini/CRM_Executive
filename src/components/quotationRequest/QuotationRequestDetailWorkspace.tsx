@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { ArrowLeft, Copy, Printer, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, Copy, FileText, LayoutDashboard, Printer } from 'lucide-react';
 import Badge from '../ui/Badge';
 import Modal from '../ui/Modal';
 import PageToolbar from '../ui/PageToolbar';
@@ -11,7 +11,6 @@ import type {
 } from '../../types';
 import { formatAmount } from '../../utils/currency';
 import { formatDate } from '../../utils/date';
-import { dashboardHref } from '../../utils/navigation';
 import { printDocument } from '../../utils/print';
 import {
   canTransitionQuotationRequestStatus, quotationLineRowActions, quotationRequestStatusOptions,
@@ -21,8 +20,7 @@ import {
   formatQuotationLineReference, getQuotationLineDisplayStatus, quotationLineStatusCellText,
 } from '../../utils/quotationRequests';
 import {
-  calculateIndicativePremium, compareOptionCoverage, isQuoteExpiring, quotationInterestBreakdown,
-  quotationRateFromPremium, selectBestQuote,
+  calculateIndicativePremium, compareOptionCoverage, quotationInterestBreakdown, selectBestQuote,
 } from '../../utils/quotationRequestDashboard';
 
 type Props = {
@@ -83,7 +81,6 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
   const [declineReason, setDeclineReason] = useState('');
   const [lineRemarks, setLineRemarks] = useState('');
   const [lineError, setLineError] = useState('');
-  const [expiringWithinDays, setExpiringWithinDays] = useState(30);
   const [printVendorId, setPrintVendorId] = useState('');
   const [printTarget, setPrintTarget] = useState<{ vendorId?: string } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -108,14 +105,6 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
   const allInsurers = [...new Set(request.lines.map((line) => line.vendorId))]
     .map((vendorId) => vendors.find((vendor) => vendor.id === vendorId))
     .filter((vendor): vendor is NonNullable<typeof vendor> => Boolean(vendor));
-  const hasEligibleQuotedSection = request.lines.some((line) => {
-    if (getQuotationLineDisplayStatus(line) !== 'Quoted') return false;
-    const section = request.sections.find((item) => item.id === line.sectionId);
-    if (!section || section.status !== 'Active') return false;
-    return line.quotes.some((quote) => quote.premium > 0
-      && (!quote.validUntil || Date.parse(`${quote.validUntil.slice(0, 10)}T23:59:59.999Z`) >= Date.now()));
-  });
-
   useEffect(() => {
     if (!printTarget) return;
     const timer = window.setTimeout(() => printDocument('print-qrs-formal-slip'), 100);
@@ -312,8 +301,8 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
     <div className="flex min-w-0 flex-col gap-3">
       <PageToolbar name="qrs-detail">
         {backHref
-          ? <a className="btn-ghost !px-2 !py-1.5 text-xs" href={backHref}><ArrowLeft size={14} /> {backLabel}</a>
-          : <button type="button" className="btn-ghost !px-2 !py-1.5 text-xs" onClick={onBack}><ArrowLeft size={14} /> {backLabel}</button>}
+          ? <a className="btn-ghost !px-2 !py-1.5 text-xs" href={backHref} aria-label={backLabel} title={backLabel}><ArrowLeft size={14} /></a>
+          : <button type="button" className="btn-ghost !px-2 !py-1.5 text-xs" onClick={onBack} aria-label={backLabel} title={backLabel}><ArrowLeft size={14} /></button>}
         <div className="flex min-w-0 flex-1 items-center gap-1" role="tablist" aria-label="Quotation slip view">
           {(['dashboard', 'formal'] as const).map((mode) => <button
             key={mode}
@@ -322,10 +311,12 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
             role="tab"
             aria-selected={view === mode}
             tabIndex={view === mode ? 0 : -1}
+            aria-label={mode === 'dashboard' ? 'Dashboard' : 'Formal slip'}
+            title={mode === 'dashboard' ? 'Dashboard' : 'Formal slip'}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium ${view === mode ? 'bg-ink-700 text-white' : 'text-muted hover:bg-ink-800 hover:text-white'}`}
             onClick={() => setView(mode)}
             onKeyDown={(event) => tabKeyDown(event, ['dashboard', 'formal'], view, (next) => setView(next as ViewMode))}
-          >{mode === 'dashboard' ? 'Dashboard' : 'Formal slip'}</button>)}
+          >{mode === 'dashboard' ? <LayoutDashboard size={14} aria-hidden="true" /> : <FileText size={14} aria-hidden="true" />}</button>)}
         </div>
         {view === 'formal' && allInsurers.length > 0 && <select className="input !w-auto max-w-48 !py-1.5 !text-xs" aria-label="Print slip for insurer" value={printVendorId} onChange={(event) => setPrintVendorId(event.target.value)}>
           <option value="">All insurers</option>
@@ -421,15 +412,12 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
 
         <Card>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div><h2 className="text-sm font-semibold text-white">Carrier quotes ledger</h2><p className="text-[10px] text-muted">One row per insurer line · quotes expire alert window: {expiringWithinDays} days</p></div>
-            <select className="input !w-auto !py-1.5 !text-xs" aria-label="Quote expiry warning window" value={expiringWithinDays} onChange={(event) => setExpiringWithinDays(Number(event.target.value))}>
-              {[7, 14, 30, 60].map((days) => <option key={days} value={days}>{days} days</option>)}
-            </select>
+            <div><h2 className="text-sm font-semibold text-white">Carrier quotes ledger</h2><p className="text-[10px] text-muted">One row per insurer line</p></div>
           </div>
           <TableShell className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-left text-xs">
+            <table className="w-full min-w-[820px] text-left text-xs">
               <thead className="bg-ink-900/60 text-[10px] text-muted"><tr>
-                {['Line / insurer', 'Underwriter contact', 'Section / product', 'Option', 'Status', 'Premium', 'Derived rate', 'Validity', 'Deductible / notes', 'Insurer ref', 'Action'].map((label) => <th key={label} className="px-2 py-2 font-medium">{label}</th>)}
+                {['Line / insurer', 'Underwriter contact', 'Section / product', 'Option', 'Status', 'Premium', 'Deductible / notes', 'Action'].map((label) => <th key={label} className="px-2 py-2 font-medium">{label}</th>)}
               </tr></thead>
               <tbody>{filteredLines.map((line) => {
                 const section = request.sections.find((item) => item.id === line.sectionId);
@@ -466,17 +454,9 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
                   <td className="px-2 py-2">{quotes.length ? quotes.map(({ option }) => <div key={option.id} className="flex items-center gap-1">{option.label}{bestByOption.has(option.id) && <Badge compact variant="win">Best</Badge>}</div>) : section?.data.options.map((option) => <div key={option.id}>{option.label}</div>) ?? 'Standard'}</td>
                   <td className="px-2 py-2"><Badge compact variant={displayStatus === 'Quoted' ? 'win' : displayStatus === 'Declined' ? 'warm' : displayStatus === 'Cancelled' || cancelled ? 'muted' : 'brand'}>{displayStatus}</Badge></td>
                   <td className="px-2 py-2">{quotes.length ? quotes.map(({ option, quote }) => <div key={option.id} className={bestByOption.has(option.id) ? 'font-semibold text-win' : 'text-brand-300'}>{formatAmount(quote.premium, quote.currency)}{bestByOption.has(option.id) ? ' · Best' : ''}</div>) : statusCellText ?? statusCellFallback}</td>
-                  <td className="px-2 py-2">{quotes.length ? quotes.map(({ option, quote }) => {
-                    const rate = quotationRateFromPremium(quote.premium, section?.data.totalSumInsured ?? 0);
-                    return <div key={option.id} className="text-muted">{rate === undefined ? 'Rate unavailable' : `${rate.toFixed(2)}%`}</div>;
-                  }) : statusCellText ?? statusCellFallback}</td>
-                  <td className="px-2 py-2">{quotes.length ? quotes.map(({ option, quote }) => <div key={option.id} className={isQuoteExpiring(quote.validUntil, new Date(), expiringWithinDays) ? 'text-warm' : 'text-muted'}>
-                    {quote.validUntil ? formatDate(quote.validUntil) : 'Validity unavailable'}{isQuoteExpiring(quote.validUntil, new Date(), expiringWithinDays) && <TriangleAlert className="ml-1 inline" size={12} aria-label="Expiring soon" />}
-                  </div>) : statusCellText ?? statusCellFallback}</td>
                   <td className="max-w-40 whitespace-normal px-2 py-2 text-muted">{displayStatus === 'Quoted'
                     ? [...(line.insurerDeductibles ?? []), line.remarks].filter(Boolean).join(' · ') || 'No deductible/notes supplied'
                     : statusCellFallback}</td>
-                  <td className="px-2 py-2 text-muted">{displayStatus === 'Quoted' ? line.insurerQuoteRef || 'No insurer reference' : statusCellFallback}</td>
                   <td className="px-2 py-2">
                     <div className="flex flex-wrap gap-1">
                       {rowActions.map((action) => {
@@ -505,19 +485,8 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
               })}</tbody>
             </table>
           </TableShell>
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="mt-3">
             <p className="text-xs text-muted">{filteredLines.length} insurer line{filteredLines.length === 1 ? '' : 's'} shown</p>
-            {canEdit && <button type="button" className="btn-primary !px-3 !py-1.5 text-xs"
-              disabled={!hasEligibleQuotedSection}
-              title={!hasEligibleQuotedSection ? 'Log at least one carrier quotation first' : 'Create client quotation'}
-              onClick={() => {
-                if (!hasEligibleQuotedSection) return;
-                window.location.hash = dashboardHref('quotations', {
-                  dealId: request.dealId,
-                  requestId: request.id,
-                  create: '1',
-                });
-              }}>Create client quotation</button>}
           </div>
         </Card>
       </> : <FormalSlip request={request} sections={sectionsForView} lines={linesForView} vendorName={(id) => vendors.find((vendor) => vendor.id === id)?.name ?? 'Unknown insurer'} company={company} clientName={client?.name} leadName={lead?.title} printableVendor={printableVendor} />}

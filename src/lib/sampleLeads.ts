@@ -1,5 +1,6 @@
 import type { Activity, CompanyContactProfile, Lead, LeadStageTransition, LeadTemperature, ActivityStatus } from '../types';
 import { supabase, TENANT_ID } from './supabase';
+import { withSupabaseRetry } from './supabaseRetry';
 import { LEAD_ACTIVE_STAGES } from '../utils/leadLifecycle';
 
 export const SAMPLE_LEAD_IDS = [
@@ -376,11 +377,11 @@ export function createSampleLeadActivities(leads: Lead[], today = new Date()): A
  */
 export async function initializeSampleLeads(ownerIds: string[], today = new Date()): Promise<Lead[]> {
   const samples = createSampleLeads(ownerIds, today);
-  const { data, error: readError } = await supabase
+  const { data, error: readError } = await withSupabaseRetry('Read existing Leads from Supabase', () => supabase
     .from('tenant_records')
     .select('data')
     .eq('tenant_id', TENANT_ID)
-    .eq('resource', 'leads');
+    .eq('resource', 'leads'));
 
   if (readError) throw new Error(`Could not read existing Leads: ${readError.message}`);
 
@@ -391,10 +392,10 @@ export async function initializeSampleLeads(ownerIds: string[], today = new Date
   const merged = [...existing, ...samples]
     .filter((record): record is Lead => Boolean(record && typeof record.id === 'string' && record.id.trim()))
     .map((record) => ({ ...record, id: record.id.trim() }));
-  const { error: writeError } = await supabase.rpc('sync_tenant_records', {
+  const { error: writeError } = await withSupabaseRetry('Save sample Leads to Supabase', () => supabase.rpc('sync_tenant_records', {
     p_resource: 'leads',
     p_records: merged,
-  });
+  }));
 
   if (writeError) throw new Error(`Could not seed sample Leads: ${writeError.message}`);
   return samples;

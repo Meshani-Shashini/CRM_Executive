@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Client, Deal, Lead, PipelineStage, StageHistoryAudit } from '../../types';
 import {
   classifyDealOutcome,
+  summarizeClosedDealsForLastSixMonths,
   summarizeDealValues,
   summarizeDealsByPeriod,
   validateDealBaseForProgression,
@@ -92,6 +93,46 @@ function audit(dealId: string, outcome: 'won' | 'lost', details?: string): Stage
 }
 
 describe('monthly deal summaries', () => {
+  it('counts valid won and lost deals in the rolling six-month window', () => {
+    const now = new Date(2026, 8, 4);
+    const won = makeDeal('won-current', {
+      closeDate: '2026-09-02',
+      stage: 'Policy Bound / Won',
+      disposition: 'won',
+    });
+    const lost = makeDeal('lost-first-month', {
+      closeDate: '2026-04-30',
+      stage: 'Lost',
+      disposition: 'lost',
+      lossReason: 'Competitor selected',
+    });
+    const open = makeDeal('open-current', { closeDate: '2026-09-03' });
+    const outsideWindow = makeDeal('won-outside-window', {
+      closeDate: '2026-03-31',
+      stage: 'Policy Bound / Won',
+      disposition: 'won',
+    });
+    const invalidDate = makeDeal('won-invalid-date', {
+      closeDate: '2026-09-31',
+      stage: 'Policy Bound / Won',
+      disposition: 'won',
+    });
+
+    expect(summarizeClosedDealsForLastSixMonths(
+      [won, lost, open, outsideWindow, invalidDate],
+      stages,
+      [],
+      now,
+    )).toEqual([
+      { key: '2026-04', label: 'Apr', won: 0, lost: 1 },
+      { key: '2026-05', label: 'May', won: 0, lost: 0 },
+      { key: '2026-06', label: 'Jun', won: 0, lost: 0 },
+      { key: '2026-07', label: 'Jul', won: 0, lost: 0 },
+      { key: '2026-08', label: 'Aug', won: 0, lost: 0 },
+      { key: '2026-09', label: 'Sep', won: 1, lost: 0 },
+    ]);
+  });
+
   it('splits closed-won value, open stage groups, and weighted open value using stage probability', () => {
     const open = makeDeal('open-1', { value: 1000 });
     const review = makeDeal('open-2', { stage: 'Review', value: 2000, probability: 5 });

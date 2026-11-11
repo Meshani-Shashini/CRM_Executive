@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bell, CalendarDays, ChevronLeft, ChevronRight, Clock3 } from 'lucide-react';
+import { Bell, CalendarDays, CalendarRange, ChevronLeft, ChevronRight, Clock3, List } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { buildCalendarEvents, type CalendarEvent, type CalendarEventKind } from '../utils/calendarData';
 import { dashboardHref } from '../utils/navigation';
@@ -149,7 +149,11 @@ export default function CalendarPage() {
       <PageToolbar name="calendar">
         <ViewModeSwitcher label="Calendar view" role="group" value={view} onChange={setView}
           className="hidden sm:inline-flex"
-          options={(['month', 'week', 'agenda'] as const).map((option) => ({ value: option, label: option }))} />
+          options={[
+            { value: 'month', label: 'Month', Icon: CalendarDays },
+            { value: 'week', label: 'Week', Icon: CalendarRange },
+            { value: 'agenda', label: 'Agenda', Icon: List },
+          ]} />
         <label className="sr-only" htmlFor="calendar-ownership">Show</label>
         <select id="calendar-ownership" aria-label="Show calendar events" className="input !w-auto !py-1.5 !text-xs" value={ownership} onChange={(event) => setOwnership(event.target.value as 'all' | 'mine')}>
             <option value="all">All events</option>

@@ -16,6 +16,7 @@ import {
   type CustomerLookups,
 } from '../data/customerLookups';
 import { AUTH_BYPASS, supabase, TENANT_ID } from '../lib/supabase';
+import { withSupabaseRetry } from '../lib/supabaseRetry';
 import {
   createSampleLeadActivities,
   createSampleLeads,
@@ -474,11 +475,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [user.role]);
 
   const loadProfile = useCallback(async (userId: string): Promise<User> => {
-    const { data, error } = await supabase
+    const { data, error } = await withSupabaseRetry('Load your Supabase profile', () => supabase
       .from('user_profiles')
       .select('id, name, email, role, title, client_record_id')
       .eq('id', userId)
-      .single();
+      .single());
     if (error) throw new Error(`Could not load your Supabase profile: ${error.message}`);
     return appUser(data as ProfileRecord);
   }, []);
@@ -513,7 +514,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const restoreSession = async () => {
       try {
-        const { data, error } = await supabase.auth.getSession();
+        const { data, error } = await withSupabaseRetry(
+          'Restore your Supabase session',
+          () => supabase.auth.getSession(),
+        );
         if (error) throw error;
         await syncSession(data.session);
       } catch (error) {
@@ -641,11 +645,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       throw new Error('Sign in as a staff user or provide an existing staff owner ID before seeding sample Leads.');
     }
 
-    const samples = AUTH_BYPASS
-      ? createSampleLeads(validOwnerIds)
-      : await persistSampleLeads(validOwnerIds);
+    const today = new Date();
+    let samples: Lead[];
+    if (AUTH_BYPASS) {
+      samples = createSampleLeads(validOwnerIds, today);
+    } else {
+      try {
+        samples = await persistSampleLeads(validOwnerIds, today);
+      } catch (error) {
+        setPersistenceError(error instanceof Error ? error.message : 'Could not save sample Leads to Supabase.');
+        throw error;
+      }
+    }
     const sampleIdSet = new Set<string>(SAMPLE_LEAD_IDS);
-    const sampleActivities = createSampleLeadActivities(samples);
+    const sampleActivities = createSampleLeadActivities(samples, today);
     setLeads((current) => [
       ...current.filter((lead) => !sampleIdSet.has(lead.id)),
       ...samples,
@@ -662,10 +675,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const loadRecords = async () => {
       setDataReady(false);
       try {
-        const { data, error } = await supabase
+        const { data, error } = await withSupabaseRetry('Load app records from Supabase', () => supabase
           .from('tenant_records')
           .select('resource, record_id, data, updated_at')
-          .eq('tenant_id', TENANT_ID);
+          .eq('tenant_id', TENANT_ID));
         if (error) throw new Error(`Could not load Supabase records: ${error.message}`);
         if (cancelled) return;
         const records = (data ?? []) as TenantRecord[];
@@ -795,18 +808,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const savedRecords = new Map<string, Map<string, { updated_at: string; data: Record<string, unknown> }>>();
 
         const syncResource = async (resource: string, deleteMissing: boolean) => {
-          const result = await writeArray(resource, allResources[resource], recordVersions.current, deleteMissing);
-          if (result.error) {
-            console.error(`Could not persist "${resource}" records to Supabase.`, result.error);
-            setPersistenceError(`Supabase save failed for ${resource}: ${result.error.message}`);
+          try {
+            const result = await withSupabaseRetry(
+              `Save "${resource}" records to Supabase`,
+              () => writeArray(resource, allResources[resource], recordVersions.current, deleteMissing),
+            );
+            if (result.error) throw result.error;
+            const persisted = persistedRecordMap(result.data);
+            for (const [recordId, record] of persisted) {
+              recordVersions.current.set(`${resource}:${recordId}`, record.updated_at);
+            }
+            if (!deleteMissing) savedRecords.set(resource, persisted);
+            return true;
+          } catch (error) {
+            console.error(`Could not persist "${resource}" records to Supabase.`, error);
+            setPersistenceError(error instanceof Error
+              ? error.message
+              : `Save "${resource}" records to Supabase failed.`);
             return false;
           }
-          const persisted = persistedRecordMap(result.data);
-          for (const [recordId, record] of persisted) {
-            recordVersions.current.set(`${resource}:${recordId}`, record.updated_at);
-          }
-          if (!deleteMissing) savedRecords.set(resource, persisted);
-          return true;
         };
 
         for (const resource of upsertOrder) {
@@ -939,17 +959,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (AUTH_BYPASS || authLoading || user.role !== 'admin' || user.id === DEMO_USER.id) return;
     let cancelled = false;
     const loadUsers = async () => {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('id, name, email, role, title, client_record_id')
-        .eq('tenant_id', TENANT_ID)
-        .order('name');
-      if (error) {
+      try {
+        const { data, error } = await withSupabaseRetry('Load user profiles from Supabase', () => supabase
+          .from('user_profiles')
+          .select('id, name, email, role, title, client_record_id')
+          .eq('tenant_id', TENANT_ID)
+          .order('name'));
+        if (error) throw error;
+        if (!cancelled) setUsers((data ?? []).map((profile) => appUser(profile as ProfileRecord)));
+      } catch (error) {
         console.error('Could not load user profiles from Supabase.', error);
-        if (!cancelled) setPersistenceError(`Could not load users: ${error.message}`);
-        return;
+        if (!cancelled) {
+          setPersistenceError(error instanceof Error ? error.message : 'Could not load user profiles from Supabase.');
+        }
       }
-      if (!cancelled) setUsers((data ?? []).map((profile) => appUser(profile as ProfileRecord)));
     };
     void loadUsers();
     return () => { cancelled = true; };
@@ -973,7 +996,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (updatedUser.id === user.id && updatedUser.role !== user.role) {
       throw new Error('You cannot change your own role.');
     }
-    const { data, error } = await supabase
+    const { data, error } = await withSupabaseRetry('Update user profile in Supabase', () => supabase
       .from('user_profiles')
       .update({
         name: updatedUser.name.trim(),
@@ -983,7 +1006,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .eq('id', updatedUser.id)
       .eq('tenant_id', TENANT_ID)
       .select('id, name, email, role, title, client_record_id')
-      .single();
+      .single());
     if (error) throw new Error(`Could not update user profile: ${error.message}`);
     const profile = appUser(data as ProfileRecord);
     setUsers((current) => current.map((item) => item.id === profile.id ? profile : item));

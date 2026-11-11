@@ -1,22 +1,31 @@
 import { useEffect, useState } from 'react';
 import {
   TrendingUp, Target, Users, AlertTriangle, CheckCircle2, Clock3,
+  Building2, Briefcase, ShieldCheck,
 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import Badge from '../components/ui/Badge';
 import PageToolbar from '../components/ui/PageToolbar';
 import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
-import MonthlyDealSummaryPanel from '../components/deal/MonthlyDealSummaryPanel';
+import MonthlyWonLostChart from '../components/deal/MonthlyWonLostChart';
+import {
+  DashboardBarChart,
+  DashboardChartCard,
+  DashboardDonutChart,
+  DashboardEmptyChart,
+} from '../components/dashboard/DashboardCharts';
 import { formatAmount, toMvr } from '../utils/currency';
 import { dashboardHref } from '../utils/navigation';
 import { formatDate } from '../utils/date';
 import {
-  isLostPipelineStage, isStageSlaOverdue, isTerminalDealStage, isWonPipelineStage,
+  isLostPipelineStage, isWonPipelineStage,
 } from '../utils/stageSla';
-import { LEAD_LIFECYCLE_STAGES, lifecycleStageForLead } from '../utils/leadLifecycle';
+import { classifyDealOutcome, summarizeClosedDealsForLastSixMonths } from '../utils/monthlyDealSummary';
+import {
+  activeUnconvertedLeads, LEAD_LIFECYCLE_STAGES, lifecycleStageForLead,
+} from '../utils/leadLifecycle';
 
-const tabs = ['Company', 'Leads', 'Deals', 'Staff'] as const;
-type DashboardTab = typeof tabs[number];
+type DashboardTab = 'Company' | 'Leads' | 'Deals' | 'Staff';
 
 export default function DashboardPage() {
   const [tab, setTab] = useState<DashboardTab>('Company');
@@ -58,7 +67,12 @@ export default function DashboardPage() {
       <PageToolbar name="dashboard">
         <ViewModeSwitcher label="Dashboard sections" role="group" value={tab} onChange={setTab}
           className="w-fit"
-          options={tabs.map((item) => ({ value: item, label: item }))} />
+          options={[
+            { value: 'Company', label: 'Company', Icon: Building2 },
+            { value: 'Leads', label: 'Leads', Icon: Users },
+            { value: 'Deals', label: 'Deals', Icon: Briefcase },
+            { value: 'Staff', label: 'Staff', Icon: ShieldCheck },
+          ]} />
       </PageToolbar>
 
       {tab === 'Leads' && <LeadsDashboard />}
@@ -83,13 +97,10 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <MonthlyDealSummaryPanel
+          <MonthlyWonLostChart
             deals={deals}
             pipelineStages={pipelineStages}
-            leads={leads}
-            clients={clients}
             stageHistory={stageHistory}
-            title="Monthly company deal summary"
           />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -150,220 +161,293 @@ export default function DashboardPage() {
 }
 
 function LeadsDashboard() {
-  const { leads, deals, pipelineStages, stageHistory } = useApp();
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
-  const activeLeads = leads.filter((lead) => lead.status !== 'COMPLETED');
-  const hotLeads = leads.filter((lead) => lead.temperature === 'HOT');
+  const { leads, deals } = useApp();
+  const openLeads = activeUnconvertedLeads(leads, deals);
+  const linkedLeadIds = new Set(deals.map((deal) => deal.leadId));
+  const hasLinkedDeal = (lead: typeof leads[number]) => Boolean(lead.dealId) || linkedLeadIds.has(lead.id);
+  const hotLeads = openLeads.filter((lead) => lead.temperature === 'HOT');
+  const convertedLeads = leads.filter((lead) =>
+    lifecycleStageForLead(lead, hasLinkedDeal(lead)) === 'Converted to deal');
   const stages = LEAD_LIFECYCLE_STAGES.map((stage) => ({
     name: stage,
-    count: leads.filter((lead) => lifecycleStageForLead(
-      lead,
-      Boolean(deals.some((deal) => deal.id === lead.dealId || deal.leadId === lead.id)),
-    ) === stage).length,
+    count: leads.filter((lead) => lifecycleStageForLead(lead, hasLinkedDeal(lead)) === stage).length,
   }));
-  const maxStageCount = Math.max(1, ...stages.map((stage) => stage.count));
-  const leadSlaOverdue = (lead: typeof leads[number]) => {
-    const deal = deals.find((item) => item.id === lead.dealId || item.leadId === lead.id);
-    if (!deal || isTerminalDealStage(
-      deal.stage,
-      deal.disposition,
-      pipelineStages.find((stage) => stage.pipelineId === deal.pipelineId && stage.name === deal.stage),
-    )) return false;
-    const configuredStages = pipelineStages
-      .filter((stage) => stage.pipelineId === deal.pipelineId)
-      .sort((left, right) => left.stageOrder - right.stageOrder);
-    const stage = configuredStages.find((item) => item.name === deal.stage);
-    if (!stage) return false;
-    const activeHistory = deal && stageHistory.find((entry) =>
-      entry.dealId === deal.id && entry.toStageId === stage.id && !entry.exitedAt);
-    const enteredAt = activeHistory?.enteredAt
-      ?? deal.stageChangedAt
-      ?? deal.createdAt;
-    return isStageSlaOverdue(enteredAt, stage.stagnationDaysThreshold, now);
-  };
+  const premiumsByClass = groupLeadsByInsuranceClass(openLeads);
+  const leadsByClass = groupLeadsByInsuranceClass(leads, false);
+  const premiumInPlay = openLeads.reduce(
+    (total, lead) => total + toMvr(lead.premium, lead.currency, lead.exchangeRate),
+    0,
+  );
+  const hotShare = openLeads.length ? Math.round(hotLeads.length / openLeads.length * 100) : 0;
+  const leadStageColors = ['#38BDF8', '#27C272', '#F59E0B', '#E54848', '#14B8A6', '#EC4899'];
+  const classColors = ['#27C272', '#EF4444', '#38BDF8', '#F59E0B', '#A78BFA', '#14B8A6'];
+  const priorityColors = { HOT: '#E54848', WARM: '#E09228', COLD: '#5B8DEF' };
 
   return (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard href={dashboardHref('leads')} label="Total Leads" value={`${leads.length}`} detail="Current records" icon={Users} accent="brand" />
-        <KpiCard href={dashboardHref('leads', { status: 'active' })} label="Active Leads" value={`${activeLeads.length}`} detail="Not completed" icon={TrendingUp} accent="cold" />
-        <KpiCard href={dashboardHref('leads', { temperature: 'HOT' })} label="Hot Leads" value={`${hotLeads.length}`} detail="Priority follow-up" icon={AlertTriangle} accent="hot" />
-        <KpiCard href={dashboardHref('leads', { stage: 'Intro Email Sent' })} label="Quoted" value={`${stages.find((stage) => stage.name === 'Intro Email Sent')?.count ?? 0}`} detail="In quotation stage" icon={CheckCircle2} accent="win" />
+        <KpiCard href={dashboardHref('leads', { status: 'active' })} label="Open leads" value={`${openLeads.length}`} detail="Not converted or lost" icon={Users} accent="brand" />
+        <KpiCard href={dashboardHref('leads', { temperature: 'HOT' })} label="Hot" value={`${hotShare}%`} detail={`${hotLeads.length} priority leads`} icon={AlertTriangle} accent="hot" />
+        <KpiCard href={dashboardHref('leads', { status: 'active' })} label="Premium in play" value={formatAmount(premiumInPlay, 'MVR')} detail="Open lead premiums" icon={TrendingUp} accent="cold" />
+        <KpiCard href={dashboardHref('leads', { status: 'converted' })} label="Converted" value={`${convertedLeads.length}`} detail="Leads linked to deals" icon={CheckCircle2} accent="win" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="glass rounded-2xl p-5">
-          <h3 className="text-white font-semibold mb-4">Leads by Funnel Stage</h3>
-          {leads.length === 0 ? <EmptyState /> : <div className="space-y-3">
-            {stages.map((stage) => (
-              <div key={stage.name}>
-                <div className="flex justify-between text-xs mb-1">
-                      <a href={dashboardHref('leads', { stage: stage.name })} className="text-white hover:text-brand-300">{stage.name}</a>
-                  <span className="text-muted">{stage.count}</span>
-                </div>
-                <div className="h-2 bg-ink-900 rounded-full overflow-hidden">
-                  <div className="h-full bg-brand-400 rounded-full" style={{ width: `${stage.count / maxStageCount * 100}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>}
-        </div>
-        <div className="glass rounded-2xl p-5">
-          <h3 className="text-white font-semibold mb-4">Recent Leads</h3>
-          {leads.length === 0 ? <EmptyState /> : <div className="space-y-3">
-            {leads.slice(0, 5).map((lead) => (
-              <a key={lead.id} href={dashboardHref('leads', { id: lead.id })} className="flex items-center justify-between gap-3 border-b border-ink-700/60 pb-3 last:border-0 last:pb-0 hover:bg-ink-800/40 rounded-lg px-2">
-                <div className="min-w-0">
-                  <div className="text-sm text-white truncate">{lead.client}</div>
-                  <div className="text-[11px] text-muted">{lifecycleStageForLead(lead, Boolean(deals.some((deal) => deal.id === lead.dealId || deal.leadId === lead.id)))} · {lead.lastActivity}</div>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {leadSlaOverdue(lead) && <Badge variant="hot"><Clock3 size={11} /> SLA overdue</Badge>}
-                  <Badge variant={lead.temperature === 'HOT' ? 'hot' : lead.temperature === 'WARM' ? 'warm' : 'cold'}>{lead.temperature}</Badge>
-                </div>
-              </a>
-            ))}
-          </div>}
-        </div>
+        <DashboardChartCard title="Leads by funnel stage">
+          <DashboardBarChart items={stages.map((stage, index) => ({
+            label: compactStageLabel(stage.name),
+            value: stage.count,
+            color: leadStageColors[index % leadStageColors.length],
+          }))} />
+        </DashboardChartCard>
+        <DashboardChartCard title="Premiums by insurance class">
+          <DashboardDonutChart
+            items={premiumsByClass.map((item, index) => ({
+              label: item.label,
+              value: item.value,
+              color: classColors[index % classColors.length],
+            }))}
+            centerValue={compactAmount(premiumInPlay)}
+            centerLabel="MVR premium"
+          />
+        </DashboardChartCard>
+        <DashboardChartCard title="Priority mix">
+          <DashboardDonutChart
+            items={(['HOT', 'WARM', 'COLD'] as const).map((temperature) => ({
+              label: temperature.charAt(0) + temperature.slice(1).toLowerCase(),
+              value: openLeads.filter((lead) => lead.temperature === temperature).length,
+              color: priorityColors[temperature],
+            }))}
+            centerValue={`${openLeads.length}`}
+            centerLabel="leads"
+          />
+        </DashboardChartCard>
+        <DashboardChartCard title="Leads by class">
+          {leadsByClass.length === 0 ? <DashboardEmptyChart>No open leads to show.</DashboardEmptyChart> : <DashboardBarChart items={leadsByClass.map((item, index) => ({
+            label: item.label,
+            value: item.value,
+            color: classColors[index % classColors.length],
+          }))} />}
+        </DashboardChartCard>
       </div>
     </>
   );
 }
 
 function DealsDashboard() {
-  const { deals, leads, clients, pipelineStages, stageHistory } = useApp();
+  const { deals, leads, pipelineStages, stageHistory } = useApp();
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
-  const totalValue = deals.reduce((total, deal) => total + toMvr(deal.value, deal.currency, deal.exchangeRate), 0);
-  const weightedValue = deals.reduce((total, deal) => total + toMvr(deal.weighted, deal.currency, deal.exchangeRate), 0);
-  const stages = [...new Set(deals.map((deal) => deal.stage))].map((stage) => ({
-    name: stage,
-    count: deals.filter((deal) => deal.stage === stage).length,
-    value: deals.filter((deal) => deal.stage === stage)
-      .reduce((total, deal) => total + toMvr(deal.value, deal.currency, deal.exchangeRate), 0),
+  const outcomes = deals.map((deal) => ({
+    deal,
+    outcome: classifyDealOutcome(
+      deal,
+      pipelineStages.find((stage) => stage.pipelineId === deal.pipelineId && stage.name === deal.stage),
+      stageHistory,
+    ),
   }));
-  const maxStageValue = Math.max(...stages.map((stage) => stage.value), 1);
-  const averageProbability = deals.length
-    ? Math.round(deals.reduce((sum, deal) => sum + deal.probability, 0) / deals.length)
+  const openDeals = outcomes.filter((entry) => entry.outcome === 'open');
+  const wonDeals = outcomes.filter((entry) => entry.outcome === 'won');
+  const lostDeals = outcomes.filter((entry) => entry.outcome === 'lost');
+  const openPipelineValue = openDeals.reduce(
+    (total, { deal }) => total + toMvr(deal.value, deal.currency, deal.exchangeRate),
+    0,
+  );
+  const monthlyOutcomes = summarizeClosedDealsForLastSixMonths(deals, pipelineStages, stageHistory, new Date(now));
+  const monthlyWinRates = monthlyOutcomes.map((month) => ({
+    label: month.label,
+    value: month.won + month.lost ? Math.round(month.won / (month.won + month.lost) * 100) : 0,
+    color: '#27C272',
+    closed: month.won + month.lost,
+  }));
+  const closedDealCount = wonDeals.length + lostDeals.length;
+  const winRate = closedDealCount ? Math.round(wonDeals.length / closedDealCount * 100) : 0;
+  const leadByDealId = new Map(leads.flatMap((lead) => [[lead.id, lead], ...(lead.dealId ? [[lead.dealId, lead] as const] : [])]));
+  const pipelineByClass = new Map<string, number>();
+  for (const { deal } of openDeals) {
+    const insuranceClass = leadByDealId.get(deal.leadId)?.insuranceClass ?? 'Unclassified';
+    pipelineByClass.set(
+      insuranceClass,
+      (pipelineByClass.get(insuranceClass) ?? 0) + toMvr(deal.value, deal.currency, deal.exchangeRate),
+    );
+  }
+  const classColors = ['#27C272', '#EF4444', '#38BDF8', '#F59E0B', '#A78BFA', '#14B8A6'];
+  const classValueItems = [...pipelineByClass.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .map(([label, value], index) => ({ label, value, color: classColors[index % classColors.length] }));
+  const closedDurations = outcomes.flatMap(({ deal, outcome }) => {
+    if (outcome === 'open' || !deal.createdAt) return [];
+    const createdAt = Date.parse(deal.createdAt);
+    const terminalStageIds = new Set(pipelineStages
+      .filter((stage) => stage.pipelineId === deal.pipelineId
+        && (outcome === 'won' ? stage.isClosedWon : stage.isClosedLost))
+      .map((stage) => stage.id));
+    const closure = stageHistory
+      .filter((entry) => entry.dealId === deal.id
+        && (entry.outcome ? entry.outcome === outcome : terminalStageIds.has(entry.toStageId)))
+      .sort((left, right) => Date.parse(right.enteredAt) - Date.parse(left.enteredAt))[0];
+    const closedAt = Date.parse(closure?.enteredAt ?? '');
+    return Number.isFinite(createdAt) && Number.isFinite(closedAt) && closedAt >= createdAt
+      ? [(closedAt - createdAt) / 86400000]
+      : [];
+  });
+  const averageDaysToClose = closedDurations.length
+    ? Math.round(closedDurations.reduce((total, days) => total + days, 0) / closedDurations.length)
     : 0;
-  const dealSlaOverdue = (deal: typeof deals[number]) => {
-    const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
-    if (isTerminalDealStage(deal.stage, deal.disposition, stage)) return false;
-    if (!stage) return false;
-    const activeHistory = stageHistory.find((entry) =>
-      entry.dealId === deal.id && entry.toStageId === stage.id && !entry.exitedAt);
-    const enteredAt = activeHistory?.enteredAt ?? deal.stageChangedAt ?? deal.createdAt;
-    return isStageSlaOverdue(enteredAt, stage.stagnationDaysThreshold, now);
-  };
+  const showMonthlyWinRate = monthlyWinRates.some((month) => month.closed > 0);
 
   return (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard href={dashboardHref('deals')} label="Pipeline Value" value={formatAmount(totalValue, 'MVR')} detail="Current deals" icon={TrendingUp} accent="brand" />
-        <KpiCard href={dashboardHref('deals')} label="Weighted Pipeline" value={formatAmount(weightedValue, 'MVR')} detail="Probability adjusted" icon={Target} accent="cold" />
-        <KpiCard href={dashboardHref('deals')} label="Deals" value={`${deals.length}`} detail="Across all stages" icon={Users} accent="win" />
-        <KpiCard href={dashboardHref('deals')} label="Average Probability" value={`${averageProbability}%`} detail="Win probability" icon={CheckCircle2} accent="hot" />
+        <KpiCard href={dashboardHref('deals', { status: 'open' })} label="Open deals" value={`${openDeals.length}`} detail="Across active stages" icon={Users} accent="brand" />
+        <KpiCard href={dashboardHref('deals', { status: 'open' })} label="Pipeline value" value={formatAmount(openPipelineValue, 'MVR')} detail="Open deal value" icon={TrendingUp} accent="cold" />
+        <KpiCard href={dashboardHref('deals', { status: 'won' })} label="Won" value={`${wonDeals.length}`} detail="Closed-won deals" icon={CheckCircle2} accent="win" />
+        <KpiCard href={dashboardHref('deals')} label="Avg. days to close" value={`${averageDaysToClose}`} detail={`${closedDurations.length} with timing data`} icon={Clock3} accent="hot" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="glass rounded-2xl p-5">
-          <h3 className="text-white font-semibold mb-4">Pipeline by Deal Stage</h3>
-          {stages.length === 0 ? <EmptyState /> : <div className="space-y-4">
-            {stages.map((stage) => (
-              <div key={stage.name}>
-                <div className="flex justify-between text-xs mb-1">
-                      <a href={dashboardHref('deals', { stage: stage.name })} className="text-white hover:text-brand-300">{stage.name} <span className="text-muted">({stage.count})</span></a>
-                  <span className="text-muted">{formatAmount(stage.value, 'MVR')}</span>
-                </div>
-                <div className="h-2 bg-ink-900 rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-brand-500 to-brand-400 rounded-full" style={{ width: `${stage.value / maxStageValue * 100}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>}
-        </div>
-        <div className="glass rounded-2xl p-5">
-          <h3 className="text-white font-semibold mb-4">Deals</h3>
-          {deals.length === 0 ? <EmptyState /> : <div className="space-y-3">
-            {deals.map((deal) => (
-              <a key={deal.id} href={dashboardHref('deals', { id: deal.id })} className="flex items-center justify-between gap-3 border-b border-ink-700/60 pb-3 last:border-0 last:pb-0 hover:bg-ink-800/40 rounded-lg px-2">
-                <div className="min-w-0">
-                  <div className="text-sm text-white truncate">{deal.client}</div>
-                  <div className="text-[11px] text-muted truncate">{deal.product} · {deal.stage}</div>
-                </div>
-                <div className="text-right shrink-0">
-                  {dealSlaOverdue(deal) && <div className="mb-1 flex justify-end"><Badge variant="hot"><Clock3 size={11} /> SLA overdue</Badge></div>}
-                  <div className="text-sm text-white">{formatAmount(deal.value, deal.currency)}</div>
-                  {deal.currency === 'USD' && <div className="text-[11px] text-muted">{formatAmount(toMvr(deal.value, deal.currency, deal.exchangeRate), 'MVR')}</div>}
-                  <div className="text-[11px] text-muted">{deal.probability}% probability</div>
-                </div>
-              </a>
-            ))}
-          </div>}
-        </div>
+        <DashboardChartCard title="Win rate">
+          {closedDealCount === 0 ? <DashboardEmptyChart>Not enough data yet. Close a deal to see your win rate.</DashboardEmptyChart> : (
+            <DashboardDonutChart
+              items={[
+                { label: 'Won', value: wonDeals.length, color: '#27C272' },
+                { label: 'Lost', value: lostDeals.length, color: '#454B55' },
+              ]}
+              centerValue={`${winRate}%`}
+              centerLabel={`${closedDealCount} deal${closedDealCount === 1 ? '' : 's'}`}
+            />
+          )}
+        </DashboardChartCard>
+        <DashboardChartCard title="Win rate by month">
+          {showMonthlyWinRate ? <DashboardBarChart
+            items={monthlyWinRates.map(({ label, value, color }) => ({ label, value, color }))}
+            valueLabel={(value) => `${value}%`}
+          /> : <DashboardEmptyChart>Not enough data yet. Close deals to see the monthly trend.</DashboardEmptyChart>}
+        </DashboardChartCard>
+        <DashboardChartCard title="Pipeline value by insurance class">
+          {classValueItems.length === 0 ? <DashboardEmptyChart>No open deals to show.</DashboardEmptyChart> : (
+            <DashboardDonutChart
+              items={classValueItems}
+              centerValue={compactAmount(openPipelineValue)}
+              centerLabel="MVR value"
+            />
+          )}
+        </DashboardChartCard>
+        <DashboardChartCard title="Deals by status">
+          <DashboardBarChart
+            items={[
+              { label: 'Open', value: openDeals.length, color: '#5B8DEF' },
+              { label: 'Won', value: wonDeals.length, color: '#27C272' },
+              { label: 'Lost', value: lostDeals.length, color: '#454B55' },
+            ]}
+          />
+        </DashboardChartCard>
       </div>
-      <MonthlyDealSummaryPanel
-        deals={deals}
-        pipelineStages={pipelineStages}
-        leads={leads}
-        clients={clients}
-        stageHistory={stageHistory}
-        title="Monthly deals forecast"
-      />
     </>
   );
 }
 
 function StaffDashboard() {
-  const { users, leads, deals } = useApp();
+  const { users, deals, activities, pipelineStages, stageHistory } = useApp();
   const salesUsers = users.filter((user) => user.role === 'sales');
-  const totalAssignedLeads = leads.filter((lead) => salesUsers.some((user) => user.id === lead.ownerId)).length;
-  const salesPipeline = deals
-    .filter((deal) => salesUsers.some((user) => user.id === deal.ownerId))
-    .reduce((total, deal) => total + toMvr(deal.weighted, deal.currency, deal.exchangeRate), 0);
+  const salesUserIds = new Set(salesUsers.map((user) => user.id));
+  const teamDeals = deals.filter((deal) => salesUserIds.has(deal.ownerId));
+  const today = new Date();
+  const currentMonthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  const wonThisMonth = teamDeals.filter((deal) => {
+    const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
+    return classifyDealOutcome(deal, stage, stageHistory) === 'won'
+      && deal.closeDate?.slice(0, 7) === currentMonthKey;
+  });
+  const achieved = wonThisMonth.reduce(
+    (total, deal) => total + toMvr(deal.value, deal.currency, deal.exchangeRate),
+    0,
+  );
+  const salesPipeline = teamDeals.reduce((total, deal) => {
+    const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
+    return classifyDealOutcome(deal, stage, stageHistory) === 'open'
+      ? total + toMvr(deal.weighted, deal.currency, deal.exchangeRate)
+      : total;
+  }, 0);
+  const activitiesByPerson = salesUsers.map((user) => ({
+    user,
+    count: activities.filter((activity) => activity.userId === user.id).length,
+  }));
+  const achievedByPerson = salesUsers.map((user) => ({
+    user,
+    amount: wonThisMonth.filter((deal) => deal.ownerId === user.id)
+      .reduce((total, deal) => total + toMvr(deal.value, deal.currency, deal.exchangeRate), 0),
+  }));
+  const activityColors = ['#38BDF8', '#27C272', '#F59E0B', '#E54848', '#A78BFA', '#14B8A6'];
 
   return (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard href={dashboardHref('settings')} label="Team Members" value={`${users.length}`} detail="Current tenant users" icon={Users} accent="brand" />
-        <KpiCard href={dashboardHref('leads')} label="Sales Staff" value={`${salesUsers.length}`} detail="Managing pipeline" icon={TrendingUp} accent="cold" />
-        <KpiCard href={dashboardHref('leads')} label="Assigned Leads" value={`${totalAssignedLeads}`} detail="Sales team total" icon={Target} accent="win" />
-        <KpiCard href={dashboardHref('deals')} label="Weighted Pipeline" value={formatAmount(salesPipeline, 'MVR')} detail="Sales team total" icon={CheckCircle2} accent="hot" />
+        <KpiCard label="Team target" value={formatAmount(0, 'MVR')} detail="No target configured" icon={Target} accent="brand" />
+        <KpiCard label="Achieved" value={formatAmount(achieved, 'MVR')} detail="Won deals this month" icon={CheckCircle2} accent="win" />
+        <KpiCard href={dashboardHref('deals')} label="Weighted pipeline" value={formatAmount(salesPipeline, 'MVR')} detail="Open sales deals" icon={TrendingUp} accent="cold" />
+        <KpiCard href={dashboardHref('settings')} label="People" value={`${salesUsers.length}`} detail="Sales team members" icon={Users} accent="hot" />
       </div>
-      <div className="glass rounded-2xl overflow-hidden">
-        <div className="p-5 border-b border-ink-700/60">
-          <h3 className="text-white font-semibold">Team Overview</h3>
-          <p className="text-xs text-muted mt-1">Leads and weighted pipeline assigned to each team member</p>
-        </div>
-        <div className="divide-y divide-ink-700/60">
-          {users.map((user) => {
-            const assignedLeads = leads.filter((lead) => lead.ownerId === user.id);
-            const assignedDeals = deals.filter((deal) => deal.ownerId === user.id);
-            const weighted = assignedDeals.reduce((total, deal) => total + toMvr(deal.weighted, deal.currency, deal.exchangeRate), 0);
-            return (
-              <div key={user.id} className="flex flex-wrap items-center gap-3 px-5 py-4">
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-xs font-bold text-white shrink-0">
-                  {user.name.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-40">
-                  <div className="text-sm text-white">{user.name}</div>
-                  <div className="text-[11px] text-muted">{user.title ?? user.role}</div>
-                </div>
-                <div className="text-xs text-muted">{assignedLeads.length} leads</div>
-                <div className="text-xs text-muted">{assignedDeals.length} deals</div>
-                <div className="text-sm text-brand-400 font-medium">{formatAmount(weighted, 'MVR')}</div>
-              </div>
-            );
-          })}
-        </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <DashboardChartCard title="Achieved by person">
+          {achievedByPerson.length === 0 || !achievedByPerson.some(({ amount }) => amount > 0)
+            ? <DashboardEmptyChart>Nothing to show yet.</DashboardEmptyChart> : (
+            <DashboardBarChart
+              items={achievedByPerson.map(({ user, amount }, index) => ({
+                key: user.id,
+                label: user.name.split(' ')[0],
+                value: amount,
+                color: activityColors[index % activityColors.length],
+              }))}
+              valueLabel={(value) => compactAmount(value)}
+            />
+          )}
+        </DashboardChartCard>
+        <DashboardChartCard title="Activity logged">
+          {activitiesByPerson.length === 0 || !activitiesByPerson.some(({ count }) => count > 0)
+            ? <DashboardEmptyChart>No activity logged yet.</DashboardEmptyChart> : (
+            <DashboardBarChart items={activitiesByPerson.map(({ user, count }, index) => ({
+              key: user.id,
+              label: user.name.split(' ')[0],
+              value: count,
+              color: activityColors[index % activityColors.length],
+            }))} />
+          )}
+        </DashboardChartCard>
       </div>
+      <section className="glass rounded-2xl p-4" aria-label="Against target">
+        <h3 className="mb-4 text-sm font-semibold text-white">Against target</h3>
+        <div className="flex min-h-14 items-center justify-center rounded-lg border border-dashed border-ink-600 px-4 text-center text-xs text-muted">
+          No targets set for {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} yet.
+        </div>
+      </section>
     </>
   );
+}
+
+function groupLeadsByInsuranceClass(leads: ReturnType<typeof activeUnconvertedLeads>, usePremium = true) {
+  const groups = new Map<string, number>();
+  for (const lead of leads) {
+    const value = usePremium
+      ? toMvr(lead.premium, lead.currency, lead.exchangeRate)
+      : 1;
+    groups.set(lead.insuranceClass, (groups.get(lead.insuranceClass) ?? 0) + value);
+  }
+  return [...groups.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .map(([label, value]) => ({ label, value }));
+}
+
+function compactStageLabel(stage: string) {
+  return stage.replace(' to deal', '').replace(' Identified', '');
+}
+
+function compactAmount(amount: number) {
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(amount);
 }
 
 function KpiCard({

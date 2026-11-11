@@ -14,7 +14,7 @@ const roleLabel: Record<Role, string> = {
 };
 
 const titles: Record<string, string> = {
-  dashboard: 'Executive Dashboard',
+  dashboard: 'Dashboard',
   plans: 'My Plans',
   leads: 'Leads',
   deals: 'Deals',

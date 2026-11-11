@@ -46,11 +46,51 @@ export interface MonthlyDealSummary extends DealValueSummary {
   label: string;
 }
 
+export interface MonthlyDealOutcomeCount {
+  key: string;
+  label: string;
+  won: number;
+  lost: number;
+}
+
 export function isValidDealCloseDate(value?: string) {
   const date = value?.slice(0, 10) ?? '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
   const parsed = new Date(`${date}T00:00:00.000Z`);
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
+}
+
+export function summarizeClosedDealsForLastSixMonths(
+  deals: Deal[],
+  pipelineStages: PipelineStage[],
+  stageHistory: StageHistoryAudit[],
+  now = new Date(),
+): MonthlyDealOutcomeCount[] {
+  const months = Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - 5 + index, 1);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    return {
+      key,
+      label: date.toLocaleDateString('en-US', { month: 'short' }),
+      won: 0,
+      lost: 0,
+    };
+  });
+  const monthsByKey = new Map(months.map((month) => [month.key, month]));
+
+  for (const deal of deals) {
+    const datePart = deal.closeDate?.slice(0, 10) ?? '';
+    if (!isValidDealCloseDate(datePart)) continue;
+    const month = monthsByKey.get(datePart.slice(0, 7));
+    if (!month) continue;
+
+    const stage = pipelineStages.find((candidate) =>
+      candidate.pipelineId === deal.pipelineId && candidate.name === deal.stage);
+    const outcome = classifyDealOutcome(deal, stage, stageHistory);
+    if (outcome === 'won' || outcome === 'lost') month[outcome] += 1;
+  }
+
+  return months;
 }
 
 export function validateDealBaseForProgression(deal: Deal, context: Pick<DealSummaryContext, 'leads' | 'clients'>) {

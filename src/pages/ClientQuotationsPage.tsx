@@ -590,15 +590,15 @@ export default function ClientQuotationsPage() {
       {notice && <div role="status" className="rounded-lg border border-win/30 bg-win/10 px-4 py-2 text-sm text-win">{notice}</div>}
       {error && <div role="alert" className="rounded-lg border border-hot/30 bg-hot/10 px-4 py-2 text-sm text-hot">{error}</div>}
 
-      <PageToolbar name="client-quotations">
+      {(editor || (queryDealId && (activeForDeal || canCreateForDeal))) && <PageToolbar name="client-quotations">
         {editor && <button type="button" className="btn-ghost" onClick={() => setEditor(null)}><ArrowLeft size={14} /> All quotations</button>}
-        <h1 className="mr-auto text-lg font-bold text-white">{editor ? displayedReference(editor) : 'Client Quotations'}</h1>
+        {editor && <h1 className="mr-auto text-lg font-bold text-white">{displayedReference(editor)}</h1>}
         {editor && <button type="button" className="btn-ghost" onClick={() => printDocument('print-client-quotation')}><Printer size={14} /> Print / Save PDF</button>}
         {!editor && queryDealId && activeForDeal && <button type="button" className="btn-primary" onClick={() => openQuotation(activeForDeal)}>Open client quotation</button>}
         {!editor && queryDealId && !activeForDeal && canCreateForDeal && <button type="button" className="btn-primary" onClick={openWizard}><FilePlus2 size={14} /> Create client quotation</button>}
         {editor && ['Issued', 'Rejected', 'Expired'].includes(editor.status) && <button type="button" className="btn-ghost" onClick={() => reviseQuotation(editor)}><RefreshCw size={14} /> Revise</button>}
         {editor && <a className="btn-ghost" href={backToDealHref}>Back to deal</a>}
-      </PageToolbar>
+      </PageToolbar>}
 
       {wizardOpen && sourceRequest && selectedDeal && (
         <section className="glass space-y-4 rounded-2xl p-4 sm:p-6" aria-label="Client quotation creation wizard">

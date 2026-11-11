@@ -593,7 +593,7 @@ export default function QSlipsPage() {
             <thead className="bg-ink-900/60 text-[11px] tracking-wider text-muted">
               <tr>
                 {['Batch / Deal', 'Lead', 'Client', 'Batch status', 'Required by', 'Insured amount', 'Actions'].map((label) => (
-                  <th key={label} scope="col" className="px-3 py-3 text-left font-medium">{label}</th>
+                  <th key={label} scope="col" className={`px-3 py-3 font-medium ${label === 'Actions' ? 'text-right' : 'text-left'}`}>{label}</th>
                 ))}
               </tr>
             </thead>
@@ -638,10 +638,8 @@ export default function QSlipsPage() {
                       <td className="px-3 py-3"><Badge variant={statusTone(status)}>{status}</Badge><div className="text-[10px] text-muted">{lines.length} matching line{lines.length === 1 ? '' : 's'}</div></td>
                       <td className="px-3 py-3 text-muted">{formatDate(request.requiredBy)}</td>
                       <td className="px-3 py-3 font-medium text-white">{formatAmount(total, request.currency)}</td>
-                      <td className="px-3 py-3">
-                        <div className="flex flex-wrap items-center justify-end gap-2">
-                          <a className="inline-flex items-center gap-1 rounded-md border border-ink-600 px-2 py-1 text-xs text-brand-300 hover:border-ink-500 hover:text-white" href={dashboardHref('deals', { id: request.dealId })} onClick={(event) => event.stopPropagation()}>Deal <ArrowUpRight size={13} /></a>
-                        </div>
+                      <td className="px-3 py-3 text-right">
+                        <a className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-ink-600 px-2 py-1 text-xs text-brand-300 hover:border-ink-500 hover:text-white" href={dashboardHref('deals', { id: request.dealId })} onClick={(event) => event.stopPropagation()}>Deal <ArrowUpRight size={13} /></a>
                       </td>
                     </tr>
                     {expanded && request.sections.map((section) => {
