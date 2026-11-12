@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowUpRight, ChevronDown, ChevronRight, Plus, Search, Send, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowUpRight, ChevronDown, ChevronRight, Plus, Search, Send, X } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import PageToolbar from '../components/ui/PageToolbar';
 import DateInput from '../components/ui/DateInput';
@@ -85,7 +85,9 @@ export default function QSlipsPage() {
     currency: 'MVR' as 'MVR' | 'USD', notes: '', preparedBy: '', checkedBy: '',
   });
   const [draftSections, setDraftSections] = useState<QuotationSection[]>([]);
+  const draftSectionsRef = useRef<QuotationSection[]>([]);
   const [sectionInsurers, setSectionInsurers] = useState<Record<string, string[]>>({});
+  const [sectionInterestInputs, setSectionInterestInputs] = useState<Record<string, string>>({});
   const [sectionProductCode, setSectionProductCode] = useState('');
   const [formError, setFormError] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -113,8 +115,10 @@ export default function QSlipsPage() {
   const openNew = useCallback((dealId = '') => {
     setSelectedDealId(dealId);
     setWizardStep(0);
+    draftSectionsRef.current = [];
     setDraftSections([]);
     setSectionInsurers({});
+    setSectionInterestInputs({});
     setSectionProductCode('');
     setFormError('');
     const deal = deals.find((item) => item.id === dealId);
@@ -166,8 +170,13 @@ export default function QSlipsPage() {
       currency: deal?.currency ?? 'MVR',
     }));
   };
+  const updateDraftSections = (update: (current: QuotationSection[]) => QuotationSection[]) => {
+    const updated = update(draftSectionsRef.current);
+    draftSectionsRef.current = updated;
+    setDraftSections(updated);
+  };
   const updateSection = (sectionId: string, update: (section: QuotationSection) => QuotationSection) => {
-    setDraftSections((current) => current.map((section) => section.id === sectionId
+    updateDraftSections((current) => current.map((section) => section.id === sectionId
       ? (() => {
         const updated = update(section);
         return { ...updated, data: withSectionTotal(updated.data) };
@@ -180,6 +189,9 @@ export default function QSlipsPage() {
     const normalizedQuery = searchQuery.trim().toLowerCase();
     return quotationRequests.flatMap((request) => {
       const { deal, lead, client, clientName } = resolveRequestContext(request, deals, clients, leads);
+      if ((requestFilter && request.id !== requestFilter)
+        || (dealFilter && request.dealId !== dealFilter)
+        || (clientFilter && request.clientId !== clientFilter && client?.id !== clientFilter)) return [];
       const requestMatchesSearch = [
         request.reference, request.dealId, deal?.client, deal?.product, request.leadId,
         lead?.title, lead?.client, clientName,
@@ -191,13 +203,12 @@ export default function QSlipsPage() {
         return (!statusFilter || getQuotationLineDisplayStatus(line) === statusFilter)
           && (!vendorFilter || line.vendorId === vendorFilter)
           && (!productFilter || request.sections.find((section) => section.id === line.sectionId)?.productCode === productFilter)
-          && (!clientFilter || request.clientId === clientFilter || client?.id === clientFilter)
           && (!normalizedQuery || requestMatchesSearch || lineMatchesSearch || vendorName(line.vendorId).toLowerCase().includes(normalizedQuery));
       });
-      if ((!requestFilter || request.id === requestFilter)
-        && (!dealFilter || request.dealId === dealFilter)
-        && lines.length) return [{ request, lines }];
-      return [];
+      const hasLineFilters = Boolean(statusFilter || vendorFilter || productFilter);
+      if (normalizedQuery && !requestMatchesSearch && !lines.length) return [];
+      if (hasLineFilters && !lines.length) return [];
+      return [{ request, lines }];
     }).sort((left, right) => right.request.createdAt.localeCompare(left.request.createdAt));
   }, [clientFilter, clients, dealFilter, deals, leads, productFilter, quotationRequests, requestFilter, searchQuery, statusFilter, vendorFilter, vendorName]);
 
@@ -225,8 +236,8 @@ export default function QSlipsPage() {
       setFormError('Choose a product to add a quotation section.');
       return;
     }
-    const section = createQuotationSection(`qrs-section-${crypto.randomUUID()}`, draftSections.length + 1, product);
-    setDraftSections((current) => [...current, section]);
+    const section = createQuotationSection(`qrs-section-${crypto.randomUUID()}`, draftSectionsRef.current.length + 1, product);
+    updateDraftSections((current) => [...current, section]);
     setSectionInsurers((current) => ({ ...current, [section.id]: [] }));
     setFormError('');
   };
@@ -340,7 +351,6 @@ export default function QSlipsPage() {
     setQuotationRequests((current) => [request, ...current]);
     request.lines.forEach((line) => addActivity(request, line, 'Quotation request line created', 'Request sent to insurer.'));
     setExpandedRequests((current) => [request.id, ...current]);
-    setExpandedSections((current) => [...current, ...sections.map((section) => `${request.id}:${section.id}`)]);
     setOpen(false);
   };
 
@@ -499,10 +509,18 @@ export default function QSlipsPage() {
     setAddVendorSectionId('');
   };
 
-  const toggleExpanded = (requestId: string) => setExpandedRequests((current) =>
-    current.includes(requestId) ? current.filter((id) => id !== requestId) : [...current, requestId]);
-  const toggleSection = (sectionKey: string) => setExpandedSections((current) =>
-    current.includes(sectionKey) ? current.filter((key) => key !== sectionKey) : [...current, sectionKey]);
+  const toggleExpanded = (requestId: string) => {
+    setExpandedRequests((current) =>
+      current.includes(requestId) ? current.filter((id) => id !== requestId) : [...current, requestId]);
+    setExpandedSections((current) => current.filter((key) => !key.startsWith(`${requestId}:`)));
+  };
+  const toggleSection = (requestId: string, sectionId: string) => {
+    const sectionKey = `${requestId}:${sectionId}`;
+    setExpandedSections((current) => {
+      const requestSections = current.filter((key) => !key.startsWith(`${requestId}:`));
+      return current.includes(sectionKey) ? requestSections : [...requestSections, sectionKey];
+    });
+  };
 
   const visibleRequest = editingLine
     ? quotationRequests.find((request) => request.id === editingLine.requestId)
@@ -553,9 +571,19 @@ export default function QSlipsPage() {
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <PageToolbar name="qslips">
-        <Badge compact variant="warm">Requested <span className="font-semibold">{quotationRequests.flatMap((request) => request.lines).filter((line) => getQuotationLineDisplayStatus(line) === 'Requested').length}</span></Badge>
-        <Badge compact variant="cold">Sent <span className="font-semibold">{quotationRequests.flatMap((request) => request.lines).filter((line) => getQuotationLineDisplayStatus(line) === 'Sent').length}</span></Badge>
-        <Badge compact variant="win">Quoted <span className="font-semibold">{quotationRequests.flatMap((request) => request.lines).filter((line) => getQuotationLineDisplayStatus(line) === 'Quoted').length}</span></Badge>
+        <div className="flex items-center gap-1" role="group" aria-label="Filter by quotation request status">
+          {([
+            { status: 'Requested', variant: 'warm' as const },
+            { status: 'Sent', variant: 'cold' as const },
+            { status: 'Quoted', variant: 'win' as const },
+          ]).map(({ status, variant }) => (
+            <button key={status} type="button" aria-pressed={statusFilter === status}
+              className={`rounded-full transition ${statusFilter === status ? 'ring-2 ring-brand-400' : 'hover:opacity-80'}`}
+              onClick={() => setStatusFilter((current) => current === status ? '' : status)}>
+              <Badge compact variant={variant}>{status} <span className="font-semibold">{quotationRequests.flatMap((request) => request.lines).filter((line) => getQuotationLineDisplayStatus(line) === status).length}</span></Badge>
+            </button>
+          ))}
+        </div>
         <div className="relative min-w-32 flex-1">
           <Search size={14} className="pointer-events-none absolute left-3 top-2.5 text-muted" />
           <input className="input w-full !py-1.5 !pl-9 !text-xs" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search batch, line, or insurer ref" aria-label="Search quotation requests" />
@@ -652,7 +680,7 @@ export default function QSlipsPage() {
                       return <Fragment key={section.id}>
                         <tr className="border-t border-ink-700/60 bg-ink-900/20 text-xs">
                           <td className="py-2 pl-8">
-                            <button type="button" className="mr-2 align-middle text-muted" aria-label={`${sectionExpanded ? 'Collapse' : 'Expand'} ${section.title}`} onClick={() => toggleSection(sectionKey)}>
+                            <button type="button" className="mr-2 align-middle text-muted" aria-label={`${sectionExpanded ? 'Collapse' : 'Expand'} ${section.title}`} onClick={() => toggleSection(request.id, section.id)}>
                               {sectionExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                             </button>
                             <span className="font-medium text-white">{String(section.no).padStart(2, '0')} · {section.title}</span>
@@ -711,17 +739,25 @@ export default function QSlipsPage() {
         </div>
       </div>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="New Quotation Request Slip" subtitle={`Step ${wizardStep + 1} of 4 · ${['Deal and risk details', 'Insurance sections', 'Insurer selection', 'Review and create'][wizardStep]}`} size="lg" footer={<>
-        <button type="button" className="btn-ghost" onClick={() => setOpen(false)}><X size={14} /> Cancel</button>
-        {wizardStep > 0 && <button type="button" className="btn-secondary" onClick={() => { setWizardStep((step) => step - 1); setFormError(''); }}>Back</button>}
-        <button type="button" className="btn-primary" onClick={() => {
-          setFormError('');
-          if (wizardStep < 3) setWizardStep((step) => step + 1);
-          else requestFormRef.current?.requestSubmit();
-        }}>
-          {wizardStep < 3 ? 'Continue' : <><Send size={14} /> Create slips</>}
-        </button>
-      </>}>
+      <Modal open={open} onClose={() => setOpen(false)} title="New Quotation Request Slip" subtitle={`Step ${wizardStep + 1} of 4 · ${['Deal and risk details', 'Insurance sections', 'Insurer selection', 'Review and create'][wizardStep]}`} size="lg" footer={
+        <div className="flex w-full items-center justify-between gap-3">
+          <button type="button" className="btn-ghost" onClick={() => setOpen(false)}><X size={14} /> Cancel</button>
+          <div className="flex items-center gap-2">
+            {wizardStep > 0 && <button type="button" className="btn-ghost" onClick={() => { setWizardStep((step) => step - 1); setFormError(''); }}><ArrowLeft size={14} /> Back</button>}
+            <button type="button" className="btn-primary" onClick={() => {
+              setFormError('');
+              if (wizardStep === 1 && !draftSectionsRef.current.length) {
+                setFormError('Add at least one insurance section before selecting insurers.');
+                return;
+              }
+              if (wizardStep < 3) setWizardStep((step) => step + 1);
+              else requestFormRef.current?.requestSubmit();
+            }}>
+              {wizardStep < 3 ? <><span>Continue</span><ArrowRight size={14} /></> : <><Send size={14} /> Create slips</>}
+            </button>
+          </div>
+        </div>
+      }>
         <form ref={requestFormRef} id="quotation-request-form" onSubmit={submitRequest} className="space-y-4">
           {wizardStep === 0 && <>
             <FilterField label="Open deal *">
@@ -757,27 +793,42 @@ export default function QSlipsPage() {
           </>}
 
           {wizardStep === 1 && <div className="space-y-4">
-            <div className="flex flex-wrap items-end gap-2">
+            <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
               <FilterField label="Product section *">
-                <select className="input min-w-56" value={sectionProductCode} onChange={(event) => setSectionProductCode(event.target.value)}>
+                <select className="input" value={sectionProductCode} onChange={(event) => setSectionProductCode(event.target.value)}>
                   <option value="">Select a product</option>
                   {products.map((product) => <option key={product.code} value={product.code}>{product.name} ({product.code})</option>)}
                 </select>
               </FilterField>
-              <button type="button" className="btn-secondary" onClick={addSection}><Plus size={14} /> Add section</button>
+              <button type="button" className="btn-ghost w-full sm:w-auto" onClick={addSection}><Plus size={14} /> Add section</button>
             </div>
             {draftSections.map((section) => <section key={section.id} className="space-y-3 rounded-xl border border-ink-600 bg-ink-900/35 p-3">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold text-white">{String(section.no).padStart(2, '0')} · {section.title}</h3>
                 <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => {
-                  setDraftSections((current) => current.filter((item) => item.id !== section.id).map((item, index) => ({ ...item, no: index + 1 })));
+                  updateDraftSections((current) => current.filter((item) => item.id !== section.id).map((item, index) => ({ ...item, no: index + 1 })));
                   setSectionInsurers((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== section.id)));
+                  setSectionInterestInputs((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(`${section.id}:`))));
                 }}>Remove</button>
               </div>
-              {section.data.interests.map((interest, index) => <div key={`${section.id}-interest-${index}`} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_12rem]">
-                <FilterField label={`Interest ${index + 1}`}><input className="input" value={interest.interest} onChange={(event) => updateSection(section.id, (item) => ({ ...item, data: { ...item.data, interests: item.data.interests.map((entry, entryIndex) => entryIndex === index ? { ...entry, interest: event.target.value } : entry) } }))} /></FilterField>
-                <FilterField label="Sum insured"><input className="input" type="number" min="0" step="0.01" value={interest.sumInsured} onChange={(event) => updateSection(section.id, (item) => ({ ...item, data: { ...item.data, interests: item.data.interests.map((entry, entryIndex) => entryIndex === index ? { ...entry, sumInsured: Number(event.target.value) } : entry) } }))} /></FilterField>
-              </div>)}
+              {section.data.interests.map((interest, index) => {
+                const inputKey = `${section.id}:${index}`;
+                return <div key={`${section.id}-interest-${index}`} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_12rem]">
+                  <FilterField label={`Interest ${index + 1}`}><input className="input" value={interest.interest} onChange={(event) => updateSection(section.id, (item) => ({ ...item, data: { ...item.data, interests: item.data.interests.map((entry, entryIndex) => entryIndex === index ? { ...entry, interest: event.target.value } : entry) } }))} /></FilterField>
+                  <FilterField label="Sum insured"><input className="input" type="number" min="0" step="0.01" value={sectionInterestInputs[inputKey] ?? String(interest.sumInsured)} onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setSectionInterestInputs((current) => ({ ...current, [inputKey]: value }));
+                    const sumInsured = value === '' ? 0 : Number(value);
+                    if (Number.isFinite(sumInsured)) {
+                      updateSection(section.id, (item) => ({ ...item, data: { ...item.data, interests: item.data.interests.map((entry, entryIndex) => entryIndex === index ? { ...entry, sumInsured } : entry) } }));
+                    }
+                  }} onBlur={() => setSectionInterestInputs((current) => {
+                    const remaining = { ...current };
+                    delete remaining[inputKey];
+                    return remaining;
+                  })} /></FilterField>
+                </div>;
+              })}
               {section.data.businessInterruption && <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <FilterField label="Gross profit"><input className="input" type="number" min="0" step="0.01" value={section.data.businessInterruption.grossProfit} onChange={(event) => updateSection(section.id, (item) => ({ ...item, data: { ...item.data, businessInterruption: { ...item.data.businessInterruption!, grossProfit: Number(event.target.value) } } }))} /></FilterField>
                 <FilterField label="Indemnity months"><input className="input" type="number" min="1" step="1" value={section.data.businessInterruption.indemnityMonths} onChange={(event) => updateSection(section.id, (item) => ({ ...item, data: { ...item.data, businessInterruption: { ...item.data.businessInterruption!, indemnityMonths: Number(event.target.value) } } }))} /></FilterField>
@@ -800,22 +851,23 @@ export default function QSlipsPage() {
             {!draftSections.length && <p className="rounded-lg border border-dashed border-ink-600 p-4 text-sm text-muted">Add one or more products to define the requested insurance sections.</p>}
           </div>}
 
-          {wizardStep === 2 && <div className="space-y-3">
+          {wizardStep === 2 && <div className="space-y-4">
             <p className="text-sm text-muted">Select the insurers that should receive each section. An insurer may receive any subset of the slip.</p>
-            {draftSections.map((section) => <fieldset key={section.id} className="rounded-xl border border-ink-600 p-3">
-              <legend className="px-1 text-sm font-medium text-white">{String(section.no).padStart(2, '0')} · {section.title}</legend>
+            {draftSections.map((section) => <fieldset key={section.id} className="min-w-0 rounded-xl border border-ink-600 p-3">
+              <legend className="max-w-full px-1 text-sm font-medium text-white">{String(section.no).padStart(2, '0')} · {section.title}</legend>
               {insurerOptions.length ? <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {insurerOptions.map((vendor) => <label key={vendor.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-ink-700 bg-ink-900/40 px-3 py-2 text-sm text-white">
-                  <input type="checkbox" checked={(sectionInsurers[section.id] ?? []).includes(vendor.id)} onChange={() => setSectionInsurers((current) => ({
+                {insurerOptions.map((vendor) => <label key={vendor.id} className="flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border border-ink-700 bg-ink-900/40 px-3 py-2 text-sm text-white">
+                  <input className="shrink-0 accent-brand-400" type="checkbox" checked={(sectionInsurers[section.id] ?? []).includes(vendor.id)} onChange={() => setSectionInsurers((current) => ({
                     ...current,
                     [section.id]: (current[section.id] ?? []).includes(vendor.id)
                       ? current[section.id].filter((id) => id !== vendor.id)
                       : [...(current[section.id] ?? []), vendor.id],
                   }))} />
-                  <span>{vendor.name}</span><span className="ml-auto text-[10px] text-muted">{vendor.vendorType}</span>
+                  <span className="min-w-0 truncate">{vendor.name}</span><span className="ml-auto shrink-0 text-[10px] text-muted">{vendor.vendorType}</span>
                 </label>)}
               </div> : <p className="text-sm text-muted">Add an active insurer or reinsurer before creating the slip.</p>}
             </fieldset>)}
+            {!draftSections.length && <p className="rounded-lg border border-dashed border-ink-600 p-4 text-sm text-muted">No insurance sections to map. Go back and add at least one section first.</p>}
           </div>}
 
           {wizardStep === 3 && <div className="space-y-3">

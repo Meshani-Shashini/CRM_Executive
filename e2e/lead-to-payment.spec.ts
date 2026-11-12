@@ -137,7 +137,10 @@ test('lead converts through QRS, invoice, and payment with monthly open-to-won r
 
   await qrsForm.getByLabel('Product section *').selectOption('PR');
   await qrsForm.getByRole('button', { name: 'Add section' }).click();
-  await qrsForm.getByLabel('Sum insured').first().fill('300000');
+  const sumInsuredInput = qrsForm.getByLabel('Sum insured').first();
+  await sumInsuredInput.fill('');
+  await expect(sumInsuredInput).toHaveValue('');
+  await sumInsuredInput.fill('300000');
   await qrsForm.getByLabel('Product section *').selectOption('LP');
   await qrsForm.getByRole('button', { name: 'Add section' }).click();
   await qrsForm.getByLabel('Gross profit').fill('120000');
@@ -158,13 +161,24 @@ test('lead converts through QRS, invoice, and payment with monthly open-to-won r
   const batchReference = (await batchRow.getAttribute('aria-label'))?.match(/QRS-\d{3,}-\d{4}/)?.[0];
   expect(batchReference).toBeTruthy();
   const lineRows = page.getByRole('row').filter({ hasText: new RegExp(`${batchReference}-01-0[12]`) });
+  const secondSectionLine = page.getByRole('row').filter({ hasText: new RegExp(`${batchReference}-02-01`) });
+  const firstSectionToggle = page.getByRole('button', { name: 'Expand Property All Risk' });
+  const secondSectionToggle = page.getByRole('button', { name: 'Expand Consequential Loss' });
+  await expect(firstSectionToggle).toBeVisible();
+  await expect(lineRows).toHaveCount(0);
+  await firstSectionToggle.click();
+  await expect(lineRows).toHaveCount(2);
+  await expect(secondSectionLine).toHaveCount(0);
+  await secondSectionToggle.click();
+  await expect(lineRows).toHaveCount(0);
+  await expect(secondSectionLine).toHaveCount(1);
+  await firstSectionToggle.click();
   await expect(lineRows).toHaveCount(2);
   const firstLineReference = (await lineRows.nth(0).innerText()).match(/QRS-\d{3,}-\d{4}-\d{2}-\d{2}/)?.[0];
   const secondLineReference = (await lineRows.nth(1).innerText()).match(/QRS-\d{3,}-\d{4}-\d{2}-\d{2}/)?.[0];
   expect(firstLineReference).toBeTruthy();
   expect(secondLineReference).toBeTruthy();
   expect(firstLineReference).not.toBe(secondLineReference);
-  await expect(page.getByRole('row').filter({ hasText: new RegExp(`${batchReference}-02-01`) })).toHaveCount(1);
 
   await page.getByRole('button', { name: `Update ${firstLineReference}` }).click();
   await page.getByLabel('Status *').selectOption('Quoted');
