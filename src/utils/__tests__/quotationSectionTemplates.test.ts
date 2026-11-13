@@ -13,6 +13,21 @@ describe('quotation section templates', () => {
       .toEqual(['Public liability', 'Products liability', 'Personal injury']);
   });
 
+  it('creates a general first section while retaining the selected deal product', () => {
+    const section = createQuotationSection(
+      'section-1',
+      1,
+      { code: 'PR', name: 'Property All Risk' },
+      'general',
+    );
+    expect(section.productCode).toBe('PR');
+    expect(section.title).toBe('Property All Risk');
+    expect(section.data.interests).toEqual([{ interest: 'Insured interest', sumInsured: 0 }]);
+    expect(section.data.materialInfo).toEqual({ 'Risk description': '', 'Claims experience': '' });
+    expect(section.data.deductibles).toEqual(['Standard deductible: ']);
+    expect(section.data.extensions).toEqual([{ name: 'Additional extension', limit: '' }]);
+  });
+
   it('calculates totals from interests, business interruption, and the highest alternative option', () => {
     const section = createQuotationSection('section-1', 1, { code: 'TL', name: 'Public Liability' });
     section.data.options[0].coverages[0].limit = 250000;

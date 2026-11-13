@@ -242,6 +242,26 @@ export default function QSlipsPage() {
     setFormError('');
   };
 
+  const initializeDefaultSection = () => {
+    if (!selectedDeal || draftSectionsRef.current.length) return;
+    const dealProductCode = selectedDeal.productCode?.trim().toUpperCase();
+    const product = products.find((item) => item.code.toUpperCase() === dealProductCode)
+      ?? products.find((item) => item.name.trim().toLowerCase() === selectedDeal.product.trim().toLowerCase());
+    const defaultProduct = product ?? {
+      code: selectedDeal.productCode?.trim() || 'GENERAL',
+      name: selectedDeal.product.trim() || selectedDeal.productCode?.trim() || 'General insurance',
+    };
+    const section = createQuotationSection(
+      `qrs-section-${crypto.randomUUID()}`,
+      1,
+      defaultProduct,
+      'general',
+    );
+    updateDraftSections((current) => current.length ? current : [section]);
+    setSectionInsurers((current) => ({ ...current, [section.id]: [] }));
+    setSectionProductCode(product?.code ?? '');
+  };
+
   const submitRequest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError('');
@@ -746,6 +766,11 @@ export default function QSlipsPage() {
             {wizardStep > 0 && <button type="button" className="btn-ghost" onClick={() => { setWizardStep((step) => step - 1); setFormError(''); }}><ArrowLeft size={14} /> Back</button>}
             <button type="button" className="btn-primary" onClick={() => {
               setFormError('');
+              if (wizardStep === 0 && !selectedDeal) {
+                setFormError('Choose an open deal before continuing.');
+                return;
+              }
+              if (wizardStep === 0) initializeDefaultSection();
               if (wizardStep === 1 && !draftSectionsRef.current.length) {
                 setFormError('Add at least one insurance section before selecting insurers.');
                 return;

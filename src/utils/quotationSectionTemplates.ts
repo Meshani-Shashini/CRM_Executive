@@ -121,8 +121,9 @@ export function createQuotationSection(
   id: string,
   no: number,
   product: Pick<ProductCode, 'code' | 'name'>,
+  templateOverride?: QuotationSectionTemplate,
 ): QuotationSection {
-  const template = getQuotationSectionTemplate(product.code);
+  const template = templateOverride ? templates[templateOverride] : getQuotationSectionTemplate(product.code);
   return {
     id,
     no,
