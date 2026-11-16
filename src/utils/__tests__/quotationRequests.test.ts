@@ -4,10 +4,12 @@ import { nextLocalReference } from '../references';
 import { createQuotationSection } from '../quotationSectionTemplates';
 import { quotationLineRowActions } from '../quotationRequestStatus';
 import {
-  createLineReference, deriveRequestStatus, formatQuotationLineActivity, formatQuotationLineReference,
+  createDealQuotationSnapshot, createLineReference, deriveRequestStatus, formatQuotationLineActivity, formatQuotationLineReference,
   getQuotationLineDisplayStatus, hasActiveQuotationLine, hasDuplicateQuotationReferences,
-  deriveSectionStatus, nextLineReference, normalizeQuotationRequest, quotationLineStatusCellText,
+  deriveSectionStatus, markQuotationLinesSent, nextLineReference, normalizeQuotationRequest, quotationLineStatusCellText,
+  quotationRateFromPremium,
 } from '../quotationRequests';
+import { formatSlashDateInput, parseSlashDateInput } from '../date';
 
 function line(reference: string, status: QuotationRequestLine['status']): QuotationRequestLine {
   return {
@@ -71,6 +73,108 @@ describe('quotation request batches', () => {
     expect(deriveRequestStatus([line('a', 'Quoted'), line('b', 'Declined')])).toBe('Partially Quoted');
     expect(deriveRequestStatus([line('a', 'Quoted'), line('b', 'Quoted')])).toBe('Quoted');
     expect(deriveRequestStatus([line('a', 'Cancelled'), line('b', 'Cancelled')])).toBe('Cancelled');
+  });
+
+  it('marks only requested insurer lines sent with a timestamp and status history', () => {
+    const requested = line('requested', 'Requested');
+    const alreadySent = { ...line('sent', 'Sent'), sentAt: '2026-01-02T00:00:00.000Z' };
+    const cancelled = line('cancelled', 'Cancelled');
+    const sentAt = '2026-02-01T10:30:00.000Z';
+
+    const result = markQuotationLinesSent(
+      request([requested, alreadySent, cancelled]),
+      ['requested', 'sent', 'cancelled'],
+      'user-2',
+      sentAt,
+    );
+
+    expect(result.sentLines).toHaveLength(1);
+    expect(result.request.lines.map(({ status, sentAt: timestamp, statusHistory }) => ({
+      status,
+      sentAt: timestamp,
+      lastChange: statusHistory[statusHistory.length - 1],
+    }))).toEqual([
+      {
+        status: 'Sent',
+        sentAt,
+        lastChange: {
+          fromStatus: 'Requested',
+          toStatus: 'Sent',
+          changedAt: sentAt,
+          changedBy: 'user-2',
+        },
+      },
+      {
+        status: 'Sent',
+        sentAt: '2026-01-02T00:00:00.000Z',
+        lastChange: undefined,
+      },
+      { status: 'Cancelled', sentAt: undefined, lastChange: undefined },
+    ]);
+    expect(result.request.updatedAt).toBe(sentAt);
+  });
+
+  it('derives carrier rates and syncs quote details into the linked Deal snapshot', () => {
+    const sentAt = '2026-02-01T10:30:00.000Z';
+    const attachment = {
+      id: 'attachment-1',
+      name: 'carrier-quote.pdf',
+      url: 'data:application/pdf;base64,abc',
+      uploadedAt: sentAt,
+    };
+    const quoteLine: QuotationRequestLine = {
+      ...line('QRS-012-2026-01-01', 'Quoted'),
+      quotes: [{ optionId: 'base', premium: 2500, currency: 'MVR', ratePct: 2, validUntil: '2026-12-31' }],
+      quotedSumInsured: 125000,
+      insurerDeductibles: ['MVR 500'],
+      insurerTerms: 'Subject to survey.',
+      insurerQuoteRef: 'CARRIER-42',
+      attachments: [attachment],
+    };
+    const requestWithQuote = request([quoteLine]);
+
+    expect(quotationRateFromPremium(2500, 125000)).toBe(2);
+    expect(createDealQuotationSnapshot(requestWithQuote, quoteLine, 'Island Insurance', sentAt)).toMatchObject({
+      requestId: requestWithQuote.id,
+      lineId: quoteLine.id,
+      insurer: 'Island Insurance',
+      status: 'Quoted',
+      quotedSumInsured: 125000,
+      insurerDeductibles: ['MVR 500'],
+      insurerTerms: 'Subject to survey.',
+      insurerQuoteRef: 'CARRIER-42',
+      attachments: [attachment],
+    });
+  });
+
+  it('normalizes and preserves uploaded quote attachment metadata', () => {
+    const attachment = {
+      id: 'attachment-1',
+      name: 'carrier-quote.pdf',
+      url: 'data:application/pdf;base64,abc',
+      uploadedAt: '2026-02-01T10:30:00.000Z',
+      storagePath: 'tenant/requests/request/line/file.pdf',
+      storageBucket: 'quotation-attachments',
+    };
+    const source = request([{
+      ...line('QRS-012-2026-01-01', 'Quoted'),
+      quotedSumInsured: 125000,
+      insurerTerms: 'Subject to survey.',
+      attachments: [attachment],
+    }]);
+
+    const normalized = normalizeQuotationRequest(source);
+    expect(normalized?.lines[0]).toMatchObject({
+      quotedSumInsured: 125000,
+      insurerTerms: 'Subject to survey.',
+      attachments: [attachment],
+    });
+  });
+
+  it('formats and parses quote validity as DD/MMM/YYYY', () => {
+    expect(formatSlashDateInput('2026-11-16')).toBe('16/Nov/2026');
+    expect(parseSlashDateInput('16/Nov/2026')).toBe('2026-11-16');
+    expect(parseSlashDateInput('31/Feb/2026')).toBe('');
   });
 
   it('keeps cancellation precedence over an expired quote and only expires sent or quoted lines', () => {

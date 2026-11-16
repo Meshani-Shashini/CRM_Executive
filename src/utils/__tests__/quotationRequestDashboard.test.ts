@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { QuotationRequestLine, QuotationSection } from '../../types';
 import {
-  calculateIndicativePremium, compareOptionCoverage, isQuoteExpiring,
-  quotationInterestBreakdown, quotationRateFromPremium, selectBestQuote,
+  calculateIndicativePremium, compareOptionCoverage, isQuoteExpiring, lowestQuotedPremiumsByComparison,
+  quotationComparisonKey, quotationInterestBreakdown, quotationRateFromPremium, selectBestQuote,
 } from '../quotationRequestDashboard';
 
 const section: QuotationSection = {
@@ -71,6 +71,27 @@ describe('quotation request dashboard calculations', () => {
       },
     ];
     expect(selectBestQuote(candidates)?.line.id).toBe('two');
+  });
+
+  it('finds lowest premiums independently by option and currency', () => {
+    const candidates = [
+      { line: quoteLine('mvr-high', 250), quote: { optionId: 'option-01', premium: 250, currency: 'MVR' as const } },
+      { line: quoteLine('mvr-low', 180), quote: { optionId: 'option-01', premium: 180, currency: 'MVR' as const } },
+      {
+        line: { ...quoteLine('different-sum-insured', 100), quotedSumInsured: 2000 },
+        quote: { optionId: 'option-01', premium: 100, currency: 'MVR' as const },
+        sumInsured: 2000,
+      },
+      { line: quoteLine('usd', 90), quote: { optionId: 'option-01', premium: 90, currency: 'USD' as const } },
+      { line: quoteLine('other-option', 50), quote: { optionId: 'option-02', premium: 50, currency: 'MVR' as const } },
+    ];
+
+    expect(lowestQuotedPremiumsByComparison(candidates)).toEqual(new Map([
+      [quotationComparisonKey({ optionId: 'option-01', currency: 'MVR' }), 180],
+      [quotationComparisonKey({ optionId: 'option-01', currency: 'MVR' }, 2000), 100],
+      [quotationComparisonKey({ optionId: 'option-01', currency: 'USD' }), 90],
+      [quotationComparisonKey({ optionId: 'option-02', currency: 'MVR' }), 50],
+    ]));
   });
 
   it('flags quotes expiring within the configured window only', () => {

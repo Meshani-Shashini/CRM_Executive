@@ -300,6 +300,15 @@ export interface QuotationRequestQuote {
   validUntil?: string;
 }
 
+export interface QuotationRequestLineAttachment {
+  id: string;
+  name: string;
+  url: string;
+  uploadedAt: string;
+  storagePath?: string;
+  storageBucket?: string;
+}
+
 export interface QuotationRequestLineStatusChange {
   fromStatus?: QuotationRequestLineStatus;
   toStatus: QuotationRequestLineStatus;
@@ -318,6 +327,7 @@ export interface QuotationRequestLine {
   respondedAt?: string;
   insurerQuoteRef?: string;
   quotes: QuotationRequestQuote[];
+  quotedSumInsured?: number;
   declineReason?: string;
   /** Legacy pricing fields remain readable for existing client quotations. */
   quotedPremium?: number;
@@ -326,12 +336,33 @@ export interface QuotationRequestLine {
   validUntil?: string;
   insurerDeductibles?: string[];
   insurerWarranties?: Array<{ title: string; text: string }>;
+  insurerTerms?: string;
+  attachments?: QuotationRequestLineAttachment[];
   remarks: string;
   statusHistory: QuotationRequestLineStatusChange[];
 }
 
+export interface DealQuotationSnapshot {
+  requestId: string;
+  requestReference: string;
+  lineId: string;
+  lineReference: string;
+  vendorId: string;
+  insurer: string;
+  status: 'Quoted' | 'Declined';
+  quotes: QuotationRequestQuote[];
+  quotedSumInsured: number;
+  insurerDeductibles: string[];
+  insurerTerms: string;
+  insurerQuoteRef?: string;
+  validUntil?: string;
+  declineReason?: string;
+  attachments: QuotationRequestLineAttachment[];
+  updatedAt: string;
+}
+
 export type ClientQuotationStatus =
-  | 'Draft' | 'Issued' | 'Accepted' | 'Rejected' | 'Expired' | 'Superseded';
+  | 'Draft' | 'Pending Approval' | 'Approved' | 'Issued' | 'Accepted' | 'Rejected' | 'Expired' | 'Superseded';
 
 export interface ClientQuotationSource {
   sectionId: string;
@@ -416,6 +447,11 @@ export interface ClientQuotation {
   updatedAt: string;
   statusHistory: ClientQuotationStatusChange[];
   sourceValidityConfirmed?: boolean;
+  approvedBy?: string;
+  approvedByName?: string;
+  approvedByRole?: Role;
+  approvedAt?: string;
+  supportingDocuments?: QuotationRequestLineAttachment[];
   acceptance?: {
     name: string;
     designation: string;
@@ -559,6 +595,7 @@ export interface Deal {
   source?: string;
   notes?: string;
   intakeCompleted?: boolean;
+  quotationSnapshot?: DealQuotationSnapshot;
 }
 
 export interface Pipeline {

@@ -4,13 +4,15 @@ import Badge from '../ui/Badge';
 import Modal from '../ui/Modal';
 import PageToolbar from '../ui/PageToolbar';
 import TableShell from '../table/TableShell';
+import QuotationLineEditor from './QuotationLineEditor';
+import VendorQuoteComparison from './VendorQuoteComparison';
 import { useApp } from '../../store/AppContext';
 import type {
   QuotationRequest, QuotationRequestLine, QuotationRequestLineStatus, QuotationRequestQuote,
   QuotationSection,
 } from '../../types';
 import { formatAmount } from '../../utils/currency';
-import { formatDate } from '../../utils/date';
+import { formatDate, formatSlashDateInput } from '../../utils/date';
 import { printDocument } from '../../utils/print';
 import {
   canTransitionQuotationRequestStatus, quotationLineRowActions, quotationRequestStatusOptions,
@@ -22,6 +24,8 @@ import {
 import {
   calculateIndicativePremium, compareOptionCoverage, quotationInterestBreakdown, selectBestQuote,
 } from '../../utils/quotationRequestDashboard';
+import { isQuotationExpired } from '../../utils/clientQuotations';
+import { dashboardHref } from '../../utils/navigation';
 
 type Props = {
   request: QuotationRequest;
@@ -68,12 +72,13 @@ function Card({ children, className = '' }: { children: React.ReactNode; classNa
 export default function QuotationRequestDetailWorkspace({ request, onBack, backHref, backLabel = 'QRS list' }: Props) {
   const {
     clients, deals, leads, vendors, products, company, user, viewAsRole,
-    quotationRequests, setQuotationRequests, setActivities,
+    quotationRequests, setQuotationRequests, setActivities, clientQuotations,
   } = useApp();
   const [view, setView] = useState<ViewMode>('dashboard');
   const [sectionTab, setSectionTab] = useState<SectionTab>('all');
   const [optionTab, setOptionTab] = useState<OptionTab>('compare');
   const [lineEditor, setLineEditor] = useState<QuotationRequestLine | null>(null);
+  const [quoteEditor, setQuoteEditor] = useState<{ line: QuotationRequestLine; status: 'Quoted' | 'Declined' } | null>(null);
   const [lineStatus, setLineStatus] = useState<QuotationRequestLineStatus>('Requested');
   const [quoteDrafts, setQuoteDrafts] = useState<Record<string, QuoteDraft>>({});
   const [quoteCurrency, setQuoteCurrency] = useState<'MVR' | 'USD'>(request.currency);
@@ -93,6 +98,10 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
     ?? clients.find((item) => item.id === lead?.clientId);
   const canEdit = user.role === 'admin' || role === 'admin' || role === 'sales'
     || deal?.ownerId === user.id;
+  const hasActiveClientQuotation = clientQuotations.some((quotation) => quotation.dealId === request.dealId
+    && (['Draft', 'Pending Approval', 'Approved'].includes(quotation.status)
+      || quotation.status === 'Issued' && !isQuotationExpired(quotation)));
+  const canCreateClientQuotation = (role === 'admin' || role === 'sales') && !hasActiveClientQuotation;
   const hasSentLine = request.lines.some((line) => line.status === 'Sent' || Boolean(line.sentAt));
   const activePrintVendorId = printTarget?.vendorId ?? (view === 'formal' ? printVendorId : '');
   const linesForView = request.lines.filter((line) =>
@@ -241,11 +250,15 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
         type: 'note',
         title: formatQuotationLineActivity(
           formatQuotationLineReference(line),
-          statusChanged ? 'Quotation request line status changed' : 'Carrier quotation logged',
+          statusChanged && lineStatus === 'Sent'
+            ? 'Quotation request line sent to insurer'
+            : statusChanged ? 'Quotation request line status changed' : 'Carrier quotation logged',
         ),
         description: formatQuotationLineActivity(
           formatQuotationLineReference(line),
-          `${line.status} → ${lineStatus}${lineStatus === 'Quoted' ? ` · ${quotes.length} option quote${quotes.length === 1 ? '' : 's'} logged` : ''}${lineStatus === 'Declined' ? ` · ${declineReason.trim()}` : ''}`,
+          statusChanged && lineStatus === 'Sent'
+            ? `Sent to insurer at ${now}.`
+            : `${line.status} → ${lineStatus}${lineStatus === 'Quoted' ? ` · ${quotes.length} option quote${quotes.length === 1 ? '' : 's'} logged` : ''}${lineStatus === 'Declined' ? ` · ${declineReason.trim()}` : ''}`,
         ),
         date: now,
         createdAt: now,
@@ -410,6 +423,20 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
           onTargetRateChange={updateTargetRate}
         />)}
 
+        <VendorQuoteComparison
+          requests={[request]}
+          onCreateQuotation={canCreateClientQuotation
+            ? (sourceRequest, line) => {
+              window.location.hash = dashboardHref('quotations', {
+                dealId: sourceRequest.dealId,
+                requestId: sourceRequest.id,
+                lineId: line.id,
+                create: '1',
+              });
+            }
+            : undefined}
+        />
+
         <Card>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div><h2 className="text-sm font-semibold text-white">Carrier quotes ledger</h2><p className="text-[10px] text-muted">One row per insurer line</p></div>
@@ -452,10 +479,21 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
                   <td className="px-2 py-2 text-muted">{contact ? <>{contact.name}<div>{contact.email || contact.phone}</div></> : '—'}</td>
                   <td className="px-2 py-2">{section?.title ?? 'Section unavailable'}<div className="text-muted">{section?.productCode}</div></td>
                   <td className="px-2 py-2">{quotes.length ? quotes.map(({ option }) => <div key={option.id} className="flex items-center gap-1">{option.label}{bestByOption.has(option.id) && <Badge compact variant="win">Best</Badge>}</div>) : section?.data.options.map((option) => <div key={option.id}>{option.label}</div>) ?? 'Standard'}</td>
-                  <td className="px-2 py-2"><Badge compact variant={displayStatus === 'Quoted' ? 'win' : displayStatus === 'Declined' ? 'warm' : displayStatus === 'Cancelled' || cancelled ? 'muted' : 'brand'}>{displayStatus}</Badge></td>
-                  <td className="px-2 py-2">{quotes.length ? quotes.map(({ option, quote }) => <div key={option.id} className={bestByOption.has(option.id) ? 'font-semibold text-win' : 'text-brand-300'}>{formatAmount(quote.premium, quote.currency)}{bestByOption.has(option.id) ? ' · Best' : ''}</div>) : statusCellText ?? statusCellFallback}</td>
+                  <td className="px-2 py-2"><Badge compact variant={displayStatus === 'Quoted' ? 'win' : displayStatus === 'Declined' ? 'warm' : displayStatus === 'Cancelled' || cancelled ? 'muted' : 'brand'}>{displayStatus}</Badge>
+                    {line.sentAt && <div className="mt-1 text-[10px] text-muted">Sent {formatDate(line.sentAt)}</div>}
+                  </td>
+                  <td className="px-2 py-2">{quotes.length ? <>
+                    {quotes.map(({ option, quote }) => <div key={option.id} className={bestByOption.has(option.id) ? 'font-semibold text-win' : 'text-brand-300'}>
+                      {formatAmount(quote.premium, quote.currency)}{bestByOption.has(option.id) ? ' · Best' : ''}
+                      {quote.ratePct !== undefined ? ` · ${quote.ratePct}%` : ''}
+                      {quote.validUntil ? ` · ${formatSlashDateInput(quote.validUntil)}` : ''}
+                    </div>)}
+                    <div className="mt-1 text-[10px] text-muted">
+                      Sum insured {formatAmount(line.quotedSumInsured ?? section?.data.totalSumInsured ?? 0, request.currency)}
+                    </div>
+                  </> : statusCellText ?? statusCellFallback}</td>
                   <td className="max-w-40 whitespace-normal px-2 py-2 text-muted">{displayStatus === 'Quoted'
-                    ? [...(line.insurerDeductibles ?? []), line.remarks].filter(Boolean).join(' · ') || 'No deductible/notes supplied'
+                    ? [...(line.insurerDeductibles ?? []), line.insurerTerms, line.remarks].filter(Boolean).join(' · ') || 'No deductible/notes supplied'
                     : statusCellFallback}</td>
                   <td className="px-2 py-2">
                     <div className="flex flex-wrap gap-1">
@@ -463,9 +501,9 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
                         const actionLabels = {
                           send: 'Send',
                           cancel: 'Cancel',
-                          'log-quote': 'Log carrier quotation',
+                          'log-quote': 'Record Quote',
                           decline: 'Decline',
-                          'edit-quote': 'Edit quote',
+                          'edit-quote': 'Update Quote',
                           reopen: 'Reopen',
                         } as const;
                         const targetStatus = action === 'send' ? 'Sent'
@@ -475,10 +513,28 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
                                 : 'Quoted';
                         return <button key={action} type="button" className="btn-ghost !px-2 !py-1 text-[10px]"
                           disabled={!canEdit} title={!canEdit ? 'You are not authorized to update this line.' : undefined}
-                          onClick={() => openLineEditor(line, targetStatus)}>
+                          onClick={() => {
+                            if (action === 'log-quote' || action === 'edit-quote' || action === 'decline') {
+                              setQuoteEditor({
+                                line,
+                                status: action === 'decline' ? 'Declined' : targetStatus === 'Declined' ? 'Declined' : 'Quoted',
+                              });
+                              return;
+                            }
+                            openLineEditor(line, targetStatus);
+                          }}>
                           {actionLabels[action]}
                         </button>;
                       })}
+                      {canEdit && (displayStatus === 'Declined'
+                        || displayStatus === 'Expired' && (line.status === 'Sent' || line.status === 'Quoted'))
+                        && <button type="button" className="btn-ghost !px-2 !py-1 text-[10px]"
+                          onClick={() => setQuoteEditor({
+                            line,
+                            status: displayStatus === 'Declined' ? 'Declined' : 'Quoted',
+                          })}>
+                          Update Quote
+                        </button>}
                     </div>
                   </td>
                 </tr>;
@@ -516,6 +572,14 @@ export default function QuotationRequestDetailWorkspace({ request, onBack, backH
           {lineError && <p role="alert" className="text-sm text-hot">{lineError}</p>}
         </form>}
       </Modal>
+
+      {quoteEditor && <QuotationLineEditor
+        key={`${quoteEditor.line.id}-${quoteEditor.status}`}
+        request={request}
+        line={quoteEditor.line}
+        initialStatus={quoteEditor.status}
+        onClose={() => setQuoteEditor(null)}
+      />}
 
     </div>
   );

@@ -1,6 +1,7 @@
 import type {
-  QuotationRequest, QuotationRequestLine, QuotationRequestLineStatus, QuotationRequestLineStatusChange,
-  QuotationRequestQuote, QuotationSection, QuotationSectionData,
+  DealQuotationSnapshot, QuotationRequest, QuotationRequestLine, QuotationRequestLineAttachment,
+  QuotationRequestLineStatus, QuotationRequestLineStatusChange, QuotationRequestQuote, QuotationSection,
+  QuotationSectionData,
 } from '../types';
 import { createQuotationSection, quotationSectionTotal, withSectionTotal } from './quotationSectionTemplates';
 
@@ -88,6 +89,79 @@ export function deriveSectionStatus(sectionId: string, lines: QuotationRequestLi
   return sectionLines.length > 0 && sectionLines.every((line) => getQuotationLineDisplayStatus(line) === 'Cancelled')
     ? 'Cancelled' as const
     : 'Active' as const;
+}
+
+export function markQuotationLinesSent(
+  request: QuotationRequest,
+  lineIds: string[],
+  userId: string,
+  sentAt: string,
+) {
+  const selectedLineIds = new Set(lineIds);
+  const sentLines: QuotationRequestLine[] = [];
+  const lines = request.lines.map((line) => {
+    if (!selectedLineIds.has(line.id) || getQuotationLineDisplayStatus(line) !== 'Requested') return line;
+    const sentLine: QuotationRequestLine = {
+      ...line,
+      status: 'Sent',
+      sentAt,
+      statusHistory: [...line.statusHistory, {
+        fromStatus: line.status,
+        toStatus: 'Sent',
+        changedAt: sentAt,
+        changedBy: userId,
+      }],
+    };
+    sentLines.push(sentLine);
+    return sentLine;
+  });
+
+  if (!sentLines.length) return { request, sentLines };
+  return {
+    request: {
+      ...request,
+      updatedAt: sentAt,
+      lines,
+      sections: request.sections.map((section) => ({
+        ...section,
+        status: deriveSectionStatus(section.id, lines),
+      })),
+    },
+    sentLines,
+  };
+}
+
+export function quotationRateFromPremium(premium: number, sumInsured: number) {
+  return Number.isFinite(premium) && premium > 0 && Number.isFinite(sumInsured) && sumInsured > 0
+    ? Math.round((premium / sumInsured) * 10000) / 100
+    : undefined;
+}
+
+export function createDealQuotationSnapshot(
+  request: QuotationRequest,
+  line: QuotationRequestLine,
+  insurer: string,
+  updatedAt: string,
+): DealQuotationSnapshot {
+  const section = request.sections.find((item) => item.id === line.sectionId);
+  return {
+    requestId: request.id,
+    requestReference: request.reference,
+    lineId: line.id,
+    lineReference: line.reference,
+    vendorId: line.vendorId,
+    insurer,
+    status: line.status === 'Declined' ? 'Declined' : 'Quoted',
+    quotes: line.quotes.map((quote) => ({ ...quote })),
+    quotedSumInsured: line.quotedSumInsured ?? section?.data.totalSumInsured ?? 0,
+    insurerDeductibles: [...(line.insurerDeductibles ?? [])],
+    insurerTerms: line.insurerTerms ?? '',
+    ...(line.insurerQuoteRef ? { insurerQuoteRef: line.insurerQuoteRef } : {}),
+    ...(line.validUntil ? { validUntil: line.validUntil } : {}),
+    ...(line.declineReason ? { declineReason: line.declineReason } : {}),
+    attachments: (line.attachments ?? []).map((attachment) => ({ ...attachment })),
+    updatedAt,
+  };
 }
 
 export function createLineReference(batchReference: string, sectionNo: number, lineNo: number) {
@@ -321,6 +395,9 @@ export function normalizeQuotationRequest(value: unknown): QuotationRequest | nu
       ...(typeof line.respondedAt === 'string' ? { respondedAt: line.respondedAt } : {}),
       ...(typeof line.insurerQuoteRef === 'string' ? { insurerQuoteRef: line.insurerQuoteRef } : {}),
       quotes,
+      ...(typeof line.quotedSumInsured === 'number' && Number.isFinite(line.quotedSumInsured)
+        ? { quotedSumInsured: line.quotedSumInsured }
+        : {}),
       ...(typeof line.declineReason === 'string' ? { declineReason: line.declineReason } : {}),
       ...(quotes[0] ? {
         quotedPremium: quotes[0].premium,
@@ -335,6 +412,21 @@ export function normalizeQuotationRequest(value: unknown): QuotationRequest | nu
         ? { insurerWarranties: line.insurerWarranties.filter(isRecord).flatMap((entry) =>
           typeof entry.title === 'string' && typeof entry.text === 'string'
             ? [{ title: entry.title, text: entry.text }]
+            : []) }
+        : {}),
+      ...(typeof line.insurerTerms === 'string' ? { insurerTerms: line.insurerTerms } : {}),
+      ...(Array.isArray(line.attachments)
+        ? { attachments: line.attachments.filter(isRecord).flatMap((attachment) =>
+          typeof attachment.id === 'string' && typeof attachment.name === 'string'
+            && typeof attachment.url === 'string' && typeof attachment.uploadedAt === 'string'
+            ? [{
+              id: attachment.id,
+              name: attachment.name,
+              url: attachment.url,
+              uploadedAt: attachment.uploadedAt,
+              ...(typeof attachment.storagePath === 'string' ? { storagePath: attachment.storagePath } : {}),
+              ...(typeof attachment.storageBucket === 'string' ? { storageBucket: attachment.storageBucket } : {}),
+            } satisfies QuotationRequestLineAttachment]
             : []) }
         : {}),
       remarks: typeof line.remarks === 'string' ? line.remarks : '',

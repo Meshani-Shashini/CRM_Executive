@@ -4,6 +4,8 @@ The browser uses Supabase Auth and the public anon key. CRM records are stored i
 
 ## Configure and apply the schema
 
+The `20261116100000_quotation_attachments_storage.sql` migration creates the private `quotation-attachments` Storage bucket with an 8 MB per-file limit. System Admins and Sales can upload files under their tenant folder; tenant staff can read them through signed URLs. Local demo mode stores uploaded files as base64 data URLs in memory instead of using Storage.
+
 1. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the ignored `.env` file.
 2. Link the Supabase CLI to the intended project and apply the checked-in migrations:
 

@@ -1,9 +1,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowRight, ArrowUpRight, ChevronDown, ChevronRight, Plus, Search, Send, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowUpRight, FileText, Plus, Search, Send, X } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import PageToolbar from '../components/ui/PageToolbar';
 import DateInput from '../components/ui/DateInput';
 import Modal from '../components/ui/Modal';
+import QuotationLineEditor from '../components/quotationRequest/QuotationLineEditor';
 import QuotationRequestDetailWorkspace from '../components/quotationRequest/QuotationRequestDetailWorkspace';
 import { useApp } from '../store/AppContext';
 import type {
@@ -20,7 +21,7 @@ import {
 import {
   createLineReference, deriveRequestStatus, deriveSectionStatus, formatQuotationLineActivity,
   formatQuotationLineReference, getQuotationLineDisplayStatus, hasActiveQuotationLine, hasDuplicateQuotationReferences,
-  nextLineReference, quotationSectionTotal,
+  markQuotationLinesSent, nextLineReference, quotationSectionTotal,
 } from '../utils/quotationRequests';
 import { createQuotationSection, validateQuotationSection, withSectionTotal } from '../utils/quotationSectionTemplates';
 import { getNextReference } from '../utils/references';
@@ -98,9 +99,12 @@ export default function QSlipsPage() {
   const [requestFilter, setRequestFilter] = useState('');
   const [detailRequestId, setDetailRequestId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [expandedRequests, setExpandedRequests] = useState<string[]>([]);
-  const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [editingLine, setEditingLine] = useState<{ requestId: string; lineId: string } | null>(null);
+  const [quoteEditor, setQuoteEditor] = useState<{
+    request: QuotationRequest;
+    line: QuotationRequestLine;
+    status: 'Quoted' | 'Declined';
+  } | null>(null);
   const [lineStatus, setLineStatus] = useState<QuotationRequestLineStatus>('Sent');
   const [lineQuotes, setLineQuotes] = useState<Record<string, { premium: string; currency: 'MVR' | 'USD'; ratePct: string; validUntil: string }>>({});
   const [lineQuoteReference, setLineQuoteReference] = useState('');
@@ -212,8 +216,13 @@ export default function QSlipsPage() {
     }).sort((left, right) => right.request.createdAt.localeCompare(left.request.createdAt));
   }, [clientFilter, clients, dealFilter, deals, leads, productFilter, quotationRequests, requestFilter, searchQuery, statusFilter, vendorFilter, vendorName]);
 
-  const addActivity = (request: QuotationRequest, line: QuotationRequestLine, title: string, description: string) => {
-    const now = new Date().toISOString();
+  const addActivity = (
+    request: QuotationRequest,
+    line: QuotationRequestLine,
+    title: string,
+    description: string,
+    timestamp = new Date().toISOString(),
+  ) => {
     setActivities((current) => [{
       id: `qrs-line-${crypto.randomUUID()}`,
       clientId: '',
@@ -223,11 +232,29 @@ export default function QSlipsPage() {
       type: 'note',
       title: formatQuotationLineActivity(formatQuotationLineReference(line), title),
       description: formatQuotationLineActivity(formatQuotationLineReference(line), `${vendorName(line.vendorId)}: ${description}`),
-      date: now,
-      createdAt: now,
+      date: timestamp,
+      createdAt: timestamp,
       userId: user.id,
       actorName: user.name,
     }, ...current]);
+  };
+
+  const sendRequestLines = (request: QuotationRequest, lineIds = request.lines.map((line) => line.id)) => {
+    const deal = deals.find((item) => item.id === request.dealId);
+    if (!canEdit && deal?.ownerId !== user.id) return;
+    const sentAt = new Date().toISOString();
+    const { request: updatedRequest, sentLines } = markQuotationLinesSent(request, lineIds, user.id, sentAt);
+    if (!sentLines.length) return;
+    setQuotationRequests((current) => current.map((item) =>
+      item.id === request.id ? updatedRequest : item,
+    ));
+    sentLines.forEach((line) => addActivity(
+      updatedRequest,
+      line,
+      'Quotation request line sent to insurer',
+      `Sent to insurer at ${sentAt}.`,
+      sentAt,
+    ));
   };
 
   const addSection = () => {
@@ -334,11 +361,10 @@ export default function QSlipsPage() {
       reference: createLineReference(reference, section.no, index + 1),
       sectionId: section.id,
       vendorId,
-      status: 'Sent' as const,
-      sentAt: now,
+      status: 'Requested' as const,
       quotes: [] as QuotationRequestQuote[],
       remarks: '',
-      statusHistory: [{ toStatus: 'Sent' as const, changedAt: now, changedBy: user.id }],
+      statusHistory: [{ toStatus: 'Requested' as const, changedAt: now, changedBy: user.id }],
     })));
     const request: QuotationRequest = {
       id,
@@ -369,8 +395,7 @@ export default function QSlipsPage() {
       return;
     }
     setQuotationRequests((current) => [request, ...current]);
-    request.lines.forEach((line) => addActivity(request, line, 'Quotation request line created', 'Request sent to insurer.'));
-    setExpandedRequests((current) => [request.id, ...current]);
+    request.lines.forEach((line) => addActivity(request, line, 'Quotation request line created', 'Prepared for insurer; awaiting send.'));
     setOpen(false);
   };
 
@@ -482,7 +507,15 @@ export default function QSlipsPage() {
     }
     setQuotationRequests((current) => current.map((item) => item.id === request.id ? updatedRequest : item));
     if (statusChanged) {
-      addActivity(request, updatedLine, 'Quotation request line status changed', `${line.status} → ${lineStatus}${lineStatus === 'Declined' ? ` · ${lineDeclineReason.trim()}` : ''}`);
+      addActivity(
+        request,
+        updatedLine,
+        lineStatus === 'Sent' ? 'Quotation request line sent to insurer' : 'Quotation request line status changed',
+        lineStatus === 'Sent'
+          ? `Sent to insurer at ${now}.`
+          : `${line.status} → ${lineStatus}${lineStatus === 'Declined' ? ` · ${lineDeclineReason.trim()}` : ''}`,
+        now,
+      );
     } else if (lineStatus === 'Quoted') {
       addActivity(request, updatedLine, 'Carrier quotation logged', `${quotes.length} option quote${quotes.length === 1 ? '' : 's'} logged.`);
     }
@@ -527,19 +560,6 @@ export default function QSlipsPage() {
     setAddVendorRequestId('');
     setAddVendorId('');
     setAddVendorSectionId('');
-  };
-
-  const toggleExpanded = (requestId: string) => {
-    setExpandedRequests((current) =>
-      current.includes(requestId) ? current.filter((id) => id !== requestId) : [...current, requestId]);
-    setExpandedSections((current) => current.filter((key) => !key.startsWith(`${requestId}:`)));
-  };
-  const toggleSection = (requestId: string, sectionId: string) => {
-    const sectionKey = `${requestId}:${sectionId}`;
-    setExpandedSections((current) => {
-      const requestSections = current.filter((key) => !key.startsWith(`${requestId}:`));
-      return current.includes(sectionKey) ? requestSections : [...requestSections, sectionKey];
-    });
   };
 
   const visibleRequest = editingLine
@@ -646,15 +666,18 @@ export default function QSlipsPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredRequests.map(({ request, lines }) => {
+              {filteredRequests.map(({ request, lines }, requestIndex) => {
                 const { deal, clientName, leadDetail, leadIdentifier } = resolveRequestContext(request, deals, clients, leads);
                 const canEditRequest = canEdit || deal?.ownerId === user.id;
                 const status = deriveRequestStatus(request.lines);
-                const expanded = expandedRequests.includes(request.id);
+                const requestedLineCount = request.lines.filter((line) =>
+                  getQuotationLineDisplayStatus(line) === 'Requested',
+                ).length;
                 const total = request.sections.reduce((sum, section) => sum + quotationSectionTotal(section.data), 0);
                 return (
                   <Fragment key={request.id}>
-                    <tr className="table-row cursor-pointer focus-within:bg-ink-750/30" role="link" tabIndex={0} aria-label={`Open QRS details ${request.reference}`}
+                    <tr className={`table-row cursor-pointer border-b border-ink-600 bg-ink-800/80 hover:bg-ink-800 focus-within:bg-ink-800/90 ${requestIndex > 0 ? 'border-t-4 border-t-ink-950' : 'border-t border-ink-600'}`}
+                      role="link" tabIndex={0} aria-label={`Open QRS details ${request.reference}`}
                       onClick={(event) => {
                         if ((event.target as HTMLElement).closest('a,button,input,select')) return;
                         window.location.hash = dashboardHref('qslips', {
@@ -674,12 +697,12 @@ export default function QSlipsPage() {
                           });
                         }
                       }}>
-                      <td className="px-3 py-3">
-                        <button type="button" className="mr-2 align-middle text-muted" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${request.reference}`} onClick={() => toggleExpanded(request.id)}>
-                          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                        </button>
-                        <span className="font-medium text-brand-300">{request.reference}</span>
-                        <div className="ml-6 font-mono text-[10px] text-muted">{deal?.id ?? request.dealId} · {deal?.product ?? 'Deal unavailable'}</div>
+                      <td className="border-l-4 border-l-brand-400 px-3 py-3">
+                        <span className="inline-flex items-center gap-2 !text-sm font-semibold text-brand-200">
+                          <FileText size={16} aria-hidden="true" />
+                          {request.reference}
+                        </span>
+                        <div className="font-mono text-[10px] text-muted">{deal?.id ?? request.dealId} · {deal?.product ?? 'Deal unavailable'}</div>
                       </td>
                       <td className="px-3 py-3"><div className="font-mono text-xs">{leadIdentifier}</div><div className="text-muted">{leadDetail}</div></td>
                       <td className="px-3 py-3 text-white">{clientName}</td>
@@ -687,24 +710,26 @@ export default function QSlipsPage() {
                       <td className="px-3 py-3 text-muted">{formatDate(request.requiredBy)}</td>
                       <td className="px-3 py-3 font-medium text-white">{formatAmount(total, request.currency)}</td>
                       <td className="px-3 py-3 text-right">
-                        <a className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-ink-600 px-2 py-1 text-xs text-brand-300 hover:border-ink-500 hover:text-white" href={dashboardHref('deals', { id: request.dealId })} onClick={(event) => event.stopPropagation()}>Deal <ArrowUpRight size={13} /></a>
+                        <div className="flex flex-wrap justify-end gap-1">
+                          {canEditRequest && requestedLineCount > 0 && <button type="button"
+                            className="btn-primary !px-2 !py-1 text-xs"
+                            onClick={(event) => { event.stopPropagation(); sendRequestLines(request); }}>
+                            <Send size={12} /> Send batch ({requestedLineCount})
+                          </button>}
+                          <a className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-ink-600 px-2 py-1 text-xs text-brand-300 hover:border-ink-500 hover:text-white" href={dashboardHref('deals', { id: request.dealId })} onClick={(event) => event.stopPropagation()}>Deal <ArrowUpRight size={13} /></a>
+                        </div>
                       </td>
                     </tr>
-                    {expanded && request.sections.map((section) => {
+                    {request.sections.map((section) => {
                       const sectionLines = lines.filter((line) => line.sectionId === section.id);
                       if (statusFilter || vendorFilter || clientFilter || productFilter || searchQuery || requestFilter) {
                         if (!sectionLines.length) return null;
                       }
-                      const sectionKey = `${request.id}:${section.id}`;
-                      const sectionExpanded = expandedSections.includes(sectionKey);
                       return <Fragment key={section.id}>
-                        <tr className="border-t border-ink-700/60 bg-ink-900/20 text-xs">
-                          <td className="py-2 pl-8">
-                            <button type="button" className="mr-2 align-middle text-muted" aria-label={`${sectionExpanded ? 'Collapse' : 'Expand'} ${section.title}`} onClick={() => toggleSection(request.id, section.id)}>
-                              {sectionExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                            </button>
+                        <tr className="border-t border-ink-700/60 bg-ink-800/35 text-xs">
+                          <td className="border-l-2 border-l-ink-600 py-2 pl-8">
                             <span className="font-medium text-white">{String(section.no).padStart(2, '0')} · {section.title}</span>
-                            <div className="ml-7 font-mono text-[10px] text-muted">{section.productCode}</div>
+                            <div className="font-mono text-[10px] text-muted">{section.productCode}</div>
                           </td>
                           <td className="py-2 text-muted">{sectionLines.length} insurer line{sectionLines.length === 1 ? '' : 's'}</td>
                           <td className="py-2 text-muted">—</td>
@@ -718,9 +743,9 @@ export default function QSlipsPage() {
                             {canEditRequest && <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => { setAddVendorRequestId(request.id); setAddVendorSectionId(section.id); setAddVendorId(''); setLineError(''); }}>Add insurer</button>}
                           </td>
                         </tr>
-                        {sectionExpanded && sectionLines.map((line) => (
-                          <tr key={line.id} className="border-t border-ink-700/60 bg-ink-950/30 text-xs">
-                            <td className="py-2 pl-14 font-mono text-brand-300">
+                        {sectionLines.map((line) => (
+                          <tr key={line.id} className="border-t border-ink-700/60 bg-ink-950/40 text-xs">
+                            <td className="border-l-2 border-l-ink-700 py-2 pl-14 font-mono text-brand-300">
                               {formatQuotationLineReference(line)}
                               <div className="font-sans text-[10px] text-white">{vendorName(line.vendorId)}</div>
                               {line.insurerQuoteRef && <div className="font-sans text-[10px] text-muted">Insurer ref: {line.insurerQuoteRef}</div>}
@@ -729,6 +754,7 @@ export default function QSlipsPage() {
                             <td className="py-2 text-white">{clientName}</td>
                             <td className="py-2">
                               <Badge variant={statusTone(getQuotationLineDisplayStatus(line))} compact>{getQuotationLineDisplayStatus(line)}</Badge>
+                              {line.sentAt && <div className="mt-1 text-[10px] text-muted">Sent {formatDate(line.sentAt)}</div>}
                               {(line.declineReason || line.remarks) && <div className="mt-1 text-[10px] text-muted">{line.declineReason || line.remarks}</div>}
                             </td>
                             <td className="py-2 text-muted">{formatDate(request.requiredBy)}</td>
@@ -740,7 +766,27 @@ export default function QSlipsPage() {
                               </div>)}
                             </td>
                             <td className="py-2 text-right">
-                              {canEditRequest && <button type="button" className="btn-ghost !px-2 !py-1 text-xs" aria-label={`Update ${line.reference}`} onClick={() => openLineEditor(request, line)}>Update</button>}
+                              {canEditRequest && <div className="flex flex-wrap justify-end gap-1">
+                                {getQuotationLineDisplayStatus(line) === 'Requested' && <button type="button"
+                                  className="btn-primary !px-2 !py-1 text-xs"
+                                  aria-label={`Send ${line.reference} to insurer`}
+                                  onClick={() => sendRequestLines(request, [line.id])}>
+                                  <Send size={11} /> Send
+                                </button>}
+                                <button type="button" className="btn-ghost !px-2 !py-1 text-xs" aria-label={`Update ${line.reference}`} onClick={() => {
+                                  const displayStatus = getQuotationLineDisplayStatus(line);
+                                  if (displayStatus === 'Sent' || displayStatus === 'Quoted' || displayStatus === 'Declined'
+                                    || displayStatus === 'Expired' && (line.status === 'Sent' || line.status === 'Quoted')) {
+                                    setQuoteEditor({
+                                      request,
+                                      line,
+                                      status: displayStatus === 'Declined' ? 'Declined' : 'Quoted',
+                                    });
+                                  } else {
+                                    openLineEditor(request, line);
+                                  }
+                                }}>Update</button>
+                              </div>}
                             </td>
                           </tr>
                         ))}
@@ -954,6 +1000,13 @@ export default function QSlipsPage() {
         </form>
       </Modal>
 
+      {quoteEditor && <QuotationLineEditor
+        key={`${quoteEditor.line.id}-${quoteEditor.status}`}
+        request={quoteEditor.request}
+        line={quoteEditor.line}
+        initialStatus={quoteEditor.status}
+        onClose={() => setQuoteEditor(null)}
+      />}
     </div>
   );
 }

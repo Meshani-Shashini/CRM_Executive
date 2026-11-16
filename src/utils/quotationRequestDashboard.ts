@@ -55,6 +55,33 @@ export function selectBestQuote<T extends { line: QuotationRequestLine; quote: Q
       !best || candidate.quote.premium < best.quote.premium ? candidate : best, undefined);
 }
 
+export function quotationComparisonKey(
+  quote: Pick<QuotationRequestQuote, 'optionId' | 'currency'>,
+  sumInsured?: number,
+) {
+  return JSON.stringify([quote.optionId, quote.currency, sumInsured]);
+}
+
+export function lowestQuotedPremiumsByComparison<T extends {
+  line: QuotationRequestLine;
+  quote: QuotationRequestQuote;
+  sumInsured?: number;
+}>(
+  candidates: T[],
+) {
+  const byOptionAndCurrency = new Map<string, T[]>();
+  for (const candidate of candidates) {
+    const key = quotationComparisonKey(candidate.quote, candidate.sumInsured ?? candidate.line.quotedSumInsured);
+    byOptionAndCurrency.set(key, [...(byOptionAndCurrency.get(key) ?? []), candidate]);
+  }
+  const lowestByOptionAndCurrency = new Map<string, number>();
+  for (const [key, comparableQuotes] of byOptionAndCurrency) {
+    const best = selectBestQuote(comparableQuotes);
+    if (best) lowestByOptionAndCurrency.set(key, best.quote.premium);
+  }
+  return lowestByOptionAndCurrency;
+}
+
 export function isQuoteExpiring(validUntil: string | undefined, now = new Date(), days = 30) {
   if (!validUntil || !Number.isFinite(days) || days < 0) return false;
   const expiry = Date.parse(`${validUntil.slice(0, 10)}T23:59:59.999`);

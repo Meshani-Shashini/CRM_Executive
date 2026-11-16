@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertTriangle, Archive, ArrowLeft, ArrowRight, Building2, CalendarDays, Check,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Clock3, Columns3, Filter, FileText, List,
-  MoreHorizontal, Pencil, Plus, Search, ShieldCheck, Trash2, TrendingUp, X,
+  MoreHorizontal, Pencil, Plus, Search, Send, ShieldCheck, Trash2, TrendingUp, X,
 } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
@@ -14,13 +14,18 @@ import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 import TableRowActionsMenu from '../components/ui/TableRowActionsMenu';
 import TableShell from '../components/table/TableShell';
 import StageMenu from '../components/table/StageMenu';
+import QuotationLineEditor from '../components/quotationRequest/QuotationLineEditor';
+import VendorQuoteComparison from '../components/quotationRequest/VendorQuoteComparison';
 import { OwnerCell, ProductCodePill, StagePill, TableDateCell } from '../components/table/TableCells';
 import ActivityTimelineItem from '../components/ActivityTimelineItem';
 import { useApp } from '../store/AppContext';
 import { AUTH_BYPASS, TENANT_ID } from '../lib/supabase';
-import type { Activity, CompanyContactProfile, Deal, Lead, PipelineStage, StageHistoryAudit } from '../types';
+import type {
+  Activity, CompanyContactProfile, Deal, Lead, PipelineStage, QuotationRequest, QuotationRequestLine,
+  StageHistoryAudit,
+} from '../types';
 import { formatAmount, toMvr } from '../utils/currency';
-import { formatDate } from '../utils/date';
+import { formatDate, formatSlashDateInput } from '../utils/date';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile } from '../utils/customerProfile';
 import {
@@ -42,7 +47,8 @@ import { getNextActivity } from '../utils/nextActivity';
 import { dashboardHref, hashParams, promptQuotationRequestForDeal } from '../utils/navigation';
 import { nextLocalReference } from '../utils/references';
 import {
-  deriveRequestStatus, formatQuotationLineReference, getQuotationLineDisplayStatus,
+  deriveRequestStatus, formatQuotationLineActivity, formatQuotationLineReference, getQuotationLineDisplayStatus,
+  markQuotationLinesSent,
   quotationLineStatusCellText,
 } from '../utils/quotationRequests';
 import { quotationRateFromPremium } from '../utils/quotationRequestDashboard';
@@ -362,7 +368,7 @@ export default function DealWorkspace({
   const {
     activities, setActivities, clients, setClients, deals: allDeals, setDeals, leads, setLeads,
     products, pipelines, pipelineStages, stageHistory, setStageHistory, invoices, setInvoices, user, users, vendors, viewAsRole,
-    quotationRequests, clientQuotations, company,
+    quotationRequests, setQuotationRequests, clientQuotations, company,
   } = useApp();
   const [selectedKey, setSelectedKey] = useState(() => {
     const dealId = dealsPageMode ? hashParams().get('id') ?? hashParams().get('deal') : null;
@@ -375,6 +381,11 @@ export default function DealWorkspace({
     return view === 'list' || view === 'forecast' || view === 'archive' || view === 'pipeline' || view === 'kanban' ? view : 'list';
   });
   const [qrsPickerLocation, setQrsPickerLocation] = useState<'comparison' | 'binding' | ''>('');
+  const [quoteEditor, setQuoteEditor] = useState<{
+    request: QuotationRequest;
+    line: QuotationRequestLine;
+    status: 'Quoted' | 'Declined';
+  } | null>(null);
   const [kanbanPipelineId, setKanbanPipelineId] = useState('');
   const selectedPipelineFilter = pipelineFilter ?? kanbanPipelineId;
   const changePipelineFilter = onPipelineFilterChange ?? setKanbanPipelineId;
@@ -540,9 +551,42 @@ export default function DealWorkspace({
   const selectedDealRequests = selectedDeal
     ? linkedQuotationRequests.filter((request) => request.dealId === selectedDeal.id)
     : [];
+  const canSendSelectedDealRequests = Boolean(selectedDeal && (
+    user.role === 'admin' || activeRole === 'admin' || activeRole === 'sales' || selectedDeal.ownerId === user.id
+  ));
+  const sendDealRequestLines = (request: QuotationRequest, lineIds = request.lines.map((line) => line.id)) => {
+    if (!canSendSelectedDealRequests || request.dealId !== selectedDeal?.id) return;
+    const sentAt = new Date().toISOString();
+    const { request: updatedRequest, sentLines } = markQuotationLinesSent(request, lineIds, user.id, sentAt);
+    if (!sentLines.length) return;
+    setQuotationRequests((current) => current.map((item) =>
+      item.id === request.id ? updatedRequest : item,
+    ));
+    setActivities((current) => [
+      ...sentLines.map((line) => ({
+        id: `qrs-line-${crypto.randomUUID()}`,
+        clientId: request.clientId,
+        leadId: request.leadId,
+        dealId: request.dealId,
+        insurer: vendors.find((vendor) => vendor.id === line.vendorId)?.name,
+        type: 'note' as const,
+        title: formatQuotationLineActivity(formatQuotationLineReference(line), 'Quotation request line sent to insurer'),
+        description: formatQuotationLineActivity(
+          formatQuotationLineReference(line),
+          `${vendors.find((vendor) => vendor.id === line.vendorId)?.name ?? 'Insurer'}: Sent to insurer at ${sentAt}.`,
+        ),
+        date: sentAt,
+        createdAt: sentAt,
+        userId: user.id,
+        actorName: user.name,
+      })),
+      ...current,
+    ]);
+  };
   const activeClientQuotation = selectedDeal
     ? clientQuotations.filter((quotation) => quotation.dealId === selectedDeal.id
-      && (quotation.status === 'Draft' || quotation.status === 'Issued' && !isQuotationExpired(quotation)))
+      && (['Draft', 'Pending Approval', 'Approved'].includes(quotation.status)
+        || quotation.status === 'Issued' && !isQuotationExpired(quotation)))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
     : undefined;
   const selectedDealHasEligibleQuotedLine = selectedDealRequests.some((request) =>
@@ -2820,13 +2864,23 @@ export default function DealWorkspace({
             </div>
             <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold text-white">Quotation comparison</h2>
-                {selectedDeal && (activeRole === 'admin' || activeRole === 'sales') && <div className="flex flex-wrap gap-1">
+                {selectedDeal && (activeRole === 'admin' || activeRole === 'sales' || canSendSelectedDealRequests) && <div className="flex flex-wrap gap-1">
                   {selectedDealRequests.length
                   ? <>
                     <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => manageQrs('comparison')}>Manage QRS</button>
                     <a className="btn-ghost !px-2 !py-1 text-xs" href={dashboardHref('qslips', { deal: selectedDeal.id, action: 'create' })}><Plus size={12} /> Add another request</a>
                   </>
                   : <a className="btn-ghost !px-2 !py-1 text-xs" href={dashboardHref('qslips', { deal: selectedDeal.id, action: 'create' })}><Plus size={12} /> Create QRS</a>}
+                  {canSendSelectedDealRequests && selectedDealRequests.some((request) =>
+                    request.lines.some((line) => getQuotationLineDisplayStatus(line) === 'Requested'))
+                    && <button type="button" className="btn-primary !px-2 !py-1 text-xs"
+                      onClick={() => selectedDealRequests.forEach((request) => sendDealRequestLines(
+                        request,
+                        request.lines.filter((line) => getQuotationLineDisplayStatus(line) === 'Requested').map((line) => line.id),
+                      ))}>
+                      Send requested ({selectedDealRequests.reduce((count, request) => count + request.lines.filter((line) =>
+                        getQuotationLineDisplayStatus(line) === 'Requested').length, 0)})
+                    </button>}
                   {activeClientQuotation
                     ? <a className="btn-primary !px-2 !py-1 text-xs" href={dashboardHref('quotations', { dealId: selectedDeal.id, quotationId: activeClientQuotation.id, dealView: workspaceView })}>Open client quotation</a>
                     : <button type="button" className="btn-primary !px-2 !py-1 text-xs" disabled={!selectedDealHasEligibleQuotedLine}
@@ -2838,6 +2892,23 @@ export default function DealWorkspace({
                 </div>}
               </div>
               {renderQrsPicker('comparison')}
+              {selectedDeal?.quotationSnapshot && <div className="mb-3 rounded-lg border border-ink-700 bg-ink-900/50 px-3 py-2 text-xs">
+                <span className="font-medium text-white">Latest carrier response synced to Deal:</span>{' '}
+                <span className="text-muted">{selectedDeal.quotationSnapshot.insurer} · {selectedDeal.quotationSnapshot.status}</span>
+                {selectedDeal.quotationSnapshot.quotes[0] && <span className="ml-1 text-brand-300">
+                  {formatAmount(selectedDeal.quotationSnapshot.quotes[0].premium, selectedDeal.quotationSnapshot.quotes[0].currency)}
+                  {' · '}{selectedDeal.quotationSnapshot.quotes[0].ratePct ?? quotationRateFromPremium(
+                    selectedDeal.quotationSnapshot.quotes[0].premium,
+                    selectedDeal.quotationSnapshot.quotedSumInsured,
+                  ) ?? '—'}%
+                </span>}
+                <span className="ml-1 text-muted">
+                  · Sum insured {formatAmount(selectedDeal.quotationSnapshot.quotedSumInsured, selectedDeal.currency)}
+                  {selectedDeal.quotationSnapshot.validUntil
+                    ? ` · Valid until ${formatSlashDateInput(selectedDeal.quotationSnapshot.validUntil)}`
+                    : ''}
+                </span>
+              </div>}
               {quotationSections.some(({ lines }) => lines.length) ? <div className="max-w-full overflow-x-auto overscroll-x-contain"><table className="w-full min-w-72 text-left text-xs">
                 <thead className="text-[10px] text-muted"><tr><th className="pb-2 font-medium">Section / insurer line</th><th className="pb-2 text-right font-medium">Premium by option</th><th className="pb-2 text-right font-medium">Rate / validity</th></tr></thead>
                 <tbody>{quotationSections.flatMap(({ request, section, lines }) => [
@@ -2859,20 +2930,55 @@ export default function DealWorkspace({
                     return <tr key={line.id} className={`border-t border-ink-700/60 ${displayStatus === 'Cancelled' ? 'text-muted opacity-60' : 'text-white'}`}>
                       <td className="py-2">{vendor?.name ?? 'Unknown insurer'}
                         <div className="font-mono text-[10px] text-muted">{formatQuotationLineReference(line)} · {displayStatus}</div>
+                        {line.sentAt && <div className="text-[10px] text-muted">Sent {formatDate(line.sentAt)}</div>}
+                        {canSendSelectedDealRequests && displayStatus === 'Requested' && <button type="button"
+                          className="btn-primary mt-1 !px-2 !py-1 text-[10px]"
+                          onClick={() => sendDealRequestLines(request, [line.id])}>
+                          <Send size={11} /> Send
+                        </button>}
+                        {canSendSelectedDealRequests
+                          && (displayStatus === 'Sent' || displayStatus === 'Quoted' || displayStatus === 'Declined'
+                            || displayStatus === 'Expired' && (line.status === 'Sent' || line.status === 'Quoted'))
+                          && <button type="button" className="btn-ghost mt-1 !px-2 !py-1 text-[10px]"
+                            onClick={() => setQuoteEditor({
+                              request,
+                              line,
+                              status: displayStatus === 'Declined' ? 'Declined' : 'Quoted',
+                            })}>
+                            {displayStatus === 'Quoted' ? 'Update Quote' : 'Record Quote'}
+                          </button>}
                       </td>
                       <td className="py-2 text-right text-brand-300">{visibleQuotes.length ? visibleQuotes.map((quote) => <div key={quote.optionId}>
                         {section.data.options.find((option) => option.id === quote.optionId)?.label ?? 'Premium'}: {formatAmount(quote.premium, quote.currency)}
                       </div>) : <span className="text-muted">{statusDetails ?? (displayStatus === 'Quoted' ? 'Quote details unavailable' : 'Awaiting quote')}</span>}</td>
                       <td className="py-2 text-right text-muted">{visibleQuotes.length ? visibleQuotes.map((quote) => {
-                        const rate = quote.ratePct ?? quotationRateFromPremium(quote.premium, section.data.totalSumInsured);
+                        const rate = quote.ratePct ?? quotationRateFromPremium(
+                          quote.premium,
+                          line.quotedSumInsured ?? section.data.totalSumInsured,
+                        );
                         return <div key={quote.optionId}>
-                          {rate === undefined ? 'Rate unavailable' : `${rate}%`} · {quote.validUntil ? formatDate(quote.validUntil) : 'Validity unavailable'}
+                          {rate === undefined ? 'Rate unavailable' : `${rate}%`} · {quote.validUntil ? formatSlashDateInput(quote.validUntil) : 'Validity unavailable'}
                         </div>;
                       }) : statusDetails ?? (displayStatus === 'Quoted' ? 'Quote details unavailable' : 'Awaiting quote')}</td>
                     </tr>;
                   }),
                 ])}</tbody>
               </table></div> : <p className="text-xs text-muted">No insurer quotes recorded. Add quotes to compare premium and terms.</p>}
+              <VendorQuoteComparison
+                requests={selectedDealRequests}
+                onCreateQuotation={selectedDeal && !activeClientQuotation && selectedDealHasEligibleQuotedLine
+                  && (activeRole === 'admin' || activeRole === 'sales')
+                  ? (request, line) => {
+                    window.location.hash = dashboardHref('quotations', {
+                      dealId: request.dealId,
+                      requestId: request.id,
+                      lineId: line.id,
+                      create: '1',
+                      dealView: workspaceView,
+                    });
+                  }
+                  : undefined}
+              />
             </div>
           </section>}
         </>}
@@ -2994,6 +3100,13 @@ export default function DealWorkspace({
           {moveError && <p role="alert" className="text-sm text-hot">{moveError}</p>}
         </div>
       </Modal>
+      {quoteEditor && <QuotationLineEditor
+        key={`${quoteEditor.line.id}-${quoteEditor.status}`}
+        request={quoteEditor.request}
+        line={quoteEditor.line}
+        initialStatus={quoteEditor.status}
+        onClose={() => setQuoteEditor(null)}
+      />}
     </div>
   );
 }

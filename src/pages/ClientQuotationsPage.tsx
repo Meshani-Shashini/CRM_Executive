@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, Check, FilePlus2, Printer, RefreshCw, Save, Send } from 'lucide-react';
+import { ArrowLeft, Check, FilePlus2, FileText, Printer, RefreshCw, Save, Send } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import PageToolbar from '../components/ui/PageToolbar';
 import { useApp } from '../store/AppContext';
@@ -20,6 +20,7 @@ import { dashboardHref, hashParams } from '../utils/navigation';
 import { printDocument } from '../utils/print';
 import { getNextReference } from '../utils/references';
 import { TENANT_ID } from '../lib/supabase';
+import { resolveQuotationAttachmentUrl } from '../lib/quotationAttachments';
 
 type ClauseSelection = Record<string, boolean>;
 
@@ -86,6 +87,7 @@ export default function ClientQuotationsPage() {
   } = useApp();
   const role = viewAsRole ?? user.role;
   const canManage = role === 'admin' || role === 'sales';
+  const canApprove = user.role === 'admin' || user.role === 'sales';
   const query = hashParams();
   const queryDealId = query.get('dealId') ?? '';
   const queryRequestId = query.get('requestId') ?? '';
@@ -101,7 +103,6 @@ export default function ClientQuotationsPage() {
   const [clauseSelection, setClauseSelection] = useState<ClauseSelection>({});
   const [wizardContactId, setWizardContactId] = useState('');
   const [wizardDesignation, setWizardDesignation] = useState('');
-  const [wizardAuthorizerId, setWizardAuthorizerId] = useState('');
   const [validityConfirmed, setValidityConfirmed] = useState(false);
   const [acceptanceName, setAcceptanceName] = useState('');
   const [acceptanceDesignation, setAcceptanceDesignation] = useState('');
@@ -117,7 +118,8 @@ export default function ClientQuotationsPage() {
   const selectedLead = leads.find((lead) => lead.id === (sourceRequest?.leadId ?? selectedDeal?.leadId));
   const activeForDeal = clientQuotations
     .filter((quotation) => quotation.dealId === queryDealId
-      && (quotation.status === 'Draft' || quotation.status === 'Issued' && !isQuotationExpired(quotation)))
+      && (['Draft', 'Pending Approval', 'Approved'].includes(quotation.status)
+        || quotation.status === 'Issued' && !isQuotationExpired(quotation)))
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
   const queryQuotation = clientQuotations.find((quotation) => quotation.id === queryQuotationId);
   const canCreateForDeal = dealRequests.some((request) =>
@@ -143,9 +145,14 @@ export default function ClientQuotationsPage() {
       const line = sourceRequest.lines.find((entry) => entry.id === queryLineId);
       const section = line && sourceRequest.sections.find((entry) => entry.id === line.sectionId);
       if (line && section) {
-        setSelectedSectionIds([section.id]);
-        const key = `${section.id}:${section.data.options.length ? section.data.options[0]?.id ?? '' : ''}`;
-        setSelectedLines((current) => ({ ...current, [key]: line.id }));
+        const optionKeys = section.data.options.length
+          ? section.data.options.map((option) => option.id).filter((optionKey) => quoteForSource(line, optionKey))
+          : [''];
+        setSelectedSectionIds((current) => current.includes(section.id) ? current : [...current, section.id]);
+        setSelectedLines((current) => ({
+          ...current,
+          ...Object.fromEntries(optionKeys.map((optionKey) => [`${section.id}:${optionKey}`, line.id])),
+        }));
       }
     }
   }, [queryLineId, queryRequestId, sourceRequest]);
@@ -159,7 +166,7 @@ export default function ClientQuotationsPage() {
     const timestamp = new Date().toISOString();
     setActivities((current) => [{
       id: `quotation-activity-${crypto.randomUUID()}`,
-      clientId: '',
+      clientId: quotation.clientId,
       leadId: quotation.leadId,
       dealId: quotation.dealId,
       type: 'note',
@@ -170,6 +177,22 @@ export default function ClientQuotationsPage() {
       userId: user.id,
       actorName: user.name,
     }, ...current]);
+  };
+
+  const openSupportingDocument = async (attachment: NonNullable<ClientQuotation['supportingDocuments']>[number]) => {
+    const target = window.open('', '_blank');
+    if (target) target.opener = null;
+    if (!target) {
+      setError('Allow pop-ups to open or download a supporting document.');
+      return;
+    }
+    setError('');
+    try {
+      target.location.href = await resolveQuotationAttachmentUrl(attachment);
+    } catch (attachmentError) {
+      target.close();
+      setError(attachmentError instanceof Error ? attachmentError.message : 'Could not open the supporting document.');
+    }
   };
 
   function openWizard() {
@@ -185,11 +208,12 @@ export default function ClientQuotationsPage() {
       setError('Set a client quotation validity from 1 to 365 days in Settings before creating a quotation.');
       return;
     }
-    const request = dealRequests.find((entry) => entry.id === queryRequestId
-      && entry.sections.some((section) => section.status === 'Active' && lineIsEligibleForSection(entry, section)))
-      ?? dealRequests.find((entry) => entry.sections.some((section) =>
-        section.status === 'Active' && lineIsEligibleForSection(entry, section)))
-      ?? dealRequests.slice().sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+    const request = (queryRequestId
+      ? dealRequests.find((entry) => entry.id === queryRequestId)
+      : undefined)
+      ?? (!queryRequestId ? dealRequests.find((entry) => entry.sections.some((section) =>
+        section.status === 'Active' && lineIsEligibleForSection(entry, section))) : undefined)
+      ?? (!queryRequestId ? dealRequests.slice().sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0] : undefined);
     if (!request) {
       setError('A client quotation can only be created from a deal with a QRS request.');
       return;
@@ -208,8 +232,10 @@ export default function ClientQuotationsPage() {
           const line = request.lines.find((entry) => entry.id === queryLineId);
           const section = line && request.sections.find((entry) => entry.id === line.sectionId);
           if (!line || !section) return {};
-          const optionKey = section.data.options[0]?.id ?? '';
-          return { [`${section.id}:${optionKey}`]: line.id };
+          const optionKeys = section.data.options.length
+            ? section.data.options.map((option) => option.id).filter((optionKey) => quoteForSource(line, optionKey))
+            : [''];
+          return Object.fromEntries(optionKeys.map((optionKey) => [`${section.id}:${optionKey}`, line.id]));
         })()
         : {}),
     });
@@ -219,7 +245,6 @@ export default function ClientQuotationsPage() {
       ?? selectedClient?.contacts?.[0];
     setWizardContactId(contact?.id ?? '');
     setWizardDesignation(contact?.role ?? selectedDeal?.contactRole ?? '');
-    setWizardAuthorizerId(users.find((person) => person.id !== user.id && person.role !== 'client')?.id ?? '');
     setValidityConfirmed(false);
     setWizardStep(0);
     setEditor(null);
@@ -285,7 +310,6 @@ export default function ClientQuotationsPage() {
       name: contact?.name ?? selectedDeal.contactName ?? selectedLead.contact ?? '',
       designation: wizardDesignation || contact?.role || selectedDeal.contactRole || '',
     };
-    const authorizer = wizardAuthorizerId;
     let draft: ClientQuotation;
     try {
       draft = createClientQuotationDraft({
@@ -296,7 +320,7 @@ export default function ClientQuotationsPage() {
         deal: selectedDeal,
         addressee,
         preparedBy: user.id,
-        authorizedBy: authorizer,
+        authorizedBy: '',
         validityDays: company.quotationValidityDays,
         clausesForSection: (section) => makeClauseSetForSection(section),
       });
@@ -339,6 +363,7 @@ export default function ClientQuotationsPage() {
       ...editor,
       totalPremium: quotationTotalPremium(editor),
       totalSumInsured: quotationTotalSumInsured(editor),
+      sourceValidityConfirmed: validityConfirmed || editor.sourceValidityConfirmed,
       updatedAt: new Date().toISOString(),
       statusHistory: [...editor.statusHistory, {
         fromStatus: editor.status,
@@ -362,14 +387,93 @@ export default function ClientQuotationsPage() {
     setNotice(`${displayedReference(saved)} draft saved.`);
   };
 
+  const submitForApproval = () => {
+    if (!editor || !canApprove || !canTransitionClientQuotation(editor.status, 'Pending Approval', user.role)) return;
+    const now = new Date().toISOString();
+    const request = quotationRequests.find((entry) => entry.id === editor.requestId);
+    const pending: ClientQuotation = {
+      ...editor,
+      status: 'Pending Approval',
+      totalPremium: quotationTotalPremium(editor),
+      totalSumInsured: quotationTotalSumInsured(editor),
+      sourceValidityConfirmed: validityConfirmed || editor.sourceValidityConfirmed,
+      updatedAt: now,
+      statusHistory: [...editor.statusHistory, {
+        fromStatus: editor.status,
+        toStatus: 'Pending Approval',
+        changedAt: now,
+        changedBy: user.id,
+      }],
+    };
+    const validationErrors = validateClientQuotation(pending, request, company.requireDifferentQuotationAuthorizer, {
+      forApproval: true,
+      confirmSourceValidity: pending.sourceValidityConfirmed,
+    });
+    if (validationErrors.length) {
+      setError(validationErrors.join(' '));
+      return;
+    }
+    setClientQuotations((current) => current.map((item) => item.id === pending.id ? pending : item));
+    setEditor(pending);
+    recordQuotationActivity(pending, 'Client quotation submitted for approval', 'Internal approval requested.');
+    setError('');
+    setNotice(`${displayedReference(pending)} submitted for approval.`);
+  };
+
+  const approveQuotation = (quotation: ClientQuotation) => {
+    if (!canApprove || !canTransitionClientQuotation(quotation.status, 'Approved', user.role)) {
+      setError('Only an Admin or Sales reviewer can approve a pending client quotation.');
+      return;
+    }
+    if (company.requireDifferentQuotationAuthorizer && quotation.preparedBy === user.id) {
+      setError('The quotation must be approved by someone other than its preparer.');
+      return;
+    }
+    const request = quotationRequests.find((entry) => entry.id === quotation.requestId);
+    const validationErrors = validateClientQuotation(quotation, request, company.requireDifferentQuotationAuthorizer, {
+      confirmSourceValidity: validityConfirmed || quotation.sourceValidityConfirmed,
+    });
+    if (validationErrors.length) {
+      setError(validationErrors.join(' '));
+      return;
+    }
+    const now = new Date().toISOString();
+    const approved: ClientQuotation = {
+      ...quotation,
+      status: 'Approved',
+      authorizedBy: user.id,
+      approvedBy: user.id,
+      approvedByName: user.name,
+      approvedByRole: user.role,
+      approvedAt: now,
+      sourceValidityConfirmed: validityConfirmed || quotation.sourceValidityConfirmed,
+      updatedAt: now,
+      statusHistory: [...quotation.statusHistory, {
+        fromStatus: quotation.status,
+        toStatus: 'Approved',
+        changedAt: now,
+        changedBy: user.id,
+      }],
+    };
+    setClientQuotations((current) => current.map((item) => item.id === approved.id ? approved : item));
+    setEditor(approved);
+    recordQuotationActivity(approved, 'Client quotation approved', `Approved by ${user.name}.`);
+    setError('');
+    setNotice(`${displayedReference(approved)} approved.`);
+  };
+
   const issueQuotation = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!editor || !canManage || editor.status !== 'Draft') return;
+    if (!editor || !canApprove || !canTransitionClientQuotation(editor.status, 'Issued', user.role)) return;
+    if (editor.approvedByRole !== 'admin' && editor.approvedByRole !== 'sales') {
+      setError('An Admin or Sales reviewer must approve this quotation before issue.');
+      return;
+    }
     const now = new Date().toISOString();
     const request = quotationRequests.find((entry) => entry.id === editor.requestId);
     const next: ClientQuotation = {
       ...editor,
-      status: 'Draft',
+      status: 'Issued',
       issuedAt: now,
       validUntil: defaultQuotationValidUntil(now, editor.validityDays),
       totalPremium: quotationTotalPremium(editor),
@@ -377,7 +481,7 @@ export default function ClientQuotationsPage() {
     };
     const validationErrors = validateClientQuotation(next, request, company.requireDifferentQuotationAuthorizer, {
       forIssue: true,
-      confirmSourceValidity: validityConfirmed,
+      confirmSourceValidity: validityConfirmed || editor.sourceValidityConfirmed,
     });
     if (validationErrors.length) {
       setError(validationErrors.join(' '));
@@ -385,11 +489,10 @@ export default function ClientQuotationsPage() {
     }
     const issued: ClientQuotation = {
       ...next,
-      status: 'Issued',
       updatedAt: now,
-      sourceValidityConfirmed: validityConfirmed,
+      sourceValidityConfirmed: validityConfirmed || editor.sourceValidityConfirmed,
       statusHistory: [...next.statusHistory, {
-        fromStatus: 'Draft',
+        fromStatus: editor.status,
         toStatus: 'Issued',
         changedAt: now,
         changedBy: user.id,
@@ -397,7 +500,7 @@ export default function ClientQuotationsPage() {
     };
     setClientQuotations((current) => current.map((item) => item.id === issued.id ? issued : item));
     setEditor(issued);
-    recordQuotationActivity(issued, 'Client quotation issued', `Valid until ${issued.validUntil}.`);
+    recordQuotationActivity(issued, 'Client quotation issued', `Issued to customer; valid until ${issued.validUntil}.`);
     setError('');
     setNotice(`${displayedReference(issued)} issued.`);
   };
@@ -446,7 +549,7 @@ export default function ClientQuotationsPage() {
 
   const transitionQuotation = (quotation: ClientQuotation, status: 'Accepted' | 'Rejected' | 'Expired') => {
     const expired = isQuotationExpired(quotation);
-    if (!canTransitionClientQuotation(quotation.status, status, role, expired)) {
+    if (!canTransitionClientQuotation(quotation.status, status, user.role, expired)) {
       setError(status === 'Accepted' && expired
         ? 'This quotation has expired and cannot be accepted.'
         : 'This quotation cannot make that status transition.');
@@ -493,9 +596,16 @@ export default function ClientQuotationsPage() {
       id: `client-quotation-${crypto.randomUUID()}`,
       version: previousVersion + 1,
       status: 'Draft',
-      issuedAt: now,
+      preparedBy: user.id,
+      createdAt: now,
+      issuedAt: undefined,
       validUntil: defaultQuotationValidUntil(now, quotation.validityDays),
       updatedAt: now,
+      authorizedBy: '',
+      approvedBy: undefined,
+      approvedByName: undefined,
+      approvedByRole: undefined,
+      approvedAt: undefined,
       acceptance: undefined,
       sourceValidityConfirmed: false,
       statusHistory: [{
@@ -526,6 +636,7 @@ export default function ClientQuotationsPage() {
   const openQuotation = (quotation: ClientQuotation) => {
     setEditor(quotation);
     setWizardOpen(false);
+    setValidityConfirmed(false);
     setError('');
   };
 
@@ -576,8 +687,8 @@ export default function ClientQuotationsPage() {
     : false;
   const editorErrors = editor
     ? validateClientQuotation(editor, editorRequest, company.requireDifferentQuotationAuthorizer, {
-      forIssue: true,
-      confirmSourceValidity: validityConfirmed,
+      forApproval: editor.status === 'Draft',
+      confirmSourceValidity: validityConfirmed || editor.sourceValidityConfirmed,
     })
     : [];
 
@@ -593,10 +704,12 @@ export default function ClientQuotationsPage() {
       {(editor || (queryDealId && (activeForDeal || canCreateForDeal))) && <PageToolbar name="client-quotations">
         {editor && <button type="button" className="btn-ghost" onClick={() => setEditor(null)}><ArrowLeft size={14} /> All quotations</button>}
         {editor && <h1 className="mr-auto text-lg font-bold text-white">{displayedReference(editor)}</h1>}
-        {editor && <button type="button" className="btn-ghost" onClick={() => printDocument('print-client-quotation')}><Printer size={14} /> Print / Save PDF</button>}
+        {editor && ['Approved', 'Issued', 'Accepted', 'Rejected', 'Expired'].includes(editor.status)
+          && <button type="button" className="btn-ghost" onClick={() => printDocument('print-client-quotation')}><Printer size={14} /> Print / Save PDF</button>}
         {!editor && queryDealId && activeForDeal && <button type="button" className="btn-primary" onClick={() => openQuotation(activeForDeal)}>Open client quotation</button>}
         {!editor && queryDealId && !activeForDeal && canCreateForDeal && <button type="button" className="btn-primary" onClick={openWizard}><FilePlus2 size={14} /> Create client quotation</button>}
-        {editor && ['Issued', 'Rejected', 'Expired'].includes(editor.status) && <button type="button" className="btn-ghost" onClick={() => reviseQuotation(editor)}><RefreshCw size={14} /> Revise</button>}
+        {editor && ['Pending Approval', 'Approved', 'Issued', 'Rejected', 'Expired'].includes(editor.status)
+          && <button type="button" className="btn-ghost" onClick={() => reviseQuotation(editor)}><RefreshCw size={14} /> Revise</button>}
         {editor && <a className="btn-ghost" href={backToDealHref}>Back to deal</a>}
       </PageToolbar>}
 
@@ -740,17 +853,11 @@ export default function ClientQuotationsPage() {
             <label className="block text-xs text-muted">Prepared by
               <input className="input mt-1" value={user.name} readOnly />
             </label>
-            <label className="block text-xs text-muted">Authorized by
-              <select className="input mt-1" value={wizardAuthorizerId} onChange={(event) => setWizardAuthorizerId(event.target.value)}>
-                <option value="">Select authorizer</option>
-                {users.filter((person) => person.id !== user.id && person.role !== 'client').map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
-              </select>
-            </label>
             {wizardValidityWarnings.length > 0 && <label className="sm:col-span-2 flex items-start gap-2 rounded-lg border border-amber-400/25 bg-amber-400/5 p-3 text-xs text-amber-100">
               <input type="checkbox" checked={validityConfirmed} onChange={(event) => setValidityConfirmed(event.target.checked)} />
               <span>{wizardValidityWarnings.join(' ')} Explicitly confirm proceeding.</span>
             </label>}
-            <p className="sm:col-span-2 text-xs text-muted">This saves a draft only. Issuance requires an authorized approver and may require renewed source-validity confirmation.</p>
+            <p className="sm:col-span-2 text-xs text-muted">This saves a draft only. It must be submitted for internal approval before an Admin or Sales reviewer can approve and issue it.</p>
           </form>}
 
           {wizardStep < 2
@@ -795,7 +902,7 @@ export default function ClientQuotationsPage() {
       {editor && <section className="space-y-4">
         <div className="glass grid gap-4 rounded-2xl p-4 sm:grid-cols-2 sm:p-6">
           <div><p className="text-xs uppercase text-muted">Client / deal</p><p className="mt-1 font-semibold text-white">{clients.find((client) => client.id === editor.clientId)?.name ?? editor.insuredName}</p><p className="text-sm text-muted">{editorDeal?.product ?? 'Deal unavailable'} · QRS {editorRequest?.reference ?? 'unavailable'}</p></div>
-          <div className="sm:text-right"><Badge variant={visibleStatus(editor) === 'Accepted' ? 'win' : visibleStatus(editor) === 'Expired' || visibleStatus(editor) === 'Rejected' ? 'warm' : 'brand'}>{visibleStatus(editor)}</Badge><p className="mt-2 text-sm text-muted">{editor.issuedAt ? `Date ${formatDate(editor.issuedAt)}` : 'Draft'} · valid until {formatDate(editor.validUntil)}</p></div>
+          <div className="sm:text-right"><Badge variant={visibleStatus(editor) === 'Accepted' ? 'win' : visibleStatus(editor) === 'Expired' || visibleStatus(editor) === 'Rejected' ? 'warm' : 'brand'}>{visibleStatus(editor)}</Badge><p className="mt-2 text-sm text-muted">{editor.issuedAt ? `Issued ${formatDate(editor.issuedAt)}` : editor.approvedAt ? `Approved ${formatDate(editor.approvedAt)}` : 'Draft'} · valid until {formatDate(editor.validUntil)}</p></div>
           <dl className="grid gap-3 text-sm sm:col-span-2 sm:grid-cols-3">
             <Detail label="Insured" value={editor.insuredName} />
             <Detail label="Risk location" value={editor.riskLocation} />
@@ -803,12 +910,25 @@ export default function ClientQuotationsPage() {
             <Detail label="Occupation" value={editor.occupation} />
             <Detail label="Policy period" value={editor.policyPeriod} />
             <Detail label="Prepared by" value={preparedName(editor.preparedBy)} />
-            <Detail label="Authorized by" value={editor.authorizedBy ? preparedName(editor.authorizedBy) : 'Not assigned'} />
+            <Detail label={editor.approvedBy ? 'Approved by' : 'Authorized by'} value={editor.approvedBy
+              ? editor.approvedByName ?? preparedName(editor.approvedBy)
+              : editor.authorizedBy ? preparedName(editor.authorizedBy) : 'Awaiting approval'} />
             <Detail label="Total sum insured" value={formatAmount(quotationTotalSumInsured(editor), editor.currency)} />
             <Detail label="Total premium" value={formatAmount(quotationTotalPremium(editor), editor.currency)} />
           </dl>
           {editor.sections.some((section) => section.optionQuotes.length > 0) && <p className="text-xs text-muted sm:col-span-2">Total premium uses the lowest quoted option for each option-based section; alternatives are shown separately below.</p>}
         </div>
+
+        {Boolean(editor.supportingDocuments?.length) && <section className="glass rounded-2xl p-4">
+          <h2 className="text-sm font-semibold text-white">Vendor quote supporting documents</h2>
+          <div className="mt-2 space-y-1">
+            {editor.supportingDocuments?.map((attachment) => <button key={attachment.id} type="button"
+              className="flex items-center gap-2 text-left text-xs text-brand-300 hover:text-white"
+              onClick={() => void openSupportingDocument(attachment)}>
+              <FileText size={13} /><span>{attachment.name}</span><span className="text-muted">View / download</span>
+            </button>)}
+          </div>
+        </section>}
 
         {editor.status === 'Draft' && canManage && <div className="glass grid gap-3 rounded-2xl p-4 sm:grid-cols-2">
           <label className="block text-xs text-muted">Addressee
@@ -823,12 +943,6 @@ export default function ClientQuotationsPage() {
           <label className="block text-xs text-muted">Addressee designation
             <input className="input mt-1" value={editor.addressee.designation} onChange={(event) => setEditor({ ...editor, addressee: { ...editor.addressee, designation: event.target.value } })} />
           </label>
-          <label className="block text-xs text-muted">Authorized by
-            <select className="input mt-1" value={editor.authorizedBy} onChange={(event) => setEditor({ ...editor, authorizedBy: event.target.value })}>
-              <option value="">Select authorizer</option>
-              {users.filter((person) => person.role !== 'client').map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
-            </select>
-          </label>
           <label className="block text-xs text-muted">Validity days
             <input className="input mt-1" type="number" min="1" max="365" value={editor.validityDays} onChange={(event) => {
               const validityDays = Number(event.target.value);
@@ -838,15 +952,57 @@ export default function ClientQuotationsPage() {
             }} />
           </label>
           {validityWarningRequired && <label className="sm:col-span-2 flex items-start gap-2 rounded-lg border border-amber-400/25 bg-amber-400/5 p-3 text-xs text-amber-100">
-            <input type="checkbox" checked={validityConfirmed} onChange={(event) => setValidityConfirmed(event.target.checked)} />
+            <input type="checkbox" checked={validityConfirmed || editor.sourceValidityConfirmed} onChange={(event) => setValidityConfirmed(event.target.checked)} />
             <span>{sourceWarnings.join(' ')} Confirm explicitly to continue.</span>
           </label>}
           {editorErrors.length > 0 && <p className="sm:col-span-2 text-xs text-muted">{editorErrors.join(' ')}</p>}
           <div className="sm:col-span-2 flex flex-wrap justify-end gap-2">
             <button type="button" className="btn-ghost" onClick={saveDraft}><Save size={14} /> Save draft</button>
-            <form onSubmit={issueQuotation}><button type="submit" className="btn-primary"><Send size={14} /> Issue quotation</button></form>
+            <button type="button" className="btn-primary" disabled={editorErrors.length > 0} onClick={submitForApproval}>
+              <Send size={14} /> Submit for approval
+            </button>
           </div>
         </div>}
+
+        {editor.status === 'Pending Approval' && <section className="glass flex flex-wrap items-center justify-between gap-3 rounded-2xl p-4">
+          <div><h2 className="font-semibold text-white">Internal approval required</h2>
+            <p className="mt-1 text-xs text-muted">
+              {company.requireDifferentQuotationAuthorizer
+                ? 'A different Admin or Sales reviewer must approve this quotation.'
+                : 'An Admin or Sales reviewer must approve this quotation.'}
+            </p>
+          </div>
+          {canApprove
+            ? <button type="button" className="btn-primary"
+              disabled={company.requireDifferentQuotationAuthorizer && editor.preparedBy === user.id
+                || validityWarningRequired && !validityConfirmed && !editor.sourceValidityConfirmed}
+              onClick={() => approveQuotation(editor)}>
+              <Check size={14} /> Approve quotation
+            </button>
+            : <p className="text-xs text-muted">Only an Admin or Sales reviewer can approve.</p>}
+          {company.requireDifferentQuotationAuthorizer && editor.preparedBy === user.id
+            && <p className="w-full text-xs text-warm">You prepared this quotation and cannot approve it.</p>}
+          {validityWarningRequired && !editor.sourceValidityConfirmed && <label className="w-full flex items-start gap-2 rounded-lg border border-amber-400/25 bg-amber-400/5 p-3 text-xs text-amber-100">
+            <input type="checkbox" checked={validityConfirmed} onChange={(event) => setValidityConfirmed(event.target.checked)} />
+            <span>{sourceWarnings.join(' ')} Confirm explicitly after review.</span>
+          </label>}
+        </section>}
+
+        {editor.status === 'Approved' && canManage && <section className="glass space-y-3 rounded-2xl p-4">
+          <div><h2 className="font-semibold text-white">Approved for issue</h2>
+            <p className="mt-1 text-xs text-muted">Approved by {editor.approvedByName ?? preparedName(editor.approvedBy ?? '')}{editor.approvedAt ? ` on ${formatDate(editor.approvedAt)}` : ''}.</p>
+          </div>
+          {validityWarningRequired && !editor.sourceValidityConfirmed && <label className="flex items-start gap-2 rounded-lg border border-amber-400/25 bg-amber-400/5 p-3 text-xs text-amber-100">
+            <input type="checkbox" checked={validityConfirmed} onChange={(event) => setValidityConfirmed(event.target.checked)} />
+            <span>{sourceWarnings.join(' ')} Confirm explicitly before issuing.</span>
+          </label>}
+          <form onSubmit={issueQuotation}>
+            <button type="submit" className="btn-primary"
+              disabled={!canApprove || validityWarningRequired && !validityConfirmed && !editor.sourceValidityConfirmed}>
+              <Send size={14} /> Issue to customer
+            </button>
+          </form>
+        </section>}
 
         <div className="space-y-3">
           {editor.sections.map((section) => <QuotationSectionCard key={section.sectionId} section={section} currency={editor.currency} />)}
@@ -854,7 +1010,7 @@ export default function ClientQuotationsPage() {
         <article className="client-quotation-print glass rounded-2xl bg-white p-5 text-slate-900 sm:p-8">
           <header className="flex flex-wrap items-start justify-between gap-4 border-b-2 border-slate-800 pb-4">
             <div><h2 className="text-xl font-bold">{company.legalName || company.name || 'Premier Brokers Pvt. Ltd.'}</h2><p>{company.address}</p><p>{company.phone} · {company.email}</p></div>
-            <div className="text-right"><h1 className="text-2xl font-bold">QUOTATION</h1><p>{displayedReference(editor)}</p><p>Date: {editor.issuedAt ? formatDate(editor.issuedAt) : formatDate(editor.createdAt)}</p></div>
+            <div className="text-right"><h1 className="text-2xl font-bold">QUOTATION</h1><p>{displayedReference(editor)}</p><p>Date: {formatDate(editor.issuedAt ?? editor.approvedAt ?? editor.createdAt)}</p></div>
           </header>
           <section className="grid gap-3 py-4 sm:grid-cols-2">
             <PrintField label="To" value={editor.addressee.name} /><PrintField label="Designation" value={editor.addressee.designation} />
@@ -865,7 +1021,16 @@ export default function ClientQuotationsPage() {
           {editor.sections.map((section) => <PrintQuotationSection key={section.sectionId} section={section} currency={editor.currency} />)}
           <div className="mt-4 border-y border-slate-400 py-3 text-right"><p>Total sum insured: {formatAmount(quotationTotalSumInsured(editor), editor.currency)}</p><strong>Total premium: {formatAmount(quotationTotalPremium(editor), editor.currency)}</strong>{editor.sections.some((section) => section.optionQuotes.length > 0) && <p className="mt-1 text-xs">Option-based section total uses the lowest selected premium; alternatives are listed separately.</p>}</div>
           <p className="mt-4 text-xs">{editor.disclaimer}</p><p className="mt-2 text-xs">This quotation is valid until {formatDate(editor.validUntil)}.</p>
-          <div className="mt-5 grid gap-5 sm:grid-cols-2"><PrintField label="Prepared by" value={preparedName(editor.preparedBy)} /><PrintField label="Authorized by" value={preparedName(editor.authorizedBy)} /></div>
+          <div className="mt-5 grid gap-5 sm:grid-cols-2">
+            <PrintField label="Prepared by" value={preparedName(editor.preparedBy)} />
+            <PrintField label={editor.approvedBy ? 'Approved by' : 'Authorized by'}
+              value={`${editor.approvedByName ?? preparedName(editor.authorizedBy)}${editor.approvedAt ? ` · ${formatDate(editor.approvedAt)}` : ''}`} />
+          </div>
+          {editor.supportingDocuments?.length ? <section className="mt-5 border-t border-slate-400 pt-3">
+            <h3 className="font-semibold">Supporting vendor quotation documents</h3>
+            <ul className="mt-1 list-disc pl-5 text-xs">{editor.supportingDocuments.map((attachment) =>
+              <li key={attachment.id}>{attachment.name}</li>)}</ul>
+          </section> : null}
           <section className="mt-6 border border-slate-400 p-4"><h3 className="font-semibold">Client confirmation</h3>
             {editor.acceptance ? <p className="mt-2">Accepted by {editor.acceptance.name}{editor.acceptance.designation ? `, ${editor.acceptance.designation}` : ''} on {formatDate(editor.acceptance.signedAt)}.</p> : <p className="mt-2">I confirm acceptance of the quotation terms above.</p>}
             {!editor.acceptance && editor.status === 'Issued' && !isQuotationExpired(editor) && <form className="mt-3 grid gap-2 print:hidden sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); transitionQuotation(editor, 'Accepted'); }}>

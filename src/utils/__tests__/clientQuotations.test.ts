@@ -149,8 +149,27 @@ describe('client quotations', () => {
     expect(quotation.sections[0]?.extensions).toEqual([{ name: 'Salvage', limit: 'MVR 5000' }]);
   });
 
+  it('carries vendor-reported sum insured, derived rate, and terms into the client quotation', () => {
+    const request = makeRequest(makeSection(), [makeLine({
+      quotedSumInsured: 125000,
+      insurerTerms: 'Subject to survey.',
+      quotes: [{ optionId: 'base', premium: 2500, currency: 'MVR' }],
+    })]);
+    const quotation = createDraft({ request });
+
+    expect(quotation.sections[0]).toMatchObject({
+      totalSumInsured: 125000,
+      ratePct: 2,
+      conditions: expect.arrayContaining(['Subject to survey.']),
+    });
+  });
+
   it('allows authorized status transitions and disallows client route access', () => {
-    expect(canTransitionClientQuotation('Draft', 'Issued', 'sales')).toBe(true);
+    expect(canTransitionClientQuotation('Draft', 'Pending Approval', 'sales')).toBe(true);
+    expect(canTransitionClientQuotation('Pending Approval', 'Approved', 'admin')).toBe(true);
+    expect(canTransitionClientQuotation('Approved', 'Issued', 'sales')).toBe(true);
+    expect(canTransitionClientQuotation('Draft', 'Issued', 'sales')).toBe(false);
+    expect(canTransitionClientQuotation('Pending Approval', 'Approved', 'client')).toBe(false);
     expect(canTransitionClientQuotation('Issued', 'Accepted', 'admin')).toBe(true);
     expect(canTransitionClientQuotation('Issued', 'Accepted', 'sales', true)).toBe(false);
     expect(canTransitionClientQuotation('Issued', 'Accepted', 'client')).toBe(false);
@@ -194,34 +213,57 @@ describe('client quotations', () => {
   });
 
   it('requires source quote validity confirmation when a carrier quote expires earlier', () => {
+    const now = new Date('2026-11-11T12:00:00.000Z');
     const request = makeRequest(makeSection(), [makeLine({
       quotes: [{ optionId: 'base', premium: 2500, currency: 'MVR', validUntil: '2026-11-12' }],
     })]);
     const draft = createDraft({ request });
-    expect(getSourceValidityWarnings(draft, [request], new Date('2026-11-11T12:00:00.000Z'))).toContain(
+    expect(getSourceValidityWarnings(draft, [request], now)).toContain(
       'QRS-012-2026-01-01 expires before the client quotation.',
     );
-    expect(sourceValidityConfirmationRequired(draft, [request], new Date('2026-11-11T12:00:00.000Z'))).toBe(true);
-    expect(validateClientQuotation(draft, request, true)).toContain('QRS-012-2026-01-01 expires before the client quotation.');
-    expect(validateClientQuotation(draft, request, true, { confirmSourceValidity: true })).toEqual([]);
+    expect(sourceValidityConfirmationRequired(draft, [request], now)).toBe(true);
+    expect(validateClientQuotation(draft, request, true, { now })).toContain('QRS-012-2026-01-01 expires before the client quotation.');
+    expect(validateClientQuotation(draft, request, true, { confirmSourceValidity: true, now })).toEqual([]);
   });
 
   it('validates required addressee, positive section values, source status, and authorizer before issue', () => {
     const request = makeRequest();
     const draft = createDraft({ request });
-    expect(validateClientQuotation(draft, request, true, { forIssue: true })).toEqual([]);
+    const issued = {
+      ...draft,
+      status: 'Issued' as const,
+      issuedAt: '2026-11-11T00:00:00.000Z',
+      approvedBy: 'admin-1',
+      approvedByName: 'Admin Reviewer',
+      approvedByRole: 'admin' as const,
+      approvedAt: '2026-11-11T00:00:00.000Z',
+      authorizedBy: 'admin-1',
+    };
+    expect(validateClientQuotation(issued, request, true, { forIssue: true })).toEqual([]);
+    expect(validateClientQuotation(draft, request, true, { forApproval: true })).toEqual([]);
     expect(validateClientQuotation({
       ...draft,
       addressee: { ...draft.addressee, contactId: '' },
     }, request, true)).toContain('Select a contact as the quotation addressee.');
     expect(validateClientQuotation({
-      ...draft,
-      authorizedBy: '',
-    }, request, true, { forIssue: true })).toContain('Authorized by is required before issue.');
+      ...issued,
+      approvedBy: '',
+    }, request, true, { forIssue: true })).toContain('An approved reviewer is required before issue.');
     expect(validateClientQuotation({
-      ...draft,
+      ...issued,
+      approvedByRole: undefined,
+    }, request, true, { forIssue: true })).toContain('An Admin or Sales reviewer must approve the quotation before issue.');
+    expect(validateClientQuotation({
+      ...issued,
+      approvedBy: draft.preparedBy,
       authorizedBy: draft.preparedBy,
     }, request, true, { forIssue: true })).toContain('The authorizer must be different from the preparer.');
+    expect(validateClientQuotation({
+      ...issued,
+      approvedBy: draft.preparedBy,
+      authorizedBy: draft.preparedBy,
+      approvedByRole: 'sales',
+    }, request, false, { forIssue: true })).toEqual([]);
     expect(validateClientQuotation({
       ...draft,
       sections: [{ ...draft.sections[0]!, totalSumInsured: 0, proposedPremium: 0 }],
@@ -232,5 +274,36 @@ describe('client quotations', () => {
     expect(validateClientQuotation(draft, changedSource, true)).toContain(
       'Marine Hull requires a matching QRS line in Quoted status.',
     );
+  });
+
+  it('snapshots unique documents from the selected vendor quote lines', () => {
+    const attachment = {
+      id: 'vendor-pdf',
+      name: 'carrier-quote.pdf',
+      url: 'https://storage.example/carrier-quote.pdf',
+      uploadedAt: '2026-11-11T00:00:00.000Z',
+      storagePath: 'tenant/quote.pdf',
+      storageBucket: 'quotation-attachments',
+    };
+    const section = makeSection([
+      { id: 'option-1', label: 'Option 1', coverages: [] },
+      { id: 'option-2', label: 'Option 2', coverages: [] },
+    ]);
+    const request = makeRequest(section, [makeLine({
+      quotes: [
+        { optionId: 'option-1', premium: 2500, currency: 'MVR' },
+        { optionId: 'option-2', premium: 3000, currency: 'MVR' },
+      ],
+      attachments: [attachment],
+    })]);
+    const quotation = createDraft({
+      request,
+      sources: [
+        { sectionId: 'section-1', lineId: 'line-1', optionKey: 'option-1' },
+        { sectionId: 'section-1', lineId: 'line-1', optionKey: 'option-2' },
+      ],
+    });
+
+    expect(quotation.supportingDocuments).toEqual([attachment]);
   });
 });

@@ -7,15 +7,15 @@ export function normalizeDateInput(value: string): string {
   let day: number;
 
   const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
-  const displayMatch = /^(\d{2})-([A-Za-z]{3})-(\d{4})$/.exec(trimmed);
+  const displayMatch = /^(\d{2})([-/])([A-Za-z]{3})\2(\d{4})$/.exec(trimmed);
   if (isoMatch) {
     year = Number(isoMatch[1]);
     month = Number(isoMatch[2]);
     day = Number(isoMatch[3]);
   } else if (displayMatch) {
     day = Number(displayMatch[1]);
-    month = MONTHS.findIndex((item) => item.toLowerCase() === displayMatch[2].toLowerCase()) + 1;
-    year = Number(displayMatch[3]);
+    month = MONTHS.findIndex((item) => item.toLowerCase() === displayMatch[3].toLowerCase()) + 1;
+    year = Number(displayMatch[4]);
   } else {
     return '';
   }
@@ -44,9 +44,23 @@ export function formatDateInput(value?: string | null): string {
   return formatDate(value);
 }
 
-/** Converts a DD-MMM-YYYY entry into the ISO date format used by forms and storage. */
+/** Converts DD-MMM-YYYY or DD/MMM/YYYY input into the ISO date format used by forms and storage. */
 export function parseDateInput(value: string): string {
-  const match = value.trim().match(/^(\d{2})-([A-Za-z]{3})-(\d{4})$/);
+  const match = value.trim().match(/^(\d{2})([-/])([A-Za-z]{3})\2(\d{4})$/);
+  if (!match) return '';
+  const month = MONTHS.findIndex((item) => item.toLowerCase() === match[3].toLowerCase());
+  if (month < 0) return '';
+  const date = new Date(Number(match[4]), month, Number(match[1]));
+  if (date.getFullYear() !== Number(match[4]) || date.getMonth() !== month || date.getDate() !== Number(match[1])) return '';
+  return `${match[4]}-${String(month + 1).padStart(2, '0')}-${match[1]}`;
+}
+
+export function formatSlashDateInput(value?: string | null): string {
+  return formatDate(value).replace(/-/g, '/');
+}
+
+export function parseSlashDateInput(value: string): string {
+  const match = value.trim().match(/^(\d{2})\/([A-Za-z]{3})\/(\d{4})$/);
   if (!match) return '';
   const month = MONTHS.findIndex((item) => item.toLowerCase() === match[2].toLowerCase());
   if (month < 0) return '';

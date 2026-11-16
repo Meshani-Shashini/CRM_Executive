@@ -99,8 +99,11 @@ export function canTransitionClientQuotation(
 ) {
   if ((role !== 'admin' && role !== 'sales') || current === next) return false;
   if (next === 'Accepted' || next === 'Rejected') return current === 'Issued' && (next !== 'Accepted' || !expired);
-  if (current === 'Draft') return next === 'Issued' || next === 'Superseded';
-  if (current === 'Issued') return next === 'Expired' && expired || next === 'Superseded';
+  if (next === 'Pending Approval') return current === 'Draft';
+  if (next === 'Approved') return current === 'Pending Approval';
+  if (next === 'Issued') return current === 'Approved';
+  if (next === 'Expired') return current === 'Issued' && expired;
+  if (next === 'Superseded') return ['Draft', 'Pending Approval', 'Approved', 'Issued'].includes(current);
   return false;
 }
 
@@ -152,7 +155,7 @@ export function validateClientQuotation(
   quotation: ClientQuotation,
   request: QuotationRequest | undefined,
   differentAuthorizerRequired: boolean,
-  options: { forIssue?: boolean; confirmSourceValidity?: boolean; now?: Date } = {},
+  options: { forApproval?: boolean; forIssue?: boolean; confirmSourceValidity?: boolean; now?: Date } = {},
 ) {
   const errors: string[] = [];
   if (!request || request.id !== quotation.requestId) {
@@ -183,14 +186,26 @@ export function validateClientQuotation(
     errors.push('Select a contact as the quotation addressee.');
   }
   if (!quotation.preparedBy.trim()) errors.push('Prepared by is required.');
+  if (options.forApproval && quotation.status !== 'Draft') {
+    errors.push('Only a draft quotation can be submitted for approval.');
+  }
+  if (options.forIssue && !quotation.approvedBy?.trim()) errors.push('An approved reviewer is required before issue.');
+  if (options.forIssue && quotation.approvedByRole !== 'admin' && quotation.approvedByRole !== 'sales') {
+    errors.push('An Admin or Sales reviewer must approve the quotation before issue.');
+  }
   if (options.forIssue && !quotation.authorizedBy.trim()) errors.push('Authorized by is required before issue.');
+  if (options.forIssue && !quotation.approvedAt) errors.push('The quotation must be approved before issue.');
+  if (options.forIssue && quotation.approvedBy && quotation.authorizedBy !== quotation.approvedBy) {
+    errors.push('The authorized approver must match the recorded reviewer.');
+  }
   if (options.forIssue && differentAuthorizerRequired
-    && quotation.preparedBy && quotation.preparedBy === quotation.authorizedBy) {
+    && quotation.preparedBy && quotation.preparedBy === quotation.approvedBy) {
     errors.push('The authorizer must be different from the preparer.');
   }
   const issueDate = quotation.issuedAt ? Date.parse(quotation.issuedAt) : Number.NaN;
   const validUntil = Date.parse(`${quotation.validUntil}T00:00:00`);
-  if (!Number.isFinite(issueDate) || !Number.isFinite(validUntil) || issueDate > validUntil) {
+  if (!Number.isFinite(validUntil)) errors.push('Quotation expiry date must be valid.');
+  if (options.forIssue && (!Number.isFinite(issueDate) || !Number.isFinite(validUntil) || issueDate > validUntil)) {
     errors.push('Issue date must be on or before a valid quotation expiry date.');
   }
   if (options.forIssue && Number.isFinite(dateOnlyEnd(quotation.validUntil))
@@ -253,7 +268,10 @@ export function createClientQuotationDraft(input: {
       optionKey: source.optionKey!,
       label: optionLabel || source.optionKey!,
       proposedPremium: quote.premium,
-      ratePct: quotationRatePct(quote.premium, section.data.totalSumInsured),
+      ratePct: quote.ratePct ?? quotationRatePct(
+        quote.premium,
+        line.quotedSumInsured ?? section.data.totalSumInsured,
+      ),
       insurerLineReference: line.reference,
       sourceValidUntil: quote.validUntil,
     }));
@@ -261,7 +279,10 @@ export function createClientQuotationDraft(input: {
       ? [...optionQuotes].sort((a, b) => a.proposedPremium - b.proposedPremium)[0]
       : {
         proposedPremium: first.quote.premium,
-        ratePct: quotationRatePct(first.quote.premium, section.data.totalSumInsured),
+        ratePct: first.quote.ratePct ?? quotationRatePct(
+          first.quote.premium,
+          first.line.quotedSumInsured ?? section.data.totalSumInsured,
+        ),
         insurerLineReference: first.line.reference,
       };
     const clauses = input.clausesForSection(section);
@@ -271,7 +292,7 @@ export function createClientQuotationDraft(input: {
       title: section.title,
       interests: section.data.interests.map((interest) => ({ ...interest })),
       businessInterruption: section.data.businessInterruption ? { ...section.data.businessInterruption } : undefined,
-      totalSumInsured: section.data.totalSumInsured,
+      totalSumInsured: first.line.quotedSumInsured ?? section.data.totalSumInsured,
       perils: [...clauses.perils],
       extensions: section.data.extensions.map((extension) => ({ ...extension })),
       deductibles: [
@@ -285,6 +306,7 @@ export function createClientQuotationDraft(input: {
       ],
       conditions: [
         ...(clauses.conditions ?? []),
+        ...quoteEntries.flatMap(({ line }) => line.insurerTerms ? [line.insurerTerms] : []),
         ...(clauses.communicableDiseaseExclusion ? [clauses.communicableDiseaseExclusion] : []),
         ...(clauses.sanctionClause ? [clauses.sanctionClause] : []),
       ],
@@ -299,6 +321,10 @@ export function createClientQuotationDraft(input: {
     };
   });
   if (currencies.size > 1) throw new Error('Selected carrier quotations must use the same currency.');
+  const supportingDocuments = [...new Map(input.sources.flatMap((source) => {
+    const line = request.lines.find((entry) => entry.id === source.lineId);
+    return (line?.attachments ?? []).map((attachment) => [attachment.id, { ...attachment }] as const);
+  })).values()];
   const clientQuotation: ClientQuotation = {
     id: input.id,
     reference: input.reference,
@@ -321,7 +347,6 @@ export function createClientQuotationDraft(input: {
     sections,
     totalPremium: quotationTotalPremium({ sections }),
     totalSumInsured: quotationTotalSumInsured({ sections }),
-    issuedAt: now,
     validityDays: input.validityDays,
     validUntil,
     disclaimer: input.clausesForSection(firstSection).disclaimer,
@@ -331,6 +356,7 @@ export function createClientQuotationDraft(input: {
     updatedAt: now,
     statusHistory: [{ toStatus: 'Draft', changedAt: now, changedBy: input.preparedBy }],
     sourceValidityConfirmed: false,
+    supportingDocuments,
   };
   return clientQuotation;
 }
