@@ -2846,7 +2846,7 @@ export default function DealWorkspace({
               {!hasCompleteCommunicationChannels(selectedLead) && <p className="mt-2 text-xs text-warm">Complete valid phone, WhatsApp, and Telegram details first.</p>}
               {selectedLead.disposition !== 'lost' && <button type="button" className="btn-primary mt-3 !py-1.5" onClick={convertLead}><ArrowRight size={13} /> Convert to deal</button>}
             </>}
-          </section> : <section className="mt-4 grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+          </section> : <section className="mt-4 flex flex-col gap-3">
             <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-4">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><ShieldCheck size={15} className="text-brand-300" /> Compliance alerts</h2>
               <div className="mt-3 space-y-2 text-xs">

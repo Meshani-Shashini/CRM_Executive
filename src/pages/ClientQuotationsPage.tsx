@@ -30,6 +30,12 @@ function visibleStatus(quotation: ClientQuotation): ClientQuotationStatus {
   return quotation.status === 'Issued' && isQuotationExpired(quotation) ? 'Expired' : quotation.status;
 }
 
+function quotationStatusBadgeVariant(status: ClientQuotationStatus): 'warm' | 'win' | 'muted' {
+  if (status === 'Pending Approval') return 'warm';
+  if (status === 'Approved') return 'win';
+  return 'muted';
+}
+
 function getClauseSet(quotationClauses: typeof import('../data/catalogs').COMPANY.quotationClauses, productCode: string): ClientQuotationClauseSet {
   const clauses = quotationClauses[productCode] ?? quotationClauses.default;
   return {
@@ -135,10 +141,18 @@ export default function ClientQuotationsPage() {
   useEffect(() => {
     if (autoOpened.current || query.get('create') !== '1' || !queryDealId || !canManage || !dealRequests.length) return;
     autoOpened.current = true;
+    if (queryLineId && queryRequestId) {
+      void createDraftFromSelectedQuote().then((created) => {
+        if (!created) openWizard();
+      }).catch((creationError: unknown) => {
+        setError(creationError instanceof Error ? creationError.message : 'Could not create a client quotation from this vendor quote.');
+      });
+      return;
+    }
     openWizard();
   // openWizard reads the current route's already-loaded data.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queryDealId, queryRequestId, quotationRequests, canManage]);
+  }, [queryDealId, queryRequestId, queryLineId, quotationRequests, canManage]);
 
   useEffect(() => {
     if (queryLineId && queryRequestId && sourceRequest?.id === queryRequestId) {
@@ -356,6 +370,99 @@ export default function ClientQuotationsPage() {
     setNotice(`${displayedReference(draft)} saved as a draft.`);
   };
 
+  async function createDraftFromSelectedQuote() {
+    if (!queryLineId || !queryRequestId || activeForDeal
+      || !Number.isInteger(company.quotationValidityDays)
+      || company.quotationValidityDays < 1
+      || company.quotationValidityDays > 365) return false;
+
+    const request = dealRequests.find((entry) => entry.id === queryRequestId);
+    const deal = request && getDeal(request.dealId);
+    const line = request?.lines.find((entry) => entry.id === queryLineId);
+    const section = request?.sections.find((entry) => entry.id === line?.sectionId);
+    if (!request || !deal) return false;
+    if (!line || line.status !== 'Quoted' || !section || section.status !== 'Active') {
+      setError('The selected vendor quote is no longer eligible for a client quotation.');
+      return true;
+    }
+
+    let sources: ClientQuotationSource[];
+    try {
+      const optionKeys = section.data.options.map((option) => option.id);
+      const selectionKeys = optionKeys.length ? optionKeys : [''];
+      sources = buildClientQuotationSources(request, [section.id], Object.fromEntries(
+        selectionKeys.map((optionKey) => [`${section.id}:${optionKey}`, line.id]),
+      ));
+    } catch (selectionError) {
+      setError(selectionError instanceof Error ? selectionError.message : String(selectionError));
+      return true;
+    }
+
+    const client = clients.find((item) => item.id === request.clientId)
+      ?? clients.find((item) => item.id === deal.clientId);
+    const lead = leads.find((item) => item.id === request.leadId)
+      ?? leads.find((item) => item.id === deal.leadId);
+    if (!client || !lead) {
+      setError('A client quotation requires a deal linked to a lead and client.');
+      return true;
+    }
+    const contact = client.contacts?.find((item) =>
+      item.id === deal.contactProfileId || item.id === lead.contactProfileId)
+      ?? client.contacts?.[0];
+    let draft: ClientQuotation;
+    try {
+      draft = createClientQuotationDraft({
+        id: `client-quotation-${crypto.randomUUID()}`,
+        reference: '',
+        request,
+        sources,
+        deal,
+        addressee: {
+          contactId: contact?.id ?? '',
+          name: contact?.name ?? deal.contactName ?? lead.contact ?? '',
+          designation: contact?.role ?? deal.contactRole ?? '',
+        },
+        preparedBy: user.id,
+        authorizedBy: '',
+        validityDays: company.quotationValidityDays,
+        clausesForSection: (sourceSection) => getClauseSet(company.quotationClauses, sourceSection.productCode),
+      });
+    } catch (creationError) {
+      setError(creationError instanceof Error ? creationError.message : String(creationError));
+      return true;
+    }
+
+    const validationErrors = validateClientQuotation(draft, request, company.requireDifferentQuotationAuthorizer);
+    if (validationErrors.length) return false;
+
+    let reference: string;
+    try {
+      reference = await getNextReference('client-quotation', new Date().getFullYear(), clientQuotations.map((item) => item.reference));
+    } catch (allocationError) {
+      setError(allocationError instanceof Error ? allocationError.message : 'Could not allocate a client quotation reference.');
+      return true;
+    }
+    if (clientQuotations.some((quotation) => quotation.reference === reference)) {
+      setError(`The allocated reference ${reference} already exists. No quotation was saved; request a new reference.`);
+      return true;
+    }
+
+    draft = { ...draft, reference };
+    setClientQuotations((current) => [draft, ...current]);
+    recordQuotationActivity(draft, 'Client quotation draft created', `Created from ${request.reference} using ${line.reference}.`);
+    setEditor(draft);
+    setWizardOpen(false);
+    setValidityConfirmed(false);
+    setError('');
+    setNotice(`${displayedReference(draft)} saved as a draft.`);
+    window.location.hash = dashboardHref('quotations', {
+      dealId: draft.dealId,
+      quotationId: draft.id,
+      ...(query.get('dealView') ? { dealView: query.get('dealView')! } : {}),
+    });
+    return true;
+  }
+
   const saveDraft = () => {
     if (!editor || !canManage || editor.status !== 'Draft') return;
     const request = quotationRequests.find((entry) => entry.id === editor.requestId);
@@ -391,13 +498,25 @@ export default function ClientQuotationsPage() {
     if (!editor || !canApprove || !canTransitionClientQuotation(editor.status, 'Pending Approval', user.role)) return;
     const now = new Date().toISOString();
     const request = quotationRequests.find((entry) => entry.id === editor.requestId);
-    const pending: ClientQuotation = {
+    const draftForApproval: ClientQuotation = {
       ...editor,
-      status: 'Pending Approval',
+      status: 'Draft',
       totalPremium: quotationTotalPremium(editor),
       totalSumInsured: quotationTotalSumInsured(editor),
       sourceValidityConfirmed: validityConfirmed || editor.sourceValidityConfirmed,
       updatedAt: now,
+    };
+    const validationErrors = validateClientQuotation(draftForApproval, request, company.requireDifferentQuotationAuthorizer, {
+      forApproval: true,
+      confirmSourceValidity: draftForApproval.sourceValidityConfirmed,
+    });
+    if (validationErrors.length) {
+      setError(validationErrors.join(' '));
+      return;
+    }
+    const pending: ClientQuotation = {
+      ...draftForApproval,
+      status: 'Pending Approval',
       statusHistory: [...editor.statusHistory, {
         fromStatus: editor.status,
         toStatus: 'Pending Approval',
@@ -405,14 +524,6 @@ export default function ClientQuotationsPage() {
         changedBy: user.id,
       }],
     };
-    const validationErrors = validateClientQuotation(pending, request, company.requireDifferentQuotationAuthorizer, {
-      forApproval: true,
-      confirmSourceValidity: pending.sourceValidityConfirmed,
-    });
-    if (validationErrors.length) {
-      setError(validationErrors.join(' '));
-      return;
-    }
     setClientQuotations((current) => current.map((item) => item.id === pending.id ? pending : item));
     setEditor(pending);
     recordQuotationActivity(pending, 'Client quotation submitted for approval', 'Internal approval requested.');
@@ -883,13 +994,14 @@ export default function ClientQuotationsPage() {
               <thead className="text-xs uppercase text-muted"><tr className="border-b border-ink-700"><th className="px-4 py-3">Reference</th><th className="px-4 py-3">Client / deal</th><th className="px-4 py-3">Sections</th><th className="px-4 py-3">Total premium</th><th className="px-4 py-3">Valid until</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Open</th></tr></thead>
               <tbody>{visibleQuotations.map((quotation) => {
                 const deal = getDeal(quotation.dealId);
+                const status = visibleStatus(quotation);
                 return <tr key={quotation.id} className="border-b border-ink-800">
                   <td className="px-4 py-3 font-medium text-white">{displayedReference(quotation)}</td>
                   <td className="px-4 py-3">{clients.find((client) => client.id === quotation.clientId)?.name ?? deal?.client ?? '—'}<div className="text-xs text-muted">{deal?.product ?? 'Deal unavailable'}</div></td>
                   <td className="px-4 py-3">{quotation.sections.length}</td>
                   <td className="px-4 py-3 text-white">{formatAmount(quotationTotalPremium(quotation), quotation.currency)}</td>
                   <td className="px-4 py-3">{formatDate(quotation.validUntil)}</td>
-                  <td className="px-4 py-3"><Badge variant={visibleStatus(quotation) === 'Accepted' ? 'win' : visibleStatus(quotation) === 'Expired' || visibleStatus(quotation) === 'Rejected' ? 'warm' : 'brand'}>{visibleStatus(quotation)}</Badge></td>
+                  <td className="px-4 py-3"><Badge variant={quotationStatusBadgeVariant(status)}>{status}</Badge></td>
                   <td className="px-4 py-3"><button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => openQuotation(quotation)}>Open</button></td>
                 </tr>;
               })}</tbody>
@@ -902,7 +1014,7 @@ export default function ClientQuotationsPage() {
       {editor && <section className="space-y-4">
         <div className="glass grid gap-4 rounded-2xl p-4 sm:grid-cols-2 sm:p-6">
           <div><p className="text-xs uppercase text-muted">Client / deal</p><p className="mt-1 font-semibold text-white">{clients.find((client) => client.id === editor.clientId)?.name ?? editor.insuredName}</p><p className="text-sm text-muted">{editorDeal?.product ?? 'Deal unavailable'} · QRS {editorRequest?.reference ?? 'unavailable'}</p></div>
-          <div className="sm:text-right"><Badge variant={visibleStatus(editor) === 'Accepted' ? 'win' : visibleStatus(editor) === 'Expired' || visibleStatus(editor) === 'Rejected' ? 'warm' : 'brand'}>{visibleStatus(editor)}</Badge><p className="mt-2 text-sm text-muted">{editor.issuedAt ? `Issued ${formatDate(editor.issuedAt)}` : editor.approvedAt ? `Approved ${formatDate(editor.approvedAt)}` : 'Draft'} · valid until {formatDate(editor.validUntil)}</p></div>
+          <div className="sm:text-right"><Badge variant={quotationStatusBadgeVariant(visibleStatus(editor))}>{visibleStatus(editor)}</Badge><p className="mt-2 text-sm text-muted">{editor.issuedAt ? `Issued ${formatDate(editor.issuedAt)}` : editor.approvedAt ? `Approved ${formatDate(editor.approvedAt)}` : 'Draft'} · valid until {formatDate(editor.validUntil)}</p></div>
           <dl className="grid gap-3 text-sm sm:col-span-2 sm:grid-cols-3">
             <Detail label="Insured" value={editor.insuredName} />
             <Detail label="Risk location" value={editor.riskLocation} />
