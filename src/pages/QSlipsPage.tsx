@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowRight, ArrowUpRight, FileText, Plus, Search, Send, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowUpRight, Columns3, FileText, Plus, Search, Send, X } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import PageToolbar from '../components/ui/PageToolbar';
 import DateInput from '../components/ui/DateInput';
@@ -64,7 +64,7 @@ function statusTone(status: ReturnType<typeof deriveRequestStatus>): 'muted' | '
 
 export default function QSlipsPage() {
   const {
-    clients, deals, leads, pipelineStages, quotationRequests, setQuotationRequests, dataReady,
+    clients, deals, leads, pipelineStages, quotationRequests, setQuotationRequests, clientQuotations, dataReady,
     vendors, products, user, viewAsRole, setActivities,
   } = useApp();
   const activeRole = viewAsRole ?? user.role;
@@ -98,6 +98,7 @@ export default function QSlipsPage() {
   const [dealFilter, setDealFilter] = useState('');
   const [requestFilter, setRequestFilter] = useState('');
   const [detailRequestId, setDetailRequestId] = useState('');
+  const [quickViewRequestId, setQuickViewRequestId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [editingLine, setEditingLine] = useState<{ requestId: string; lineId: string } | null>(null);
   const [quoteEditor, setQuoteEditor] = useState<{
@@ -582,6 +583,36 @@ export default function QSlipsPage() {
   const detailSource = detailRouteParams.get('source');
   const detailDealId = detailRouteParams.get('deal') ?? detailRouteParams.get('dealId') ?? '';
   const detailIsLinked = !detailDealId || detailRequest?.dealId === detailDealId;
+  const quickViewRequest = quotationRequests.find((request) => request.id === quickViewRequestId);
+  const quickViewDeal = quickViewRequest && deals.find((deal) => deal.id === quickViewRequest.dealId);
+  const quickViewContext = quickViewRequest
+    ? resolveRequestContext(quickViewRequest, deals, clients, leads)
+    : undefined;
+  const quickViewQuotes = quickViewRequest
+    ? clientQuotations.filter((quotation) => quotation.requestId === quickViewRequest.id)
+    : [];
+  const quickViewStages = quickViewRequest ? [
+    {
+      title: 'Initiation',
+      description: 'Requested from insurers',
+      lines: quickViewRequest.lines.filter((line) => getQuotationLineDisplayStatus(line) === 'Requested'),
+    },
+    {
+      title: 'Vendor Submission',
+      description: 'Submitted and awaiting response',
+      lines: quickViewRequest.lines.filter((line) => getQuotationLineDisplayStatus(line) === 'Sent'),
+    },
+    {
+      title: 'Quoted',
+      description: 'Insurer responses received',
+      lines: quickViewRequest.lines.filter((line) => getQuotationLineDisplayStatus(line) === 'Quoted'),
+    },
+    {
+      title: 'Approved',
+      description: 'Client quotation approval',
+      quotations: quickViewQuotes,
+    },
+  ] : [];
   if (detailRequestId) {
     if (!dataReady) return <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-6 text-sm text-muted">Loading quotation slip…</div>;
     if (!detailRequest || !detailIsLinked) return <div className="rounded-xl border border-ink-600 bg-ink-900/30 p-6">
@@ -711,6 +742,11 @@ export default function QSlipsPage() {
                       <td className="px-3 py-3 font-medium text-white">{formatAmount(total, request.currency)}</td>
                       <td className="px-3 py-3 text-right">
                         <div className="flex flex-wrap justify-end gap-1">
+                          <button type="button" className="btn-ghost !px-2 !py-1 text-xs"
+                            aria-label={`Quick view ${request.reference} workflow`}
+                            onClick={(event) => { event.stopPropagation(); setQuickViewRequestId(request.id); }}>
+                            <Columns3 size={14} /> Quick view
+                          </button>
                           {canEditRequest && requestedLineCount > 0 && <button type="button"
                             className="btn-primary !px-2 !py-1 text-xs"
                             onClick={(event) => { event.stopPropagation(); sendRequestLines(request); }}>
@@ -804,6 +840,96 @@ export default function QSlipsPage() {
           </table>
         </div>
       </div>
+
+      <Modal
+        open={Boolean(quickViewRequest)}
+        onClose={() => setQuickViewRequestId('')}
+        title={quickViewRequest ? `QRS workflow · ${quickViewRequest.reference}` : 'QRS workflow'}
+        subtitle="Review insurer responses and client quotation approval without leaving the list."
+        size="xl"
+      >
+        {quickViewRequest && quickViewContext && <div className="space-y-4">
+          <section className="grid grid-cols-2 gap-3 rounded-xl border border-ink-600 bg-ink-900/40 p-3 sm:grid-cols-4">
+            <ReadOnlyField label="Insured" value={quickViewRequest.insuredName || quickViewContext.clientName} />
+            <ReadOnlyField label="Deal" value={`${quickViewDeal?.id ?? quickViewRequest.dealId} · ${quickViewDeal?.product ?? 'Deal unavailable'}`} />
+            <ReadOnlyField label="Required by" value={quickViewRequest.requiredBy ? formatDate(quickViewRequest.requiredBy) : 'Not set'} />
+            <ReadOnlyField label="Sum insured" value={formatAmount(
+              quickViewRequest.sections.reduce((sum, section) => sum + section.data.totalSumInsured, 0),
+              quickViewRequest.currency,
+            )} />
+          </section>
+
+          <div className="overflow-x-auto pb-2">
+            <div className="grid min-w-[920px] grid-cols-4 gap-3">
+              {quickViewStages.map((stage) => (
+                <section key={stage.title} aria-label={`${stage.title} stage`} className="min-w-0 rounded-xl border border-ink-600 bg-ink-900/50 p-3">
+                  <div className="mb-3 border-b border-ink-700 pb-2">
+                    <h4 className="text-sm font-semibold text-white">{stage.title}</h4>
+                    <p className="mt-0.5 text-[10px] text-muted">{stage.description}</p>
+                    <span className="mt-2 inline-flex rounded-full border border-ink-600 px-2 py-0.5 text-[10px] text-muted">
+                      {'lines' in stage ? stage.lines?.length ?? 0 : stage.quotations?.length ?? 0} item{' '}
+                      {('lines' in stage ? stage.lines?.length ?? 0 : stage.quotations?.length ?? 0) === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {'lines' in stage ? stage.lines?.map((line) => {
+                      const section = quickViewRequest.sections.find((item) => item.id === line.sectionId);
+                      return <article key={line.id} className="rounded-lg border border-ink-600 bg-ink-800/80 p-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate font-mono text-xs font-semibold text-brand-200">{formatQuotationLineReference(line)}</p>
+                            <p className="mt-1 truncate text-xs text-white">{vendorName(line.vendorId)}</p>
+                          </div>
+                          <Badge compact variant={line.status === 'Quoted' ? 'win' : line.status === 'Sent' ? 'brand' : 'warm'}>
+                            {getQuotationLineDisplayStatus(line)}
+                          </Badge>
+                        </div>
+                        <p className="mt-2 truncate text-[10px] text-muted">{section?.title ?? 'Section unavailable'}</p>
+                        {line.quotes.map((quote) => <p key={quote.optionId} className="mt-1 text-[10px] text-muted">
+                          {section?.data.options.find((option) => option.id === quote.optionId)?.label ?? 'Premium'}: {formatAmount(quote.premium, quote.currency)}
+                        </p>)}
+                        {line.sentAt && <p className="mt-1 text-[10px] text-muted">Sent {formatDate(line.sentAt)}</p>}
+                      </article>;
+                    }) : stage.quotations?.map((quotation) => (
+                      <article key={quotation.id} className="rounded-lg border border-ink-600 bg-ink-800/80 p-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="truncate font-mono text-xs font-semibold text-brand-200">{quotation.reference}</p>
+                          <Badge compact variant={['Approved', 'Issued', 'Accepted'].includes(quotation.status)
+                            ? 'win' : quotation.status === 'Pending Approval' ? 'warm' : 'muted'}>
+                            {quotation.status}
+                          </Badge>
+                        </div>
+                        <p className="mt-2 text-[10px] text-muted">{quotation.sections.length} section{quotation.sections.length === 1 ? '' : 's'}</p>
+                        <p className="mt-1 text-xs font-medium text-white">{formatAmount(quotation.totalPremium, quotation.currency)}</p>
+                      </article>
+                    ))}
+                    {('lines' in stage ? stage.lines?.length ?? 0 : stage.quotations?.length ?? 0) === 0 && (
+                      <p className="rounded-lg border border-dashed border-ink-600 px-2.5 py-4 text-center text-[10px] text-muted">
+                        {'lines' in stage ? 'No insurer lines at this stage.' : 'No client quotations yet.'}
+                      </p>
+                    )}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </div>
+
+          {quickViewRequest.lines.some((line) => ['Declined', 'Expired', 'Cancelled'].includes(getQuotationLineDisplayStatus(line))) && (
+            <section className="rounded-xl border border-ink-600 bg-ink-900/40 p-3">
+              <h4 className="text-xs font-semibold text-white">Other line outcomes</h4>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {quickViewRequest.lines.filter((line) =>
+                  ['Declined', 'Expired', 'Cancelled'].includes(getQuotationLineDisplayStatus(line)),
+                ).map((line) => <span key={line.id} className="inline-flex items-center gap-1.5 rounded-lg border border-ink-600 px-2 py-1 text-[10px] text-muted">
+                  <span className="font-mono text-brand-200">{formatQuotationLineReference(line)}</span>
+                  <span>{vendorName(line.vendorId)}</span>
+                  <Badge compact variant="muted">{getQuotationLineDisplayStatus(line)}</Badge>
+                </span>)}
+              </div>
+            </section>
+          )}
+        </div>}
+      </Modal>
 
       <Modal open={open} onClose={() => setOpen(false)} title="New Quotation Request Slip" subtitle={`Step ${wizardStep + 1} of 4 · ${['Deal and risk details', 'Insurance sections', 'Insurer selection', 'Review and create'][wizardStep]}`} size="lg" footer={
         <div className="flex w-full items-center justify-between gap-3">
