@@ -6,6 +6,9 @@ import type {
   Activity, Client, Deal, Invoice, Lead, LeadStageHistoryRecord, Payment, Pipeline, PipelineStage,
   ClientQuotation, QuotationRequest, Role, StageHistoryAudit, TaxRate, User, ProductCode, Vendor,
 } from '../types';
+import {
+  createDefaultSettingsCatalogs, normalizeSettingsCatalogs, type SettingsCatalogs,
+} from '../data/settingsCatalogs';
 import { COMPANY, PRODUCT_CODES } from '../data/catalogs';
 import { DEAL_PIPELINE_STAGES } from '../data/pipelineStageTemplates';
 import { migrateVendorData } from '../data/vendors';
@@ -73,6 +76,8 @@ interface AppState {
   setCompany: (company: typeof COMPANY) => void;
   emailTemplates: Record<string, string>;
   setEmailTemplates: (templates: Record<string, string>) => void;
+  settingsCatalogs: SettingsCatalogs;
+  setSettingsCatalogs: Dispatch<SetStateAction<SettingsCatalogs>>;
   persistenceError: string | null;
   pipelines: Pipeline[];
   setPipelines: Dispatch<SetStateAction<Pipeline[]>>;
@@ -455,6 +460,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [users, setUsers] = useState<User[]>(demoSeed?.users ?? []);
   const [company, setCompany] = useState<typeof COMPANY>(demoSeed?.company ?? COMPANY);
   const [emailTemplates, setEmailTemplates] = useState<Record<string, string>>(demoSeed?.emailTemplates ?? DEFAULT_EMAIL_TEMPLATES);
+  const [settingsCatalogs, setSettingsCatalogs] = useState<SettingsCatalogs>(createDefaultSettingsCatalogs);
   const [pipelines, setPipelines] = useState<Pipeline[]>(demoSeed?.pipelines ?? []);
   const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>(demoSeed?.pipelineStages ?? []);
   const [stageHistory, setStageHistory] = useState<StageHistoryAudit[]>(demoSeed?.stageHistory ?? []);
@@ -632,6 +638,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setUsers([]);
     setCompany(COMPANY);
     setEmailTemplates(DEFAULT_EMAIL_TEMPLATES);
+    setSettingsCatalogs(createDefaultSettingsCatalogs());
     setPipelines([]);
     setPipelineStages([]);
     setStageHistory([]);
@@ -721,10 +728,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setStageHistory(migrated.stageHistory);
         const companyRecord = records.find((record) => record.resource === 'company');
         const savedCompany = companyRecord?.data;
+        const { settingsCatalogs: savedSettingsCatalogs, ...savedCompanyDetails } = savedCompany ?? {};
+        setSettingsCatalogs(normalizeSettingsCatalogs(savedSettingsCatalogs));
         const savedLeadStageSlaDays = savedCompany?.leadStageSlaDays;
         setCompany({
           ...COMPANY,
-          ...savedCompany,
+          ...savedCompanyDetails,
           requireNextActivityForStageChange: typeof savedCompany?.requireNextActivityForStageChange === 'boolean'
             ? savedCompany.requireNextActivityForStageChange
             : COMPANY.requireNextActivityForStageChange,
@@ -781,7 +790,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       'pipeline-stages': pipelineStages,
       'stage-history': stageHistory,
       'lead-stage-history': buildLeadStageHistoryRecords(leads),
-      company: [{ id: 'company-settings', ...company }],
+      company: [{ id: 'company-settings', ...company, settingsCatalogs }],
       'email-templates': [{ id: 'email-templates', templates: emailTemplates }],
     };
     const writableByRole: Record<Role, string[]> = {
@@ -858,6 +867,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [
     dataReady, user.id, user.role, taxRates, leads, clients, activities, vendors, quotationRequests, clientQuotations, deals,
     invoices, payments, pipelines, pipelineStages, stageHistory, company, emailTemplates, customerLookups, products,
+    settingsCatalogs,
   ]);
 
   useEffect(() => {
@@ -1025,12 +1035,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     activities, setActivities, vendors, setVendors, quotationRequests, setQuotationRequests,
     clientQuotations, setClientQuotations,
     deals, setDeals, invoices, setInvoices, payments, setPayments, users, setUsers,
-    createUser, updateUserProfile, company, setCompany, emailTemplates, setEmailTemplates, persistenceError,
+    createUser, updateUserProfile, company, setCompany, emailTemplates, setEmailTemplates,
+    settingsCatalogs, setSettingsCatalogs, persistenceError,
     pipelines, setPipelines, pipelineStages, setPipelineStages, stageHistory, setStageHistory,
   }), [
     user, authLoading, authError, viewAsRole, setViewAsRole, signIn, register, signOut, initializeSampleLeads, hasAccess, dataReady,
     taxRates, leads, clients, customerLookups, products, activities, vendors, quotationRequests, clientQuotations, deals, invoices, payments, users,
-    createUser, updateUserProfile, company, emailTemplates, persistenceError, pipelines, pipelineStages, stageHistory,
+    createUser, updateUserProfile, company, emailTemplates, settingsCatalogs, persistenceError, pipelines, pipelineStages, stageHistory,
   ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

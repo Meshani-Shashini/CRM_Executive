@@ -858,7 +858,7 @@ export default function ClientQuotationsPage() {
                     return <div key={selectionKey} className="mt-3 min-w-0">
                       <h3 className="mb-2 text-xs font-semibold text-white">{option.label}</h3>
                       <div className="overflow-x-auto rounded-lg border border-ink-700">
-                        <table className="w-full min-w-[680px] text-left text-xs">
+                        <table className="w-full min-w-[680px] text-left text-sm">
                           <thead className="bg-ink-800 text-muted"><tr><th className="p-2">Select / insurer</th><th className="p-2">Premium</th><th className="p-2">Rate</th><th className="p-2">Valid until</th><th className="p-2">Deductible notes</th></tr></thead>
                           <tbody>{lines.map((line) => {
                             const quote = quoteForSource(line, option.id || undefined)!;
@@ -989,20 +989,20 @@ export default function ClientQuotationsPage() {
         </div>}
         {queryDealId && !activeForDeal && !canCreateForDeal && <p role="status" className="rounded-lg border border-ink-700 p-3 text-xs text-muted">A client quotation becomes available after an active QRS section has an unexpired quoted carrier line.</p>}
         <div className="glass overflow-hidden rounded-2xl">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="text-xs uppercase text-muted"><tr className="border-b border-ink-700"><th className="px-4 py-3">Reference</th><th className="px-4 py-3">Client / deal</th><th className="px-4 py-3">Sections</th><th className="px-4 py-3">Total premium</th><th className="px-4 py-3">Valid until</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Open</th></tr></thead>
+          <div className="quotation-list-fit">
+            <table className="w-full min-w-[760px] text-left leading-tight">
+              <thead className="font-semibold uppercase text-muted"><tr className="border-b border-ink-700"><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Client / deal</th><th className="px-3 py-2">Sections</th><th className="px-3 py-2">Total premium</th><th className="px-3 py-2">Valid until</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Open</th></tr></thead>
               <tbody>{visibleQuotations.map((quotation) => {
                 const deal = getDeal(quotation.dealId);
                 const status = visibleStatus(quotation);
                 return <tr key={quotation.id} className="border-b border-ink-800">
-                  <td className="px-4 py-3 font-medium text-white">{displayedReference(quotation)}</td>
-                  <td className="px-4 py-3">{clients.find((client) => client.id === quotation.clientId)?.name ?? deal?.client ?? '—'}<div className="text-xs text-muted">{deal?.product ?? 'Deal unavailable'}</div></td>
-                  <td className="px-4 py-3">{quotation.sections.length}</td>
-                  <td className="px-4 py-3 text-white">{formatAmount(quotationTotalPremium(quotation), quotation.currency)}</td>
-                  <td className="px-4 py-3">{formatDate(quotation.validUntil)}</td>
-                  <td className="px-4 py-3"><Badge variant={quotationStatusBadgeVariant(status)}>{status}</Badge></td>
-                  <td className="px-4 py-3"><button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => openQuotation(quotation)}>Open</button></td>
+                  <td className="px-3 py-2 font-medium text-white">{displayedReference(quotation)}</td>
+                  <td className="px-3 py-2">{clients.find((client) => client.id === quotation.clientId)?.name ?? deal?.client ?? '—'}<div className="text-muted">{deal?.product ?? 'Deal unavailable'}</div></td>
+                  <td className="px-3 py-2">{quotation.sections.length}</td>
+                  <td className="px-3 py-2 text-white">{formatAmount(quotationTotalPremium(quotation), quotation.currency)}</td>
+                  <td className="px-3 py-2">{formatDate(quotation.validUntil)}</td>
+                  <td className="px-3 py-2"><Badge subtle variant={quotationStatusBadgeVariant(status)}>{status}</Badge></td>
+                  <td className="px-3 py-2"><button type="button" className="btn-ghost !px-2 !py-1" onClick={() => openQuotation(quotation)}>Open</button></td>
                 </tr>;
               })}</tbody>
             </table>
@@ -1014,7 +1014,7 @@ export default function ClientQuotationsPage() {
       {editor && <section className="space-y-4">
         <div className="glass grid gap-4 rounded-2xl p-4 sm:grid-cols-2 sm:p-6">
           <div><p className="text-xs uppercase text-muted">Client / deal</p><p className="mt-1 font-semibold text-white">{clients.find((client) => client.id === editor.clientId)?.name ?? editor.insuredName}</p><p className="text-sm text-muted">{editorDeal?.product ?? 'Deal unavailable'} · QRS {editorRequest?.reference ?? 'unavailable'}</p></div>
-          <div className="sm:text-right"><Badge variant={quotationStatusBadgeVariant(visibleStatus(editor))}>{visibleStatus(editor)}</Badge><p className="mt-2 text-sm text-muted">{editor.issuedAt ? `Issued ${formatDate(editor.issuedAt)}` : editor.approvedAt ? `Approved ${formatDate(editor.approvedAt)}` : 'Draft'} · valid until {formatDate(editor.validUntil)}</p></div>
+          <div className="sm:text-right"><Badge subtle variant={quotationStatusBadgeVariant(visibleStatus(editor))}>{visibleStatus(editor)}</Badge><p className="mt-2 text-sm text-muted">{editor.issuedAt ? `Issued ${formatDate(editor.issuedAt)}` : editor.approvedAt ? `Approved ${formatDate(editor.approvedAt)}` : 'Draft'} · valid until {formatDate(editor.validUntil)}</p></div>
           <dl className="grid gap-3 text-sm sm:col-span-2 sm:grid-cols-3">
             <Detail label="Insured" value={editor.insuredName} />
             <Detail label="Risk location" value={editor.riskLocation} />
@@ -1173,7 +1173,7 @@ function QuotationSectionCard({ section, currency }: { section: ClientQuotationS
     </table></div>
     {section.businessInterruption && <p className="mt-2 text-sm text-muted">Business interruption · Gross profit {formatAmount(section.businessInterruption.grossProfit, currency)} · {section.businessInterruption.indemnityMonths} months</p>}
     <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2"><Detail label="Section total sum insured" value={formatAmount(section.totalSumInsured, currency)} /><Detail label="Indicative premium / rate" value={`${formatAmount(section.proposedPremium, currency)} · ${section.ratePct}%`} /><Detail label="Carrier quote valid until" value={section.sourceValidUntil ? formatDate(section.sourceValidUntil) : 'Not specified'} /></div>
-    {section.optionQuotes.length > 0 && <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[560px] text-left text-xs"><thead className="text-muted"><tr><th className="py-2">Option</th><th className="py-2">Carrier reference</th><th className="py-2 text-right">Premium</th><th className="py-2 text-right">Rate</th><th className="py-2">Carrier validity</th></tr></thead><tbody>{section.optionQuotes.map((option) => <tr key={option.optionKey} className="border-t border-ink-700"><td className="py-2">{option.label}</td><td className="py-2">{option.insurerLineReference}</td><td className="py-2 text-right">{formatAmount(option.proposedPremium, currency)}</td><td className="py-2 text-right">{option.ratePct}%</td><td className="py-2">{option.sourceValidUntil ? formatDate(option.sourceValidUntil) : 'Not specified'}</td></tr>)}</tbody></table></div>}
+    {section.optionQuotes.length > 0 && <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[560px] text-left text-sm"><thead className="text-muted"><tr><th className="py-2">Option</th><th className="py-2">Carrier reference</th><th className="py-2 text-right">Premium</th><th className="py-2 text-right">Rate</th><th className="py-2">Carrier validity</th></tr></thead><tbody>{section.optionQuotes.map((option) => <tr key={option.optionKey} className="border-t border-ink-700"><td className="py-2">{option.label}</td><td className="py-2">{option.insurerLineReference}</td><td className="py-2 text-right">{formatAmount(option.proposedPremium, currency)}</td><td className="py-2 text-right">{option.ratePct}%</td><td className="py-2">{option.sourceValidUntil ? formatDate(option.sourceValidUntil) : 'Not specified'}</td></tr>)}</tbody></table></div>}
     <ClauseList title="Perils" values={section.perils} />
     <ClauseList title="Extensions" values={section.extensions.map((item) => `${item.name}: ${item.limit}`)} />
     <ClauseList title="Deductibles" values={section.deductibles.map((item) => `${item.label}: ${item.text}`)} />

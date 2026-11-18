@@ -4,7 +4,6 @@ import {
   Building2, Briefcase, ShieldCheck,
 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
-import Badge from '../components/ui/Badge';
 import PageToolbar from '../components/ui/PageToolbar';
 import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 import MonthlyWonLostChart from '../components/deal/MonthlyWonLostChart';
@@ -60,6 +59,7 @@ export default function DashboardPage() {
       Boolean(deals.some((deal) => deal.id === lead.dealId || deal.leadId === lead.id)),
     ) === stage).length,
   }));
+  const maxStageCount = Math.max(1, ...stages.map((stage) => stage.count));
   const recentActivities = [...activities].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
 
   return (
@@ -109,12 +109,12 @@ export default function DashboardPage() {
               {leadClasses.length === 0 ? <EmptyState /> : (
                 <div className="space-y-3">
                   {leadClasses.map((item) => (
-                    <div key={item.name}>
-                      <div className="flex justify-between text-xs mb-1">
-                        <a href={dashboardHref('leads', { insuranceClass: item.name })} className="text-white hover:text-brand-300">{item.name}</a>
-                        <span className="text-muted">{item.count}</span>
+                    <div key={item.name} className="rounded-lg bg-ink-900/50 px-3 py-2">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <a href={dashboardHref('leads', { insuranceClass: item.name })} className="font-medium text-white hover:text-brand-300">{item.name}</a>
+                        <span className="shrink-0 font-medium text-muted">{item.count}</span>
                       </div>
-                      <div className="h-2 bg-ink-900 rounded-full overflow-hidden">
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-ink-900">
                         <div className="h-full bg-brand-400 rounded-full" style={{ width: `${item.count / maxClassCount * 100}%` }} />
                       </div>
                     </div>
@@ -126,11 +126,16 @@ export default function DashboardPage() {
             <div className="glass rounded-2xl p-5">
               <h3 className="text-white font-semibold mb-4">Leads by Funnel Stage</h3>
               {leads.length === 0 ? <EmptyState /> : (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {stages.map((stage) => (
-                    <div key={stage.name} className="flex items-center justify-between rounded-lg bg-ink-900/50 px-3 py-2 text-sm">
-                      <a href={dashboardHref('leads', { stage: stage.name })} className="text-white hover:text-brand-300">{stage.name}</a>
-                      <Badge variant="brand">{stage.count}</Badge>
+                    <div key={stage.name} className="rounded-lg bg-ink-900/50 px-3 py-2">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <a href={dashboardHref('leads', { stage: stage.name })} className="font-medium text-white hover:text-brand-300">{stage.name}</a>
+                        <span className="shrink-0 font-medium text-muted">{stage.count}</span>
+                      </div>
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-ink-900">
+                        <div className="h-full rounded-full bg-brand-400" style={{ width: `${stage.count / maxStageCount * 100}%` }} />
+                      </div>
                     </div>
                   ))}
                 </div>

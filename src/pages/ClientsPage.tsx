@@ -29,7 +29,7 @@ type ClientStatus = 'Active' | 'Draft' | 'Renewal Due' | 'Info incomplete';
 type ClientSortKey = 'name' | 'tin' | 'country' | 'class' | 'contactPerson' | 'phone' | 'email' | 'address' | 'owner' | 'activity' | 'status';
 
 export default function ClientsPage() {
-  const { clients, setClients, leads, setLeads, deals, setDeals, invoices, activities, setActivities, user, users, dataReady } = useApp();
+  const { clients, setClients, leads, setLeads, deals, setDeals, invoices, activities, setActivities, user, users, dataReady, settingsCatalogs } = useApp();
   const [selectedId, setSelectedId] = useState('');
   const [portalClientId, setPortalClientId] = useState(user.clientId ?? '');
   const [view, setView] = useState<'list' | 'kanban'>(() => localStorage.getItem('clientsView') === 'kanban' ? 'kanban' : 'list');
@@ -862,7 +862,9 @@ export default function ClientsPage() {
                     <Field label="Sum insured"><input className="input" name="sumInsured" type="number" min="0" step="0.01" defaultValue={editingClient.sumInsured} /></Field>
                     <Field label="Premium"><input className="input" name="premium" type="number" min="0" step="0.01" defaultValue={editingClient.premium} /></Field>
                     <Field label="Expiry"><DateInput name="expiry" defaultValue={editingClient.expiry} aria-label="Policy expiry date" /></Field>
-                    <Field label="Tags (comma-separated)"><input className="input" name="tags" defaultValue={editingClient.tags.join(', ')} /></Field>
+                    <Field label="Tags (comma-separated)"><input className="input" name="tags" list="shared-client-tags" defaultValue={editingClient.tags.join(', ')} />
+                      <datalist id="shared-client-tags">{settingsCatalogs.tags.map((tag) => <option key={tag} value={tag} />)}</datalist>
+                    </Field>
                     <Field label="Account status"><select className="input" name="accountStatus" defaultValue={editingClient.accountStatus ?? 'active'}><option value="active">Active</option><option value="draft">Draft</option></select></Field>
                     {editingClient.insuredEntity && <>
                       <Field label="Entity type"><input className="input" name="entityType" defaultValue={editingClient.insuredEntity.entityType} /></Field>

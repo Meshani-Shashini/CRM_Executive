@@ -2,23 +2,31 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { ArrowRight, Flame, Snowflake, Sun } from 'lucide-react';
 import type { LeadTemperature } from '../types';
 
-const tableBadgeClass = 'pill pill-compact border';
+const tableBadgeClass = 'inline-flex h-5 items-center whitespace-nowrap rounded-full px-2 text-[9px] font-semibold leading-none tracking-wide';
 
-const temperatureOptions: { value: LeadTemperature; Icon: typeof Flame; className: string; menuClassName: string }[] = [
-  { value: 'HOT', Icon: Flame, className: 'border-hot/50 bg-hot/10 text-hot shadow-[0_0_8px_rgba(239,68,68,0.18)]', menuClassName: 'text-hot' },
-  { value: 'WARM', Icon: Sun, className: 'border-amber-400/50 bg-amber-500/10 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.16)]', menuClassName: 'text-amber-300' },
-  { value: 'COLD', Icon: Snowflake, className: 'border-blue-400/50 bg-blue-500/10 text-blue-300 shadow-[0_0_8px_rgba(59,130,246,0.22)]', menuClassName: 'text-blue-300' },
+const temperatureOptions: {
+  value: LeadTemperature;
+  Icon: typeof Flame;
+  className: string;
+  detailClassName: string;
+  menuClassName: string;
+}[] = [
+  { value: 'HOT', Icon: Flame, className: 'bg-red-500/10 text-red-300', detailClassName: 'border-hot/50 bg-hot/10 text-hot shadow-[0_0_8px_rgba(239,68,68,0.18)]', menuClassName: 'text-hot' },
+  { value: 'WARM', Icon: Sun, className: 'bg-orange-500/10 text-orange-300', detailClassName: 'border-amber-400/50 bg-amber-500/10 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.16)]', menuClassName: 'text-amber-300' },
+  { value: 'COLD', Icon: Snowflake, className: 'bg-sky-500/10 text-sky-300', detailClassName: 'border-blue-400/50 bg-blue-500/10 text-blue-300 shadow-[0_0_8px_rgba(59,130,246,0.22)]', menuClassName: 'text-blue-300' },
 ];
 
 export default function LeadTemperatureControl({
   leadName,
   temperature,
   disabled,
+  compact = false,
   onChange,
 }: {
   leadName: string;
   temperature: LeadTemperature;
   disabled: boolean;
+  compact?: boolean;
   onChange: (temperature: LeadTemperature) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -79,9 +87,9 @@ export default function LeadTemperatureControl({
         disabled={disabled}
         title={`${temperature} lead temperature`}
         onClick={() => setOpen((current) => !current)}
-        className={`${tableBadgeClass} transition-all hover:brightness-125 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400 disabled:cursor-not-allowed disabled:opacity-60 ${selected.className}`}
+        className={`${compact ? tableBadgeClass : 'pill pill-compact border'} transition-colors hover:brightness-125 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400 disabled:cursor-not-allowed disabled:opacity-60 ${compact ? selected.className : selected.detailClassName}`}
       >
-        <TemperatureIcon size={12} className="shrink-0" aria-hidden="true" />
+        {!compact && <TemperatureIcon size={12} className="shrink-0" aria-hidden="true" />}
         <span>{temperature}</span>
       </button>
       {open && <div role="menu" aria-label={`${leadName} temperature options`} className="absolute left-0 top-full z-30 mt-1 min-w-32 rounded-lg border border-ink-600 bg-ink-900 p-1 shadow-xl">
@@ -91,13 +99,13 @@ export default function LeadTemperatureControl({
             type="button"
             role="menuitemradio"
             aria-checked={temperature === value}
-            className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-[10px] font-semibold transition-colors hover:bg-ink-700 ${menuClassName} ${temperature === value ? 'bg-ink-700/70' : ''}`}
+            className={`flex w-full items-center rounded-md px-2.5 py-2 text-[10px] font-semibold transition-colors hover:bg-ink-700 ${compact ? '' : 'gap-2'} ${menuClassName} ${temperature === value ? 'bg-ink-700/70' : ''}`}
             onClick={() => {
               setOpen(false);
               if (value !== temperature) setPendingTemperature(value);
             }}
           >
-            <Icon size={13} aria-hidden="true" />
+            {!compact && <Icon size={13} aria-hidden="true" />}
             {value}
           </button>
         ))}
@@ -115,20 +123,22 @@ export default function LeadTemperatureControl({
         >
           <h2 id={confirmationTitleId} className="text-sm font-semibold text-white">Confirm temperature change</h2>
           <p className="mt-2 flex items-center gap-2 text-sm text-muted" aria-label={`${leadName}: ${temperature} to ${pendingTemperature}?`}>
-            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold ${selected.className}`}>
-              <TemperatureIcon size={12} aria-hidden="true" />
+            <span className={`inline-flex items-center gap-1 rounded-full ${compact ? 'px-2 py-1' : 'border px-2 py-1'} text-[10px] font-bold ${compact ? selected.className : selected.detailClassName}`}>
+              {!compact && <TemperatureIcon size={12} aria-hidden="true" />}
               {temperature}
             </span>
             <ArrowRight size={14} aria-hidden="true" />
-            {(() => {
-              const next = temperatureOptions.find((option) => option.value === pendingTemperature);
-              if (!next) return null;
-              const NextIcon = next.Icon;
-              return <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold ${next.className}`}>
-                <NextIcon size={12} aria-hidden="true" />
-                {pendingTemperature}
-              </span>;
-            })()}
+            <span className={`inline-flex items-center gap-1 rounded-full ${compact ? 'px-2 py-1' : 'border px-2 py-1'} text-[10px] font-bold ${compact
+              ? temperatureOptions.find((option) => option.value === pendingTemperature)?.className ?? ''
+              : temperatureOptions.find((option) => option.value === pendingTemperature)?.detailClassName ?? ''}`}>
+              {!compact && (() => {
+                const next = temperatureOptions.find((option) => option.value === pendingTemperature);
+                if (!next) return null;
+                const NextIcon = next.Icon;
+                return <NextIcon size={12} aria-hidden="true" />;
+              })()}
+              {pendingTemperature}
+            </span>
             <span>?</span>
           </p>
           <div className="mt-4 flex justify-end gap-2">

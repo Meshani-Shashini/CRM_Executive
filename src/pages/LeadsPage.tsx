@@ -35,7 +35,7 @@ import { buildLeadConversion } from '../utils/leadConversion';
 import { getNextActivity } from '../utils/nextActivity';
 import { getLeadStageSla } from '../utils/leadStageSla';
 
-const tableBadgeClass = 'inline-flex h-6 items-center gap-1 whitespace-nowrap rounded-full border px-1.5 text-[9px] font-bold leading-none tracking-wide uppercase';
+const tableBadgeClass = 'inline-flex h-5 items-center whitespace-nowrap rounded-full px-2 text-[9px] font-medium leading-none tracking-wide';
 
 const leadTableColumns = [
   { key: 'lead', label: 'Lead Name' },
@@ -125,7 +125,7 @@ export default function LeadsPage() {
   const {
     leads, setLeads, deals, setDeals, clients, setClients, user, users, pipelines,
     pipelineStages, setStageHistory, customerLookups, setCustomerLookups, products, activities, setActivities, viewAsRole,
-    quotationRequests, company,
+    quotationRequests, company, settingsCatalogs,
   } = useApp();
   const activeRole = viewAsRole ?? user.role;
   const PRODUCT_CODES = products;
@@ -871,6 +871,11 @@ export default function LeadsPage() {
                 const stage = boardStageForLead(lead, linkedDealIds, linkedLeadIds);
                 const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? formatStaffIdentifier(lead.ownerId);
                 const statusVariant = lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win';
+                const statusBadgeTone = statusVariant === 'backlog'
+                  ? 'bg-red-500/10 text-red-300'
+                  : statusVariant === 'in-progress'
+                    ? 'bg-blue-500/10 text-blue-300'
+                    : 'bg-emerald-500/10 text-emerald-300';
                 return <tr key={lead.id} role="link" tabIndex={0} aria-label={`Open lead details for ${lead.title ?? lead.client}`} draggable={!isTerminalLeadStage(stage) && !((lead.dealId && linkedDealIds.has(lead.dealId)) || linkedLeadIds.has(lead.id))} className="cursor-pointer border-b border-[#1B1E22] last:border-0 transition-colors hover:bg-[#111214] focus-visible:outline focus-visible:outline-1 focus-visible:outline-brand-400"
                   onClick={() => setInspectedLeadId(lead.id)}
                   onKeyDown={(event) => {
@@ -905,12 +910,13 @@ export default function LeadsPage() {
                       leadName={lead.title ?? lead.client}
                       temperature={lead.temperature ?? 'WARM'}
                       disabled={activeRole !== 'admin' && activeRole !== 'sales'}
+                      compact
                       onChange={(temperature) => updateLeadTemperature(lead, temperature)}
                     />
                   </td>
                   <td data-label={leadTableColumns[5].label} className="whitespace-nowrap px-2 py-2 pr-3 font-normal">
-                    <span className={`lead-table-status ${tableBadgeClass} ${statusVariant === 'todo' ? 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]' : statusVariant === 'backlog' ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]' : statusVariant === 'in-progress' ? 'border-[#25375B] bg-[#101C39] text-[#5B8DEF]' : 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]'}`}>
-                      <CheckCircle2 size={11} className="shrink-0" /> {lead.status}
+                    <span className={`${tableBadgeClass} ${statusBadgeTone}`}>
+                      {lead.status}
                     </span>
                   </td>
                   <td data-label={leadTableColumns[6].label} className="px-2 py-2 font-normal">
@@ -1167,7 +1173,7 @@ export default function LeadsPage() {
             </div>
             <p className="mt-1"><span className="text-white">Underwriting intake:</span> {products.find((product) => product.code === productCode)?.keyUnderwritingIntakeArtifacts}</p>
           </div>}
-          <Field label="Source"><select className="input" value={leadSource} onChange={(event) => setLeadSource(event.target.value)}><option value="">Select source</option><option>Referral</option><option>Website</option><option>Renewal</option><option>Walk-in</option><option>Partner</option></select></Field>
+          <Field label="Source"><select className="input" value={leadSource} onChange={(event) => setLeadSource(event.target.value)}><option value="">Select source</option>{[...new Set([...settingsCatalogs.leadSources, leadSource].filter(Boolean))].map((source) => <option key={source}>{source}</option>)}</select></Field>
           <Field label="Remarks / Notes"><textarea className="input min-h-20" value={leadNotes} onChange={(event) => setLeadNotes(event.target.value)} placeholder="Initial scoping, client context, or missing information" /></Field>
           <SectionHeading title="Pipeline & Progress" />
           <Field label="Funnel stage">

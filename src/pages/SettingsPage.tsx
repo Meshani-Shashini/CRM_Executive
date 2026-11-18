@@ -5,24 +5,48 @@ import Modal from '../components/ui/Modal';
 import PageToolbar from '../components/ui/PageToolbar';
 import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 import {
-  Settings as SettingsIcon, Percent, Mail, Users as UsersIcon, ShieldAlert, FileText,
-  Save, Plus, Pencil, Trash2, Check, Lock, Package, ClipboardList,
+  Settings as SettingsIcon, Percent, Mail, Users as UsersIcon, FileText,
+  Save, Plus, Pencil, Trash2, Check, Lock, Package, ClipboardList, Tags,
+  Radio, BookOpen, Trophy, Building2, Bell, Target, DollarSign, ChevronRight, ArrowLeft,
 } from 'lucide-react';
 import type { Activity, TaxRate, Role, User, ProductCode, Lead, Deal } from '../types';
 import { PRODUCT_CODES } from '../data/catalogs';
 import { formatStaffIdentifier } from '../utils/staff';
 import { resolveLeadStageSlaDays } from '../utils/leadStageSla';
 import { LEAD_ACTIVE_STAGES } from '../utils/leadLifecycle';
+import SettingsCatalogManager from './SettingsCatalogManager';
 
-type Tab = 'general' | 'tax' | 'products' | 'email' | 'quotations' | 'users' | 'audit';
+type Tab = 'directory' | 'general' | 'tax' | 'products' | 'email' | 'quotations' | 'users' | 'audit'
+  | 'tags' | 'lead-sources' | 'price-books' | 'competitors' | 'payee-accounts'
+  | 'notices' | 'strategic-goals' | 'exchange-rates';
+
+const settingsSections: {
+  key: Tab;
+  title: string;
+  description: string;
+  icon: typeof SettingsIcon;
+}[] = [
+  { key: 'tags', title: 'Tags', description: 'Manage the shared tag palette', icon: Tags },
+  { key: 'lead-sources', title: 'Lead Sources', description: 'Marketing-attribution picklist for leads', icon: Radio },
+  { key: 'products', title: 'Products', description: 'Catalog items for deal line items and quotes', icon: Package },
+  { key: 'price-books', title: 'Price Books', description: 'Per-book price overrides', icon: BookOpen },
+  { key: 'competitors', title: 'Competitors', description: 'Tracked for win/loss reporting', icon: Trophy },
+  { key: 'payee-accounts', title: 'Payee Accounts', description: 'Pre-approved insurer/vendor account numbers for payment requests', icon: Building2 },
+  { key: 'email', title: 'Email Templates', description: 'Draft and approve reusable email templates for staff', icon: Mail },
+  { key: 'notices', title: 'Notices', description: 'Post and retract announcements shown to the whole team', icon: Bell },
+  { key: 'strategic-goals', title: 'Strategic Goals', description: 'Company goals by quarter, short term, and long term', icon: Target },
+  { key: 'exchange-rates', title: 'Exchange Rates', description: 'Conversion rates to USD, used to normalize multi-currency report totals', icon: DollarSign },
+  { key: 'users', title: 'Users', description: 'Team roster, roles, deactivation', icon: UsersIcon },
+  { key: 'audit', title: 'Audit Log', description: 'Who changed what, and when', icon: ClipboardList },
+];
 
 export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) {
   const {
     user, hasAccess, taxRates, setTaxRates, users, createUser, updateUserProfile,
     company, setCompany, emailTemplates, setEmailTemplates, products, setProducts, leads, deals,
-    activities, setActivities,
+    activities, setActivities, settingsCatalogs, setSettingsCatalogs,
   } = useApp();
-  const [tab, setTab] = useState<Tab>(initialTab ?? 'tax');
+  const [tab, setTab] = useState<Tab>(initialTab ?? 'directory');
   const [editing, setEditing] = useState<TaxRate | null>(null);
   const [open, setOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
@@ -184,19 +208,61 @@ export default function SettingsPage({ initialTab }: { initialTab?: Tab } = {}) 
   return (
     <div className="space-y-5">
       {notice && <div role="status" className="rounded-lg border border-win/30 bg-win/10 px-4 py-2 text-sm text-win">{notice}<button className="float-right" onClick={() => setNotice('')} aria-label="Dismiss notice">×</button></div>}
-      <div className="glass rounded-2xl p-4 flex items-center gap-3 border-l-4 border-l-brand-400">
-        <ShieldAlert size={18} className="text-brand-400" />
-        <div className="text-sm">
-          <span className="text-white font-semibold">Admin-protected module.</span>{' '}
-          <span className="text-muted">Changes to tax rates and global parameters affect all invoices and MIRA reports.</span>
-        </div>
-      </div>
 
-      <PageToolbar name="settings">
-        <ViewModeSwitcher label="Settings sections" role="group" value={tab} onChange={setTab}
-          className="w-fit overflow-x-auto no-scrollbar"
-          options={tabs.map((item) => ({ value: item.key, label: item.label, Icon: item.icon }))} />
-      </PageToolbar>
+      {tab !== 'directory' && (
+        <PageToolbar name="settings">
+          <button type="button" className="btn-ghost !p-2" onClick={() => setTab('directory')}
+            aria-label="Back to settings" title="Back to settings">
+            <ArrowLeft size={17} />
+          </button>
+          {tabs.some((item) => item.key === tab) && (
+            <ViewModeSwitcher label="Settings sections" role="group" value={tab} onChange={setTab}
+              className="w-fit overflow-x-auto no-scrollbar"
+              options={tabs.map((item) => ({ value: item.key, label: item.label, Icon: item.icon }))} />
+          )}
+        </PageToolbar>
+      )}
+
+      {tab === 'directory' && (
+        <section aria-labelledby="settings-directory-heading" className="space-y-4">
+          <p id="settings-directory-heading" className="text-sm text-muted">
+            Manage shared lists, team access, and system configuration.
+          </p>
+          <div className="space-y-2">
+            {settingsSections.map(({ key, title, description, icon: Icon }) => (
+              <button
+                type="button"
+                key={key}
+                onClick={() => setTab(key)}
+                className="group flex w-full items-center gap-4 rounded-xl border border-ink-700 bg-ink-900/50 p-4 text-left transition hover:border-brand-400/40 hover:bg-ink-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+                aria-label={`${title}: ${description}`}
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-brand-400/20 bg-brand-400/10 text-brand-300">
+                  <Icon size={18} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-white">{title}</span>
+                  <span className="mt-0.5 block text-xs text-muted">{description}</span>
+                </span>
+                <ChevronRight size={18} aria-hidden="true" className="shrink-0 text-muted transition group-hover:translate-x-0.5 group-hover:text-white" />
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {tab !== 'directory' && !tabs.some((item) => item.key === tab) && (
+        <SettingsCatalogManager
+          section={tab as 'tags' | 'lead-sources' | 'price-books' | 'competitors' | 'payee-accounts' | 'notices' | 'strategic-goals' | 'exchange-rates'}
+          title={settingsSections.find((section) => section.key === tab)?.title ?? 'Settings'}
+          description={settingsSections.find((section) => section.key === tab)?.description ?? ''}
+          catalogs={settingsCatalogs}
+          setCatalogs={setSettingsCatalogs}
+          products={products}
+          onAudit={logSystemAudit}
+          onNotice={setNotice}
+        />
+      )}
 
       {tab === 'general' && (
         <div className="glass rounded-2xl p-5 space-y-4">
@@ -634,29 +700,42 @@ function ProductManagement({
           </div>
           <button type="button" className="btn-primary !py-1.5" onClick={startAdd}><Plus size={14} /> Add Product</button>
         </div>
-        <div className="fit-wrap product-list-fit w-full max-w-full min-w-0">
-          <table className="table-fixed w-full text-sm">
-            <colgroup>{Array.from({ length: 10 }, (_, index) => <col key={index} />)}</colgroup>
-            <thead className="text-[11px] tracking-wider text-muted border-b border-ink-600">
-              <tr><th className="text-left px-3 py-2">Class</th><th className="text-left px-3 py-2">Product Code</th><th className="text-left px-3 py-2">Description</th><th className="text-right px-3 py-2">Brokerage %</th><th className="text-left px-3 py-2">Mandatory</th><th className="text-left px-3 py-2">Pipeline Model</th><th className="text-left px-3 py-2">Sales Cycle / Velocity</th><th className="text-left px-3 py-2">Risk Level</th><th className="text-left px-3 py-2">Key Underwriting Intake Artifacts</th><th className="text-left px-3 py-2">Actions</th></tr>
-            </thead>
-            <tbody>
-              {products.map((product) => (
-                <tr key={product.code} className="border-b border-ink-700/60">
-                  <td data-label="Class" className="text-muted">{product.classType}</td>
-                  <td data-label="Product Code" className="text-white font-medium">{product.code}</td>
-                  <td data-label="Description" className="text-muted">{product.description || product.name}</td>
-                  <td data-label="Brokerage %" className="text-brand-300">{product.standardBrokerageRatePct}%</td>
-                  <td data-label="Mandatory"><Badge variant={product.isStatutoryMandatory ? 'hot' : 'muted'}>{product.isStatutoryMandatory ? 'Yes' : 'No'}</Badge></td>
-                  <td data-label="Pipeline Model" className="text-muted">Shared product-filtered</td>
-                  <td data-label="Sales Cycle / Velocity" className="text-muted">{product.salesCycleVelocity ?? '14–30 Days'}</td>
-                  <td data-label="Risk Level"><Badge variant={product.riskLevel === 'Very High' || product.riskLevel === 'High' ? 'hot' : product.riskLevel === 'Low' ? 'cold' : 'muted'}>{product.riskLevel ?? 'Medium'}</Badge></td>
-                  <td data-label="Key Underwriting Intake Artifacts" className="text-muted whitespace-normal">{product.keyUnderwritingIntakeArtifacts ?? 'Completed proposal form, asset/risk schedule and prior claims history'}</td>
-                  <td data-label="Actions"><div className="flex justify-end gap-1"><button type="button" className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white" onClick={() => startEdit(product)} aria-label={`Edit ${product.name}`}><Pencil size={14} /></button><button type="button" className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-hot" onClick={() => handleDeleteProduct(product)} aria-label={`Delete ${product.name}`} title={builtInCodes.has(product.code) ? 'Seeded NM CODES products cannot be deleted' : 'Delete custom product'}><Trash2 size={14} /></button></div></td>
+        <div className="product-list-scroll">
+          <div className="fit-wrap product-list-fit w-full max-w-full min-w-0">
+            <table className="table-fixed w-full leading-tight">
+              <colgroup>{Array.from({ length: 10 }, (_, index) => <col key={index} />)}</colgroup>
+              <thead className="border-b border-ink-600 font-semibold text-muted">
+                <tr>
+                  <th scope="col" className="px-1 py-2 text-left">Class</th>
+                  <th scope="col" className="px-1 py-2 text-left">Product Code</th>
+                  <th scope="col" className="px-1 py-2 text-right">Brokerage %</th>
+                  <th scope="col" className="px-1 py-2 text-left">Description</th>
+                  <th scope="col" className="px-1 py-2 text-left">Mandatory</th>
+                  <th scope="col" className="px-1 py-2 text-left">Pipeline Model</th>
+                  <th scope="col" className="px-1 py-2 text-left">Sales Cycle</th>
+                  <th scope="col" className="px-1 py-2 text-left">Risk Level</th>
+                  <th scope="col" className="px-1 py-2 text-left">Key Underwriting Intake Artifacts</th>
+                  <th scope="col" className="px-1 py-2 text-left">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {products.map((product) => (
+                  <tr key={product.code} className="border-b border-ink-700/60">
+                    <td data-label="Class" className="px-2 py-2 font-normal text-muted">{product.classType}</td>
+                    <td data-label="Product Code" className="px-2 py-2 font-semibold text-white">{product.code}</td>
+                    <td data-label="Brokerage %" className="px-2 py-2 text-right font-normal text-brand-300">{product.standardBrokerageRatePct}%</td>
+                    <td data-label="Description" className="px-2 py-2 font-normal text-muted">{product.description || product.name}</td>
+                    <td data-label="Mandatory" className="px-2 py-2"><Badge variant={product.isStatutoryMandatory ? 'hot' : 'muted'}>{product.isStatutoryMandatory ? 'Yes' : 'No'}</Badge></td>
+                    <td data-label="Pipeline Model" className="px-2 py-2 font-normal text-muted">Shared product-filtered</td>
+                    <td data-label="Sales Cycle / Velocity" className="px-2 py-2 font-normal text-muted">{product.salesCycleVelocity ?? '14–30 Days'}</td>
+                    <td data-label="Risk Level" className="px-2 py-2"><Badge variant={product.riskLevel === 'Very High' || product.riskLevel === 'High' ? 'hot' : product.riskLevel === 'Low' ? 'cold' : 'muted'}>{product.riskLevel ?? 'Medium'}</Badge></td>
+                    <td data-label="Key Underwriting Intake Artifacts" className="px-2 py-2 font-normal text-muted whitespace-normal">{product.keyUnderwritingIntakeArtifacts ?? 'Completed proposal form, asset/risk schedule and prior claims history'}</td>
+                    <td data-label="Actions" className="px-1 py-2 text-right"><div className="flex justify-end gap-1"><button type="button" className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white" onClick={() => startEdit(product)} aria-label={`Edit ${product.name}`}><Pencil size={14} /></button><button type="button" className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-hot" onClick={() => handleDeleteProduct(product)} aria-label={`Delete ${product.name}`} title={builtInCodes.has(product.code) ? 'Seeded NM CODES products cannot be deleted' : 'Delete custom product'}><Trash2 size={14} /></button></div></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
       <Modal open={Boolean(form)} onClose={() => { setForm(null); setEditing(null); setError(''); }} title={editing ? 'Edit Product' : 'Add Product'} subtitle="Update the master product classification matrix." size="lg" footer={<><button type="button" className="btn-ghost" onClick={() => { setForm(null); setEditing(null); setError(''); }}>Cancel</button><button type="submit" form="product-form" className="btn-primary"><Check size={14} /> Save Product</button></>}>

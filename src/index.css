@@ -118,14 +118,8 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   overflow-wrap: anywhere;
 }
 
-.fit-wrap .pill,
-.fit-wrap .lead-table-status {
+.fit-wrap .pill {
   font-size: 0.85em;
-}
-
-.fit-wrap .lead-table-status {
-  height: auto;
-  white-space: normal;
 }
 
 @container (min-width: 900px) {
@@ -833,16 +827,38 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
 .fit-wrap.payment-list-fit col:nth-child(8) { width: 14%; }
 .fit-wrap.payment-list-fit col:nth-child(9) { width: 9%; }
 
-.fit-wrap.product-list-fit col:nth-child(1) { width: 9%; }
+.fit-wrap.product-list-fit col:nth-child(1) { width: 7.5%; }
 .fit-wrap.product-list-fit col:nth-child(2) { width: 9%; }
-.fit-wrap.product-list-fit col:nth-child(3) { width: 14%; }
-.fit-wrap.product-list-fit col:nth-child(4) { width: 6%; }
-.fit-wrap.product-list-fit col:nth-child(5) { width: 8%; }
+.fit-wrap.product-list-fit col:nth-child(3) { width: 8.5%; }
+.fit-wrap.product-list-fit col:nth-child(4) { width: 13%; }
+.fit-wrap.product-list-fit col:nth-child(5) { width: 9%; }
 .fit-wrap.product-list-fit col:nth-child(6) { width: 10%; }
-.fit-wrap.product-list-fit col:nth-child(7) { width: 11%; }
+.fit-wrap.product-list-fit col:nth-child(7) { width: 12.5%; }
 .fit-wrap.product-list-fit col:nth-child(8) { width: 8%; }
-.fit-wrap.product-list-fit col:nth-child(9) { width: 19%; }
-.fit-wrap.product-list-fit col:nth-child(10) { width: 6%; }
+.fit-wrap.product-list-fit col:nth-child(9) { width: 17.5%; }
+.fit-wrap.product-list-fit col:nth-child(10) { width: 5%; }
+
+.product-list-scroll {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.fit-wrap.product-list-fit {
+  overflow: visible;
+}
+
+.fit-wrap.product-list-fit th {
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+@container (min-width: 640px) {
+  .fit-wrap.product-list-fit table {
+    min-width: 1200px;
+  }
+}
 
 .fit-wrap.mira-list-fit col:nth-child(1) { width: 5%; }
 .fit-wrap.mira-list-fit col:nth-child(2) { width: 11%; }
@@ -858,8 +874,6 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
 .fit-wrap.invoice-list-fit td,
 .fit-wrap.payment-list-fit th,
 .fit-wrap.payment-list-fit td,
-.fit-wrap.product-list-fit th,
-.fit-wrap.product-list-fit td,
 .fit-wrap.mira-list-fit th,
 .fit-wrap.mira-list-fit td {
   padding: 0.55em 0.35em;
@@ -887,11 +901,20 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   text-align: right;
 }
 
+.quotation-list-fit {
+  container-type: inline-size;
+  overflow-x: auto;
+}
+
+.quotation-list-fit table {
+  font-size: 10px;
+}
+
 @container (min-width: 900px) {
   .fit-wrap.invoice-list-fit table,
   .fit-wrap.payment-list-fit table,
-  .fit-wrap.product-list-fit table {
-    font-size: clamp(9px, calc(0.42cqw + 5px), 20px);
+  .quotation-list-fit table {
+    font-size: clamp(10px, calc(0.55cqw + 5px), 22px);
   }
 
   .fit-wrap.mira-list-fit table {
@@ -919,16 +942,16 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   .fit-wrap.payment-list-fit col:nth-child(8) { width: 14%; }
   .fit-wrap.payment-list-fit col:nth-child(9) { width: 9%; }
 
-  .fit-wrap.product-list-fit col:nth-child(1) { width: 9%; }
+  .fit-wrap.product-list-fit col:nth-child(1) { width: 7.5%; }
   .fit-wrap.product-list-fit col:nth-child(2) { width: 9%; }
-  .fit-wrap.product-list-fit col:nth-child(3) { width: 14%; }
-  .fit-wrap.product-list-fit col:nth-child(4) { width: 6%; }
-  .fit-wrap.product-list-fit col:nth-child(5) { width: 8%; }
+  .fit-wrap.product-list-fit col:nth-child(3) { width: 8.5%; }
+  .fit-wrap.product-list-fit col:nth-child(4) { width: 13%; }
+  .fit-wrap.product-list-fit col:nth-child(5) { width: 9%; }
   .fit-wrap.product-list-fit col:nth-child(6) { width: 10%; }
-  .fit-wrap.product-list-fit col:nth-child(7) { width: 11%; }
+  .fit-wrap.product-list-fit col:nth-child(7) { width: 12.5%; }
   .fit-wrap.product-list-fit col:nth-child(8) { width: 8%; }
-  .fit-wrap.product-list-fit col:nth-child(9) { width: 19%; }
-  .fit-wrap.product-list-fit col:nth-child(10) { width: 6%; }
+  .fit-wrap.product-list-fit col:nth-child(9) { width: 17.5%; }
+  .fit-wrap.product-list-fit col:nth-child(10) { width: 5%; }
 
   .fit-wrap.mira-list-fit col:nth-child(1) { width: 5%; }
   .fit-wrap.mira-list-fit col:nth-child(2) { width: 11%; }
@@ -944,8 +967,6 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   .fit-wrap.invoice-list-fit td,
   .fit-wrap.payment-list-fit th,
   .fit-wrap.payment-list-fit td,
-  .fit-wrap.product-list-fit th,
-  .fit-wrap.product-list-fit td,
   .fit-wrap.mira-list-fit th,
   .fit-wrap.mira-list-fit td {
     padding: 0.45em 0.25em;

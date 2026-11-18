@@ -95,18 +95,18 @@ export default function PaymentsPage() {
 
       <div className="glass min-w-0 rounded-2xl">
         <div className="fit-wrap payment-list-fit w-full max-w-full min-w-0">
-        <table className="table-fixed w-full text-sm">
+        <table className="table-fixed w-full leading-tight">
           <colgroup>{Array.from({ length: 9 }, (_, index) => <col key={index} />)}</colgroup>
-          <thead className="bg-ink-900/60 text-muted text-[11px] tracking-wider">
+          <thead className="bg-ink-900/60 font-semibold text-muted tracking-wider">
             <tr>
-              <th className="text-left px-4 py-3 font-medium">Receipt #</th>
-              <th className="text-left px-4 py-3 font-medium">Invoice</th>
-              <th className="text-left px-4 py-3 font-medium">Client</th>
-              <th className="text-left px-4 py-3 font-medium">Type</th>
-              <th className="text-left px-4 py-3 font-medium">Method</th>
-              <th className="text-left px-4 py-3 font-medium">Date</th>
-              <th className="payment-amount-column text-right px-4 py-3 font-medium">Amount</th>
-              <th className="payment-status-column text-left px-4 py-3 font-medium">Status</th>
+              <th className="text-left px-3 py-2 font-medium">Receipt #</th>
+              <th className="text-left px-3 py-2 font-medium">Invoice</th>
+              <th className="text-left px-3 py-2 font-medium">Client</th>
+              <th className="text-left px-3 py-2 font-medium">Type</th>
+              <th className="text-left px-3 py-2 font-medium">Method</th>
+              <th className="text-left px-3 py-2 font-medium">Date</th>
+              <th className="payment-amount-column text-right px-3 py-2 font-medium">Amount</th>
+              <th className="payment-status-column text-left px-3 py-2 font-medium">Status</th>
               <th></th>
             </tr>
           </thead>
@@ -114,13 +114,13 @@ export default function PaymentsPage() {
             {filtered.map((p) => (
               <tr key={p.id} className="table-row">
                 <td data-label="Receipt #" className="text-brand-400">{p.receiptNo}</td>
-                <td data-label="Invoice" className="text-muted text-xs">{p.invoiceNumber}</td>
+                <td data-label="Invoice" className="text-muted">{p.invoiceNumber}</td>
                 <td data-label="Client" className="text-white">{p.clientName}</td>
-                <td data-label="Type"><Badge variant={p.type === 'Commission' ? 'win' : 'brand'}>{p.type}</Badge></td>
+                <td data-label="Type"><Badge subtle variant={p.type === 'Commission' ? 'win' : 'brand'}>{p.type}</Badge></td>
                 <td data-label="Method" className="text-muted">{p.method}</td>
-                <td data-label="Date" className="text-muted text-xs">{formatDate(p.date)}</td>
+                <td data-label="Date" className="text-muted">{formatDate(p.date)}</td>
                 <td data-label="Amount" className="payment-amount-column text-right text-white font-medium">MVR {p.amount.toLocaleString()}</td>
-                <td data-label="Status" className="payment-status-column"><Badge variant={p.status === 'Completed' ? 'win' : 'warm'} dot>{p.status}</Badge></td>
+                <td data-label="Status" className="payment-status-column"><Badge subtle variant={p.status === 'Completed' ? 'win' : 'warm'}>{p.status}</Badge></td>
                 <td data-label="Actions" className="text-right">
                   <button onClick={() => downloadCsv(`${p.receiptNo}.csv`, ['Receipt #', 'Invoice #', 'Client', 'Amount', 'Type', 'Method', 'Date', 'Status'], [[p.receiptNo, p.invoiceNumber, p.clientName, p.amount, p.type, p.method, p.date, p.status]])} aria-label={`Download receipt ${p.receiptNo}`} className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white"><Download size={14} /></button>
                 </td>

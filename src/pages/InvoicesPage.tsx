@@ -117,18 +117,18 @@ export default function InvoicesPage() {
 
       <div className="glass min-w-0 rounded-2xl">
         <div className="fit-wrap invoice-list-fit w-full max-w-full min-w-0">
-        <table className="table-fixed w-full text-sm">
+        <table className="table-fixed w-full leading-tight">
           <colgroup>{Array.from({ length: 8 }, (_, index) => <col key={index} />)}</colgroup>
-          <thead className="bg-ink-900/60 text-muted text-[11px] tracking-wider">
+          <thead className="bg-ink-900/60 font-semibold text-muted tracking-wider">
             <tr>
-              <th className="text-left px-4 py-3 font-medium">Invoice #</th>
-              <th className="text-left px-4 py-3 font-medium">Client</th>
-              <th className="text-left px-4 py-3 font-medium">Insurer</th>
-              <th className="text-left px-4 py-3 font-medium">Policy</th>
-              <th className="text-left px-4 py-3 font-medium">Issue Date</th>
-              <th className="text-left px-4 py-3 font-medium">Status</th>
-              <th className="invoice-amount-column text-right px-4 py-3 font-medium">Amount</th>
-              <th className="text-right px-4 py-3 font-medium">Actions</th>
+              <th className="text-left px-3 py-2 font-medium">Invoice #</th>
+              <th className="text-left px-3 py-2 font-medium">Client</th>
+              <th className="text-left px-3 py-2 font-medium">Insurer</th>
+              <th className="text-left px-3 py-2 font-medium">Policy</th>
+              <th className="text-left px-3 py-2 font-medium">Issue Date</th>
+              <th className="text-left px-3 py-2 font-medium">Status</th>
+              <th className="invoice-amount-column text-right px-3 py-2 font-medium">Amount</th>
+              <th className="text-right px-3 py-2 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -139,10 +139,10 @@ export default function InvoicesPage() {
                   <td data-label="Invoice #" className="text-brand-400">{inv.number}</td>
                   <td data-label="Client" className="text-white">{inv.clientName}</td>
                   <td data-label="Insurer" className="text-muted">{inv.insurer}</td>
-                  <td data-label="Policy" className="text-muted text-xs">{inv.policyNo}</td>
-                  <td data-label="Issue Date" className="text-muted text-xs">{formatDate(inv.issueDate)}</td>
-                  <td data-label="Status"><Badge variant={statusVariant[inv.status]} dot>{inv.status}</Badge></td>
-                  <td data-label="Amount" className="invoice-amount-column text-right px-4 py-3 text-white font-medium whitespace-nowrap">{inv.currency} {t.total.toLocaleString()}</td>
+                  <td data-label="Policy" className="text-muted">{inv.policyNo}</td>
+                  <td data-label="Issue Date" className="text-muted">{formatDate(inv.issueDate)}</td>
+                  <td data-label="Status"><Badge subtle variant={statusVariant[inv.status]}>{inv.status}</Badge></td>
+                  <td data-label="Amount" className="invoice-amount-column text-right px-3 py-2 text-white font-medium whitespace-nowrap">{inv.currency} {t.total.toLocaleString()}</td>
                   <td data-label="Actions">
                     <div className="flex justify-end gap-1">
                       <button onClick={() => setSelected(inv)} className="p-1.5 rounded-md hover:bg-ink-700 text-muted hover:text-white" title="View"><Eye size={14} /></button>
@@ -184,29 +184,29 @@ export default function InvoicesPage() {
                 <div className="text-white font-semibold">{selected.clientName}</div>
                 <div className="text-xs text-muted">{selected.insurer}</div>
                 <div className="text-xs text-muted mt-1">{selected.policyNo}</div>
-                <div className="mt-2"><Badge variant={statusVariant[selected.status]} dot>{selected.status}</Badge></div>
+                <div className="mt-2"><Badge subtle variant={statusVariant[selected.status]}>{selected.status}</Badge></div>
               </div>
             </div>
 
             <div className="max-w-full overflow-x-auto rounded-xl border border-ink-600">
               <table className="w-full min-w-[480px] text-sm">
-                <thead className="bg-ink-800 text-muted text-[11px]">
+                <thead className="bg-ink-800 text-muted text-xs">
                   <tr>
-                    <th className="text-left px-3 py-2">Description</th>
-                    <th className="text-right px-3 py-2">Qty</th>
-                    <th className="text-right px-3 py-2">Unit Price</th>
-                    <th className="text-right px-3 py-2">VAT</th>
-                    <th className="text-right px-3 py-2">Amount</th>
+                    <th className="text-left px-3 py-1.5">Description</th>
+                    <th className="text-right px-3 py-1.5">Qty</th>
+                    <th className="text-right px-3 py-1.5">Unit Price</th>
+                    <th className="text-right px-3 py-1.5">VAT</th>
+                    <th className="text-right px-3 py-1.5">Amount</th>
                   </tr>
                 </thead>
                 <tbody>
                   {selected.items.map((it, i) => (
                     <tr key={i} className="border-t border-ink-700/60">
-                      <td className="px-3 py-2 text-white">{it.description}</td>
-                      <td className="px-3 py-2 text-right text-muted">{it.qty}</td>
-                      <td className="px-3 py-2 text-right text-muted">{it.unitPrice.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right text-muted">{it.vatRate}%</td>
-                      <td className="px-3 py-2 text-right text-white">{(it.unitPrice * it.qty).toLocaleString()}</td>
+                      <td className="px-3 py-1.5 text-white">{it.description}</td>
+                      <td className="px-3 py-1.5 text-right text-muted">{it.qty}</td>
+                      <td className="px-3 py-1.5 text-right text-muted">{it.unitPrice.toLocaleString()}</td>
+                      <td className="px-3 py-1.5 text-right text-muted">{it.vatRate}%</td>
+                      <td className="px-3 py-1.5 text-right text-white">{(it.unitPrice * it.qty).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -226,7 +226,7 @@ export default function InvoicesPage() {
                         </div>
                         <div className="text-right">
                           <div className="text-sm text-white font-medium">MVR {inst.amount.toLocaleString()}</div>
-                          <Badge variant={inst.paid ? 'win' : 'warm'}>{inst.paid ? 'Paid' : 'Pending'}</Badge>
+                          <Badge subtle variant={inst.paid ? 'win' : 'warm'}>{inst.paid ? 'Paid' : 'Pending'}</Badge>
                         </div>
                       </div>
                     ))}

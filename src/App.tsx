@@ -68,7 +68,7 @@ const placeholders: Partial<Record<NavKey, { title: string; subtitle: string }>>
 };
 
 function Shell() {
-  const { user, authLoading, hasAccess, persistenceError } = useApp();
+  const { user, authLoading, hasAccess, persistenceError, settingsCatalogs } = useApp();
   const [page, setPage] = useState<NavKey>(() => pageFromHash(window.location.hash) ?? 'dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -168,6 +168,12 @@ function Shell() {
         <main className={`min-w-0 w-full max-w-full flex-1 overflow-x-hidden overflow-y-auto p-4 lg:p-6 animate-fadeIn ${
           ['leads', 'calendar', 'vendors', 'qslips', 'renewals', 'funnels', 'pipelines'].includes(page) ? '!pt-1 lg:!pt-2' : ''
         } ${page === 'calendar' || page === 'pipelines' ? 'lg:!overflow-hidden lg:!p-0' : ''}`}>
+          {settingsCatalogs.notices.filter((item) => item.status === 'Published').map((item) => (
+            <aside key={item.id} className="mb-3 rounded-xl border border-brand-400/30 bg-brand-400/10 px-4 py-3" aria-label="Team announcement">
+              <h2 className="text-sm font-semibold text-white">{item.title}</h2>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-muted">{item.body}</p>
+            </aside>
+          ))}
           {renderPage()}
         </main>
       </div>
