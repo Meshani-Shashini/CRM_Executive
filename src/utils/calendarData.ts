@@ -17,6 +17,7 @@ export type CalendarEventKind = 'activity' | 'meeting' | 'deal' | 'lead' | 'rene
 export interface CalendarEvent {
   id: string;
   date: string;
+  time?: string;
   title: string;
   client: string;
   kind: CalendarEventKind;
@@ -39,6 +40,13 @@ export interface CalendarData {
 function storedDate(value?: string) {
   if (!value) return '';
   return normalizeDateInput(value.slice(0, 10));
+}
+
+function storedTime(value?: string) {
+  if (!value?.includes('T')) return undefined;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return undefined;
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
 function dateAfter(value: string, days: number) {
@@ -69,6 +77,7 @@ export function buildCalendarEvents(data: CalendarData): CalendarEvent[] {
     const lead = activity.leadId ? data.leads.find((item) => item.id === activity.leadId) : undefined;
     const client = data.clients.find((item) => item.id === activity.clientId);
     const category = activity.type === 'meeting' ? 'meeting' : 'activity';
+    const time = storedTime(activity.dueDate);
     const target = deal
       ? { route: 'deals' as const, id: deal.id }
       : lead
@@ -80,6 +89,7 @@ export function buildCalendarEvents(data: CalendarData): CalendarEvent[] {
     add({
       id: `activity:${activity.id}`,
       date: storedDate(activity.dueDate),
+      ...(time ? { time } : {}),
       title: activity.title,
       client: deal?.client ?? lead?.client ?? client?.name ?? '',
       kind: category,

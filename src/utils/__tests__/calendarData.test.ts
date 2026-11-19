@@ -136,4 +136,26 @@ describe('buildCalendarEvents', () => {
     });
     expect(events).toEqual([]);
   });
+
+  it('retains the local time of a timed activity', () => {
+    const events = buildCalendarEvents({
+      activities: [{
+        id: 'timed-activity',
+        clientId: 'client-1',
+        type: 'meeting',
+        title: 'Client meeting',
+        description: '',
+        date: '2026-01-01',
+        dueDate: '2026-01-02T19:12:00',
+        userId,
+      }],
+      clients: [makeClient()],
+      deals: [],
+      leads: [],
+      pipelineStages: [],
+      stageHistory: [],
+    });
+
+    expect(events[0]).toMatchObject({ date: '2026-01-02', time: '19:12' });
+  });
 });

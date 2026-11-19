@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { ArrowDown, ArrowUp, CalendarClock, Check, Clock3, Plus, Settings2, Zap } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, Clock3, Plus, Settings2 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { DEAL_PIPELINE_STAGES, getPipelineLossReasons, PIPELINE_TEMPLATES } from '../data/pipelineStageTemplates';
 import { AUTH_BYPASS, TENANT_ID } from '../lib/supabase';
@@ -12,7 +12,7 @@ import { formatDate } from '../utils/date';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile } from '../utils/customerProfile';
 import {
-  getStageSlaElapsedDays, isLostPipelineStage, isStageSlaOverdue, isTerminalDealStage, isWonPipelineStage,
+  getStageSlaElapsedDays, isLostPipelineStage, isTerminalDealStage, isWonPipelineStage,
 } from '../utils/stageSla';
 import { promptQuotationRequestForDeal } from '../utils/navigation';
 import { linkDealToLead } from '../utils/dealFactory';
@@ -91,18 +91,7 @@ function subtractDays(date: string, days: number): string {
   return result.toISOString().slice(0, 10);
 }
 
-function nextActivityBadge(activity: ReturnType<typeof getNextActivity>) {
-  const tone = activity.state === 'overdue' ? 'hot' as const
-    : activity.state === 'future' ? 'win' as const : 'warm' as const;
-  const label = activity.state === 'overdue' ? `Overdue · ${activity.title ?? formatDate(activity.date)}`
-    : activity.state === 'today' ? `Due today · ${activity.title ?? ''}`
-      : activity.state === 'future' ? `${activity.title ?? 'Next activity'} · ${formatDate(activity.date)}`
-        : 'No next activity';
-  return { label, tone };
-}
-
 type HealthState = 'Healthy' | 'At Risk' | 'Rotting';
-type MomentumState = 'Surging' | 'Steady' | 'Stalling' | 'Rotting';
 type IntentTier = NonNullable<Deal['intentTier']>;
 
 function intentForDeal(deal: Deal): IntentTier {
@@ -118,32 +107,6 @@ function dealHealth(elapsed: number | null, threshold: number): HealthState {
   if (elapsed >= threshold * 0.7) return 'At Risk';
   return 'Healthy';
 }
-
-function dealMomentum(elapsed: number | null, threshold: number): MomentumState {
-  if (elapsed === null) return 'Steady';
-  if (threshold <= 0) return elapsed <= 1 ? 'Surging' : 'Steady';
-  if (elapsed >= threshold) return 'Rotting';
-  if (elapsed >= threshold * 0.7) return 'Stalling';
-  if (elapsed >= threshold * 0.4) return 'Steady';
-  return 'Surging';
-}
-
-function dealHealthScore(elapsed: number | null, threshold: number, probability: number) {
-  const probabilityScore = Math.min(100, Math.max(0, probability));
-  const freshnessScore = threshold <= 0
-    ? 100
-    : elapsed === null
-      ? 50
-      : Math.min(100, Math.max(0, 100 * (1 - elapsed / threshold)));
-  return Math.round(probabilityScore * 0.65 + freshnessScore * 0.35);
-}
-
-const momentumVariants: Record<MomentumState, 'win' | 'muted' | 'warm' | 'hot'> = {
-  Surging: 'win',
-  Steady: 'muted',
-  Stalling: 'warm',
-  Rotting: 'hot',
-};
 
 const healthVariants: Record<HealthState, 'win' | 'warm' | 'hot'> = {
   Healthy: 'win',
@@ -624,7 +587,8 @@ export default function PipelinesPage() {
       return (!healthFilter || health === healthFilter) && (!intentFilter || intent === intentFilter);
     });
   const visibleBoardDeals = boardStages.flatMap(visibleDealsForStage);
-  const showBoardPipelineChips = new Set(visibleBoardDeals.map((deal) => deal.pipelineId ?? defaultPipelineId)).size > 1;
+  const showBoardPipelineLabels = new Set(visibleBoardDeals.map((deal) => deal.pipelineId ?? defaultPipelineId)).size > 1;
+  const canDragDeals = user.role === 'admin' || user.role === 'sales';
 
   const moveTitle = activityWarningOnly
     ? 'Confirm stage change'
@@ -735,7 +699,7 @@ export default function PipelinesPage() {
         <>
         <div
           data-testid="pipelines-board"
-          className="grid min-w-0 grid-flow-col grid-rows-1 auto-cols-[minmax(160px,1fr)] gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain [contain:layout] lg:min-h-0 lg:flex-1"
+          className="grid min-w-0 grid-flow-col grid-rows-1 auto-cols-[minmax(320px,1fr)] gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain [contain:layout] lg:min-h-0 lg:flex-1"
         >
           {boardStages.map((stage) => {
             const stageDeals = visibleDealsForStage(stage);
@@ -745,14 +709,29 @@ export default function PipelinesPage() {
               <section
                 key={stage.id}
                 data-testid="pipelines-board-column"
+                onDragOver={(event) => {
+                  if (canDragDeals) {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                  }
+                }}
+                onDrop={(event) => {
+                  if (!canDragDeals) return;
+                  event.preventDefault();
+                  const deal = pipelineDeals.find((item) => item.id === event.dataTransfer.getData('text/deal-id'));
+                  const targetPipelineId = deal?.pipelineId ?? defaultPipelineId;
+                  const target = deal && pipelineStages.find((item) =>
+                    item.pipelineId === targetPipelineId && item.name === stage.name);
+                  if (target) moveDeal(deal.id, target);
+                }}
                 className="flex min-w-0 flex-col border-r border-ink-700 bg-ink-900/40 last:border-r-0"
               >
-                <div data-testid="pipelines-stage-header" className="shrink-0 border-b border-ink-700 px-2 pt-2">
+                <div data-testid="pipelines-stage-header" className="flex h-20 shrink-0 flex-col justify-between border-b border-ink-700 px-2 py-2">
                   <div className="flex items-start gap-2">
                     <h3 className="min-w-0 flex-1 line-clamp-2 text-sm font-semibold text-white">{stage.name}</h3>
                     <Badge variant="muted">{stageDeals.length}</Badge>
                   </div>
-                  <div className="pb-2 pt-1 text-[10px] text-muted">
+                  <div className="min-w-0 truncate whitespace-nowrap text-[10px] text-muted">
                     {stage.winProbabilityPct}% win · {formatAmount(totalMvr, 'MVR')} · {stageDeals.length} deal{stageDeals.length === 1 ? '' : 's'}
                   </div>
                 </div>
@@ -761,83 +740,54 @@ export default function PipelinesPage() {
                   className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-y-contain p-2"
                 >
                   {stageDeals.map((deal) => {
-                    const dealStages = pipelineStages
-                      .filter((item) => item.pipelineId === (deal.pipelineId ?? defaultPipelineId))
-                      .sort((left, right) => left.stageOrder - right.stageOrder);
                     const dealStage = stageForDeal(deal);
                     const elapsed = dealStage ? stageElapsedDays(deal.id, dealStage) : null;
                     const targetDays = isTerminalDealStage(deal.stage, deal.disposition, dealStage) ? 0 : dealStage?.stagnationDaysThreshold ?? stage.stagnationDaysThreshold;
                     const health = dealHealth(elapsed, targetDays);
-                    const activeHistory = historyForDeal(deal.id).find((entry) => entry.toStageId === dealStage?.id && !entry.exitedAt);
-                    const enteredAt = activeHistory?.enteredAt ?? deal.stageChangedAt ?? deal.createdAt;
-                    const slaOverdue = isStageSlaOverdue(enteredAt, targetDays, now);
-                    const momentum = dealMomentum(elapsed, targetDays);
                     const intent = intentForDeal(deal);
-                    const score = dealHealthScore(elapsed, targetDays, deal.probability);
-                    const recentHistory = historyForDeal(deal.id)[0];
-                    const linkedLeadId = leads.find((lead) => lead.id === deal.leadId || lead.dealId === deal.id)?.id;
-                    const nextActivity = nextActivityBadge(getNextActivity(activities, {
-                      dealId: deal.id,
-                      leadId: linkedLeadId ?? deal.leadId,
-                    }));
+                    const healthLabel = health === 'Healthy' ? 'On track' : health === 'At Risk' ? 'At risk' : 'Overdue';
+                    const pipelineName = pipelineShortLabel(pipelines.find((pipeline) =>
+                      pipeline.id === (deal.pipelineId ?? defaultPipelineId)));
+                    const displayDate = deal.renewalExpiry ?? deal.closeDate;
+                    const dateLabel = deal.renewalExpiry ? 'Renewal' : 'Close';
+                    const formattedAmount = formatAmount(deal.value, deal.currency);
+                    const canDragDeal = canDragDeals && !isTerminalDealStage(deal.stage, deal.disposition, dealStage);
                     return (
                       <article
                         key={deal.id}
                         data-testid="pipeline-deal-card"
-                        className={`min-w-0 rounded-xl border bg-ink-800/80 p-2.5 ${health === 'Rotting' ? 'border-hot/70 shadow-[0_0_0_1px_rgba(255,70,70,0.15)]' : health === 'At Risk' ? 'border-warm/60' : 'border-ink-600'}`}
+                        draggable={canDragDeal}
+                        onDragStart={(event) => {
+                          event.dataTransfer.setData('text/deal-id', deal.id);
+                          event.dataTransfer.effectAllowed = 'move';
+                        }}
+                        className={`min-w-0 space-y-2 rounded-xl border bg-ink-800/80 p-4 ${health === 'Rotting' ? 'border-hot/50' : health === 'At Risk' ? 'border-warm/50' : 'border-ink-600'} ${canDragDeal ? 'cursor-grab active:cursor-grabbing' : ''}`}
                       >
-                        <div className="flex min-w-0 items-start justify-between gap-1.5">
-                          <div className="line-clamp-2 min-w-0 flex-1 text-[13px] font-semibold leading-snug text-white" title={deal.client}>{deal.client}</div>
-                          <div
-                            className={`pill shrink-0 !gap-1 border !px-1.5 !py-0.5 ${
-                              score >= 75 ? 'border-win/40 bg-win/10 text-win' : score >= 45 ? 'border-warm/40 bg-warm/10 text-warm' : 'border-hot/40 bg-hot/10 text-hot'
-                            }`}
-                            title="Rule-based health estimate from win probability and stage-age threshold; not an AI-generated prediction."
-                            aria-label={`Estimated deal health score ${score} out of 100`}
-                          >
-                            <Zap size={11} /> {score}
-                          </div>
-                        </div>
-                        <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted" title={`${deal.product} · ${deal.insurer}`}>{deal.product} · {deal.insurer}</div>
-                        {deal.renewalExpiry && <div className="mt-1 text-[10px] leading-tight text-warm">Renewal due {formatDate(deal.renewalExpiry)}</div>}
-                        {showBoardPipelineChips && <span data-testid="pipeline-deal-card-pipeline" className="mt-1 inline-flex max-w-full truncate rounded-full border border-ink-600 px-1.5 py-0.5 text-[9px] leading-tight text-muted" title={pipelines.find((pipeline) => pipeline.id === (deal.pipelineId ?? defaultPipelineId))?.name}>{pipelineShortLabel(pipelines.find((pipeline) => pipeline.id === (deal.pipelineId ?? defaultPipelineId)))}</span>}
                         <div
                           data-testid="pipeline-deal-card-badges"
-                          className="mt-2 flex min-w-0 flex-wrap items-start gap-1 [&_.pill]:max-w-full [&_.pill]:min-w-0 [&_.pill]:!whitespace-normal [&_.pill]:!px-1.5 [&_.pill]:!py-0.5 [&_.pill]:!text-[9px] [&_.pill]:!leading-tight [&_.pill]:[overflow-wrap:anywhere]"
+                          className="flex min-w-0 items-center gap-1.5 [&_.pill]:max-w-full [&_.pill]:min-w-0 [&_.pill]:!whitespace-nowrap [&_.pill]:!px-2 [&_.pill]:!py-1 [&_.pill]:!text-[11px] [&_.pill]:!leading-tight"
                         >
-                          <Badge variant={momentumVariants[momentum]} dot>{momentum}</Badge>
-                          <Badge variant={intentVariants[intent]}>{intent}: {intentLabels[intent]}</Badge>
-                          <Badge variant={healthVariants[health]}>{health === 'At Risk' ? 'At Risk' : health}</Badge>
-                          {slaOverdue && <Badge variant="hot"><Clock3 size={10} className="shrink-0" /> SLA overdue</Badge>}
-                          <Badge variant={nextActivity.tone} dot><CalendarClock size={10} className="shrink-0" /> {nextActivity.label}</Badge>
+                          <Badge variant={healthVariants[health]}>{healthLabel}</Badge>
+                          <Badge variant={showBoardPipelineLabels ? 'muted' : intentVariants[intent]}>
+                            <span className="block min-w-0 truncate" title={showBoardPipelineLabels ? pipelineName : `Priority ${intent}: ${intentLabels[intent]}`}>
+                              {showBoardPipelineLabels ? pipelineName : intent}
+                            </span>
+                          </Badge>
                         </div>
-                        <div data-testid="pipeline-deal-card-value" className="mt-2 min-w-0 border-t border-ink-700/80 pt-2">
-                          <div className="min-w-0 whitespace-nowrap text-[11px] font-semibold leading-tight tabular-nums text-white" title={formatAmount(deal.value, deal.currency)}>
-                            {formatAmount(deal.value, deal.currency)}
-                          </div>
-                          {deal.currency === 'USD' && (
-                            <div
-                              className="mt-1 whitespace-nowrap text-[9px] leading-tight tabular-nums text-muted"
-                              title={formatAmount(toMvr(deal.value, deal.currency, deal.exchangeRate), 'MVR')}
-                            >
-                              {formatAmount(toMvr(deal.value, deal.currency, deal.exchangeRate), 'MVR')}
-                            </div>
-                          )}
-                          <div className="mt-1 text-right text-[10px] font-medium leading-tight text-brand-400">{deal.probability}% win chance</div>
+                        <div data-testid="pipeline-deal-card-title" className="min-w-0 break-words text-sm font-semibold leading-snug text-white" title={deal.client}>
+                          {deal.client}
                         </div>
-                        <div data-testid="pipeline-deal-card-stage-age" className="mt-2 flex min-w-0 items-center justify-between gap-2 text-[9px] leading-tight text-muted">
-                          <span className="min-w-0 flex-1">{elapsed === null ? 'Stage age unavailable' : `${elapsed} day${elapsed === 1 ? '' : 's'} in stage`}</span>
-                          {recentHistory?.lossReason && <span className="min-w-0 max-w-[50%] truncate text-right text-hot" title={recentHistory.lossReason}>{recentHistory.lossReason}</span>}
+                        <div data-testid="pipeline-deal-card-subtitle" className="min-w-0 line-clamp-2 break-words text-xs leading-snug text-muted" title={`${deal.product} · ${deal.insurer}`}>
+                          {deal.product} · {deal.insurer}
                         </div>
-                        <label data-testid="pipeline-deal-card-action" className="mt-2 block min-w-0">
-                          <span className="sr-only">Move {deal.client} to stage</span>
-                          <select className="input !min-w-0 !w-full !py-1.5 !text-[10px]" value={stage.id} onChange={(event) => {
-                            const target = dealStages.find((item) => item.id === event.target.value);
-                            if (target) moveDeal(deal.id, target);
-                          }}>
-                            {dealStages.map((item) => <option key={item.id} value={item.id}>Move to: {item.name}</option>)}
-                          </select>
-                        </label>
+                        <div data-testid="pipeline-deal-card-value" className="flex min-w-0 items-center justify-between gap-3 border-t border-ink-700/80 pt-2">
+                          <span className="min-w-0 shrink-0 whitespace-nowrap text-xs font-semibold leading-tight tabular-nums text-white" title={formattedAmount} aria-label={formattedAmount}>
+                            {formattedAmount}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate whitespace-nowrap text-right text-[11px] leading-tight text-muted" title={`${dateLabel} ${formatDate(displayDate)}`}>
+                            {dateLabel} {formatDate(displayDate)}
+                          </span>
+                        </div>
                       </article>
                     );
                   })}

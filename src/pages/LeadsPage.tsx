@@ -33,7 +33,6 @@ import {
 import { formatStaffIdentifier } from '../utils/staff';
 import { buildLeadConversion } from '../utils/leadConversion';
 import { getNextActivity } from '../utils/nextActivity';
-import { getLeadStageSla } from '../utils/leadStageSla';
 
 const tableBadgeClass = 'inline-flex h-5 items-center whitespace-nowrap rounded-full px-2 text-[9px] font-medium leading-none tracking-wide';
 
@@ -94,20 +93,6 @@ function NextActivityIndicator({ state, date, title, compact = false }: {
   return <span className={`inline-flex min-w-0 items-center gap-1.5 ${tone}`} title={`${title ?? label}${date ? ` · ${label}` : ''}`}>
     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
     {!compact && <span className="truncate">{label}</span>}
-  </span>;
-}
-
-function LeadStageSlaIndicator({ lead, stage, targets }: {
-  lead: Lead;
-  stage: LeadLifecycleStage;
-  targets: ReturnType<typeof useApp>['company']['leadStageSlaDays'];
-}) {
-  if (!LEAD_ACTIVE_STAGES.includes(stage as (typeof LEAD_ACTIVE_STAGES)[number])) return null;
-  const sla = getLeadStageSla(lead, stage, targets);
-  if (!sla) return null;
-  return <span className="inline-flex items-center gap-1 text-[10px] text-muted">
-    {Math.floor(sla.elapsedDays)}d in stage
-    {sla.overdue && <Badge variant="hot">Overdue</Badge>}
   </span>;
 }
 
@@ -746,8 +731,6 @@ export default function LeadsPage() {
         <div className="grid min-w-[1820px] grid-cols-7 gap-3">
           {leadsByBoardStage.map(({ stage, leads: stageLeads }) => {
             const StageIcon = boardStageIcon(stage);
-            const aggregateMvr = stageLeads.reduce((total, lead) => total + (lead.valueMvr ?? toMvr(lead.value ?? lead.premium, lead.currency ?? 'MVR', lead.exchangeRate)), 0);
-            const showAggregate = stage === 'Contact Made' || stage === 'Intro Email Sent';
             return <section key={stage} className="min-w-0 rounded-xl border border-ink-700 bg-ink-900/55 p-2.5"
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => {
@@ -758,22 +741,22 @@ export default function LeadsPage() {
               }}>
               <header className="mb-2 flex min-h-11 items-start justify-between gap-2 px-1">
                 <div className="flex items-center gap-2 text-sm font-semibold text-white"><StageIcon size={15} className="shrink-0 text-brand-300" /><h2>{stage}</h2></div>
-                <Badge variant="muted">{stageLeads.length}</Badge>
               </header>
-              {showAggregate && <div className="mb-2 rounded-lg border border-brand-400/15 bg-brand-400/5 px-2.5 py-2">
-                <div className="text-[10px] tracking-wide text-muted">Aggregate MVR value</div>
-                <div className="text-sm font-semibold text-brand-200">{formatAmount(aggregateMvr, 'MVR')}</div>
-              </div>}
               <div className="max-h-[calc(100vh-300px)] min-h-48 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
                 {stageLeads.map((lead) => {
                   const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? formatStaffIdentifier(lead.ownerId);
-                  const product = PRODUCT_CODES.find((item) => item.code === lead.productCode);
-                  const CompanyIcon = lead.status === 'COMPLETED' ? CheckCircle2 : CircleDot;
                   const isLinked = Boolean((lead.dealId && linkedDealIds.has(lead.dealId)) || linkedLeadIds.has(lead.id));
                   const currentStage = boardStageForLead(lead, linkedDealIds, linkedLeadIds);
                   const isTerminal = isTerminalLeadStage(currentStage);
-                  const linkedDeal = deals.find((deal) => deal.id === lead.dealId || deal.leadId === lead.id);
-                  const nextActivity = getNextActivity(activities, { leadId: lead.id, dealId: linkedDeal?.id });
+                  const activityStatusClass = lead.status === 'BACKLOG'
+                    ? 'border-slate-400/20 bg-slate-400/10 text-slate-300'
+                    : lead.status === 'IN-PROGRESS'
+                      ? 'border-blue-400/20 bg-blue-400/10 text-blue-300'
+                      : lead.status === 'TO-DO'
+                        ? 'border-amber-400/20 bg-amber-400/10 text-amber-300'
+                        : 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300';
+                  const firstDate = formatDate(lead.startDate ?? lead.start_date ?? lead.createdAt ?? lead.created_at).replace(/-/g, ' ');
+                  const secondDate = formatDate(lead.closeDate ?? lead.renewalDate).replace(/-/g, ' ');
                   return <article key={lead.id} draggable={!isLinked && !isTerminal}
                     onDragStart={(event) => {
                       event.dataTransfer.setData('text/lead-id', lead.id);
@@ -781,43 +764,31 @@ export default function LeadsPage() {
                     }}
                     onClick={() => setInspectedLeadId(lead.id)}
                     className={`rounded-lg border border-ink-700 bg-ink-800/80 p-3 shadow-sm transition hover:border-brand-400/50 ${isLinked ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'}`}>
-                    <div className="mb-2 flex items-start justify-between gap-2">
-                      <button type="button" onClick={(event) => { event.stopPropagation(); setInspectedLeadId(lead.id); }} className="min-w-0 text-left">
-                        <h3 className="truncate text-sm font-bold text-white">{lead.title ?? `${lead.client} lead`}</h3>
-                      </button>
-                      <CompanyIcon size={15} className={lead.status === 'COMPLETED' ? 'shrink-0 text-emerald-400' : lead.temperature === 'HOT' ? 'shrink-0 text-hot' : 'shrink-0 text-brand-300'} aria-label={lead.status === 'COMPLETED' ? 'Completed' : lead.temperature === 'HOT' ? 'Hot lead' : 'Active lead'} />
-                    </div>
-                    <div className="truncate text-xs text-muted">{lead.client}</div>
-                    <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#1E2024] text-[9px] font-semibold text-[#8E95A2]">{avatarCode(ownerName)}</span><span className="truncate">Rep: {ownerName}</span></div>
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      <ProductCodePill code={product?.code ?? lead.productCode} name={product?.name} />
+                    <div className="mb-3 flex items-center justify-between gap-2">
                       <LeadTemperatureControl
                         leadName={lead.title ?? lead.client}
                         temperature={lead.temperature ?? 'WARM'}
                         disabled={activeRole !== 'admin' && activeRole !== 'sales'}
+                        compact
                         onChange={(temperature) => updateLeadTemperature(lead, temperature)}
                       />
-                      <Badge variant={lead.status === 'TO-DO' ? 'todo' : lead.status === 'BACKLOG' ? 'backlog' : lead.status === 'IN-PROGRESS' ? 'in-progress' : 'win'}>{lead.status}</Badge>
+                      <span className={`inline-flex h-5 items-center rounded-full border px-2 text-[9px] font-semibold leading-none tracking-wide ${activityStatusClass}`}>{lead.status}</span>
                     </div>
-                    <div className="mt-2 flex items-center justify-between border-t border-ink-700/80 pt-2 text-[11px]">
-                      <span className="text-muted">MVR value</span>
-                      <span className="font-medium text-white">{formatAmount(lead.valueMvr ?? toMvr(lead.value ?? lead.premium, lead.currency ?? 'MVR', lead.exchangeRate), 'MVR')}</span>
+                    <div className="mb-3 flex min-w-0 items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[10px] font-medium text-muted">{lead.client}</div>
+                        <h3 className="truncate text-[13px] font-bold leading-5 text-white">{lead.title ?? `${lead.client} lead`}</h3>
+                      </div>
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink-700 text-[10px] font-semibold text-slate-200" aria-label={`Owner: ${ownerName}`} title={ownerName}>{avatarCode(ownerName)}</span>
                     </div>
-                    <div className="mt-1 text-[10px] text-muted">Expected close {formatDate(lead.closeDate ?? lead.renewalDate)}</div>
-                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[10px]">
-                      <LeadStageSlaIndicator lead={lead} stage={currentStage} targets={company.leadStageSlaDays} />
-                      <NextActivityIndicator {...nextActivity} compact />
+                    <div className="flex items-center justify-between gap-2 border-t border-ink-700/70 pt-2 text-[10px] text-muted">
+                      {[firstDate, secondDate].map((date, index) => (
+                        <span key={index} className="flex min-w-0 items-center gap-1">
+                          <CalendarDays size={11} className="shrink-0 text-muted/80" aria-hidden="true" />
+                          <span className="truncate">{date}</span>
+                        </span>
+                      ))}
                     </div>
-                    <label className="mt-2 block">
-                      <span className="sr-only">Move {lead.title ?? lead.client} to stage</span>
-                      <select className="input !min-h-8 !py-1 text-[11px]" value={currentStage} disabled={isLinked || isTerminal} onClick={(event) => event.stopPropagation()} onChange={(event) => moveLeadToStage(lead, event.target.value as LeadLifecycleStage)}>
-                        {LEAD_LIFECYCLE_STAGES.map((item) => <option key={item} value={item}>{item}</option>)}
-                      </select>
-                    </label>
-                    {(user.role === 'admin' || user.role === 'sales') && <div className="mt-2 flex justify-between border-t border-ink-700/80 pt-2">
-                      <button type="button" className="btn-ghost !py-1 text-[11px]" onClick={(event) => { event.stopPropagation(); openEditLead(lead); }}><Pencil size={12} /> Edit</button>
-                      {activeRole === 'admin' && <button type="button" className="btn-ghost !py-1 text-[11px] text-hot" onClick={(event) => { event.stopPropagation(); deleteLead(lead); }}>Delete</button>}
-                    </div>}
                   </article>;
                 })}
                 {stageLeads.length === 0 && <div className="py-8 text-center text-[11px] text-muted/60">No leads in this stage.</div>}

@@ -16,7 +16,7 @@ import TableShell from '../components/table/TableShell';
 import StageMenu from '../components/table/StageMenu';
 import QuotationLineEditor from '../components/quotationRequest/QuotationLineEditor';
 import VendorQuoteComparison from '../components/quotationRequest/VendorQuoteComparison';
-import { OwnerCell, ProductCodePill, StagePill, TableDateCell } from '../components/table/TableCells';
+import { OwnerCell, ProductCodePill, TableDateCell } from '../components/table/TableCells';
 import ActivityTimelineItem from '../components/ActivityTimelineItem';
 import { useApp } from '../store/AppContext';
 import { AUTH_BYPASS, TENANT_ID } from '../lib/supabase';
@@ -2057,6 +2057,14 @@ export default function DealWorkspace({
                     : stage && isBoundStage(stage)
                       ? 'won'
                       : 'neutral';
+                  const stageLabel = dealsPageMode
+                    ? stage?.shortLabel ?? stage?.name ?? deal.stage
+                    : stage?.name ?? deal.stage;
+                  const stagePillTone = stageOutcome === 'lost'
+                    ? 'border-[#4A2020] bg-[#2E1111] text-[#E54848]'
+                    : stageOutcome === 'won'
+                      ? 'border-[#1B5137] bg-[#0D2B1D] text-[#27C272]'
+                      : 'border-[#2A2E35] bg-[#17191C] text-[#E1E2E5]';
                   const stageCell = (
                     <td data-label="Stage" className="whitespace-nowrap px-2 py-2 font-normal text-[#E1E2E5]">
                       <div className="flex min-w-0 items-center gap-1">
@@ -2079,8 +2087,8 @@ export default function DealWorkspace({
                             }
                           }}
                         >
-                          <StagePill stage={dealsPageMode ? stage?.shortLabel ?? stage?.name ?? deal.stage : stage?.name ?? deal.stage}
-                            title={stage?.name ?? deal.stage} outcome={stageOutcome} truncate />
+                          <span className={`inline-flex min-w-0 flex-1 whitespace-normal break-words rounded-full border px-1.5 py-0.5 text-[10px] font-normal leading-tight ${stagePillTone}`}
+                            title={stage?.name ?? deal.stage}>{stageLabel}</span>
                           <span className={`deal-stage-sla ${isOverdue ? 'deal-stage-sla-overdue' : ''}`} title={stage?.stagnationDaysThreshold ? `Stage SLA: ${elapsedDays ?? 0} of ${stage.stagnationDaysThreshold} days` : 'No stage SLA configured'}>
                             {stage?.stagnationDaysThreshold ? `${elapsedDays ?? 0}/${stage.stagnationDaysThreshold}d` : 'No SLA'}
                           </span>
@@ -2229,7 +2237,7 @@ export default function DealWorkspace({
               </label>
             </div>
           </div>
-          {kanbanStages.length ? <div className="deals-fit min-w-0">
+          {kanbanStages.length ? <div className="deals-fit min-w-0 overscroll-x-contain scroll-smooth pb-2">
             <div className="deals-board deals-board-compact grid gap-2">
               {kanbanStages.map((stage) => {
                 const stageDeals = pipelineDealsByStage(stage);
@@ -2252,24 +2260,39 @@ export default function DealWorkspace({
                     <h3 className="truncate text-sm font-semibold text-white">{stage.name}</h3>
                     <p className="mt-1 truncate text-[10px] text-muted">{formatAmount(totalMvr, 'MVR')} · {stageDeals.length} {stageDeals.length === 1 ? 'deal' : 'deals'}</p>
                   </header>
-                  <div className="max-h-[calc(100vh-330px)] min-h-40 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
+                  <div className="max-h-[calc(100vh-330px)] min-h-40 space-y-3 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
                     {stageDeals.map((deal) => {
-                      const nextActivity = activityForDeal(deal);
-                      const ownerName = ownerNameForDeal(deal);
+                      const dealStage = pipelineStages.find((item) =>
+                        item.pipelineId === deal.pipelineId && item.name === deal.stage);
+                      const terminal = isClosedDeal(deal, dealStage);
+                      const status = !terminal ? 'OPEN'
+                        : isWonDeal(deal, dealStage) ? 'WON'
+                          : deal.disposition === 'lost' || dealStage?.isClosedLost ? 'LOST' : 'CLOSED';
+                      const statusClass = status === 'OPEN'
+                        ? 'border-blue-400/20 bg-blue-400/10 text-blue-300'
+                        : status === 'WON'
+                          ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300'
+                          : 'border-red-400/20 bg-red-400/10 text-red-300';
+                      const productCode = products.find((item) => item.code === deal.productCode)?.code ?? deal.productCode;
                       return <article key={deal.id} draggable={canMoveStage} data-deal-id={deal.id}
                         data-deal-value-mvr={toMvr(deal.value, deal.currency, deal.exchangeRate)}
                         onDragStart={(event) => { event.dataTransfer.setData('text/deal-id', deal.id); event.dataTransfer.effectAllowed = 'move'; }}
-                        className="flex min-w-0 cursor-grab items-start gap-2 rounded-lg border border-ink-700 bg-ink-800/80 p-2.5 shadow-sm transition hover:border-brand-400/50 active:cursor-grabbing">
-                        <button type="button" onClick={() => openDealRecord(deal)} className="min-w-0 flex-1 text-left">
-                          <span className="block truncate text-xs font-semibold text-white" title={dealTitle(deal)}>{dealTitle(deal)}</span>
-                          <span className="mt-0.5 block truncate text-[10px] text-muted" title={deal.client}>{deal.client}</span>
-                          {showKanbanPipelineChips && <span className="mt-1 inline-flex max-w-full truncate rounded-full border border-ink-600 px-1.5 py-0.5 text-[9px] leading-tight text-muted" title={pipelines.find((pipeline) => pipeline.id === deal.pipelineId)?.name ?? 'Unknown pipeline'}>{pipelineLabelForDeal(deal)}</span>}
-                          <span className="mt-2 flex min-w-0 items-center gap-1.5">
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#1E2024] text-[9px] font-semibold text-[#D0D3D9]" title={ownerName}>{avatarCode(ownerName)}</span>
-                            <span className="truncate text-[10px] text-brand-300">{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
+                        className="w-full min-w-0 cursor-grab rounded-lg border border-ink-700 bg-ink-800/80 shadow-sm transition hover:border-brand-400/50 active:cursor-grabbing">
+                        <button type="button" onClick={() => openDealRecord(deal)} className="flex w-full min-w-0 flex-col gap-2 px-4 py-3.5 text-left">
+                          <span className="flex w-full min-w-0 items-center gap-1.5">
+                            <span className={`inline-flex h-5 items-center rounded-full border px-2 text-[9px] font-semibold leading-none tracking-wide ${statusClass}`}>{status}</span>
+                            {productCode && <span className="inline-flex h-5 items-center rounded-full border border-ink-600 bg-ink-900/50 px-1.5 text-[9px] font-medium leading-none text-muted">{productCode}</span>}
+                          </span>
+                          <span className="block truncate text-[10px] text-muted" title={deal.client}>{deal.client}</span>
+                          <span className="block min-w-0 whitespace-normal break-words text-xs font-semibold text-white" title={dealTitle(deal)}>{dealTitle(deal)}</span>
+                          <span className="flex w-full min-w-0 items-center justify-between gap-2 border-t border-ink-700/70 pt-2">
+                            <span className="flex min-w-0 items-center gap-1 text-[10px] text-muted" title={formatDate(deal.closeDate)}>
+                              <CalendarDays size={11} className="shrink-0" aria-hidden="true" />
+                              <span className="truncate">{formatDate(deal.closeDate).replace(/-/g, ' ')}</span>
+                            </span>
+                            <span className="shrink-0 whitespace-nowrap text-[10px] font-medium text-brand-300">{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
                           </span>
                         </button>
-                        <span className="mt-0.5 shrink-0" aria-label="Next activity"><DealActivityIndicator activity={nextActivity} compact /></span>
                       </article>;
                     })}
                     {!stageDeals.length && <p className="py-7 text-center text-[11px] text-muted/60">Drop deals here</p>}

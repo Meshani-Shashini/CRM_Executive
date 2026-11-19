@@ -305,7 +305,7 @@ export default function VendorsPage() {
             { value: 'list', label: 'List view', Icon: List },
             { value: 'kanban', label: 'Board view', Icon: Columns3 },
           ]} />
-          {activeRole !== 'finance' && <button type="button" className="btn-primary !px-3 !py-1.5 !text-xs" onClick={openNewVendor}><Plus size={13} /> Vendor</button>}
+          {activeRole !== 'finance' && <button type="button" className="btn-primary !px-3 !py-2" onClick={openNewVendor}><Plus size={14} /> Vendor</button>}
         </div>
         <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
           <Badge variant="brand"><span className="font-semibold">{visibleVendors.length}</span> {visibleVendors.length === 1 ? 'vendor' : 'vendors'}</Badge>
@@ -314,8 +314,8 @@ export default function VendorsPage() {
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search vendors" aria-label="Search vendors" className="input !py-1.5 pl-9 !text-xs" />
           </label>
           <div ref={filtersRef} className="relative">
-            <button type="button" className="btn-ghost !px-3 !py-1.5 !text-xs" aria-label="Filter vendors" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}>
-              <Filter size={13} /> Filter{filterActiveCount > 0 && <Badge variant="brand" compact>{filterActiveCount}</Badge>}
+            <button type="button" className="btn-ghost !py-1.5" aria-label="Filter vendors" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}>
+              <Filter size={14} /> Filter{filterActiveCount > 0 && <Badge variant="brand" compact>{filterActiveCount}</Badge>}
             </button>
             {filtersOpen && <div role="dialog" aria-label="Filter vendors" className="absolute right-0 top-full z-30 mt-2 w-72 rounded-xl border border-ink-600 bg-ink-900 p-4 shadow-2xl">
               <div className="mb-3 flex items-center justify-between">
@@ -358,7 +358,7 @@ export default function VendorsPage() {
         <TableShell className="vendors-table-fit hidden max-h-[calc(100vh-13rem)] overflow-auto md:block">
         {!dataReady ? <div role="status" aria-label="Loading vendors" className="space-y-2 p-3">
           {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-10 animate-pulse rounded-md bg-ink-800/80" />)}
-        </div> : <table aria-label="Vendors" className="vendors-table w-full leading-tight">
+        </div> : <table aria-label="Vendors" className="vendors-table w-full table-fixed leading-tight">
           <colgroup>
             <col style={{ width: '18%' }} /><col style={{ width: '8%' }} /><col style={{ width: '9%' }} />
             <col style={{ width: '8%' }} /><col style={{ width: '18%' }} /><col style={{ width: '11%' }} />
@@ -369,7 +369,7 @@ export default function VendorsPage() {
               {([
                 ['name', 'Vendor Name'], ['vendorType', 'Type'], ['country', 'Country'], ['currency', 'Currency'],
                 ['contact', 'Contact'], ['linkedDeals', 'Linked Deals'], ['quotationRequests', 'Quotation Requests'], ['status', 'Status'],
-              ] as const).map(([key, label]) => <th key={key} scope="col" aria-sort={sortKey === key ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className={`border-b border-[#1B1E22] ${key === 'currency' || key === 'contact' ? 'px-2.5' : 'px-1.5'} py-2 text-left`}>
+              ] as const).map(([key, label]) => <th key={key} scope="col" aria-sort={sortKey === key ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="border-b border-[#1B1E22] px-1 py-2 text-left">
                 <button type="button" className="inline-flex items-center gap-1 text-left hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400" onClick={() => {
                   if (sortKey === key) setSortDirection((direction) => direction === 'asc' ? 'desc' : 'asc');
                   else { setSortKey(key); setSortDirection('asc'); }
@@ -396,21 +396,21 @@ export default function VendorsPage() {
                   event.preventDefault();
                   openRowDetails(event.currentTarget);
                 }
-              }} className="cursor-pointer border-b border-[#1B1E22] text-[#D0D3D9] transition hover:bg-[#111214] focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400">
-                <td data-label="Vendor Name" className="px-1.5 py-2"><span className="flex min-w-0 items-center gap-2">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#292B30] text-[10px] font-semibold text-[#A4A6AE]">{avatarCode(vendor.name)}</span>
+              }} className="cursor-pointer border-b border-[#1B1E22] text-[#D0D3D9] transition hover:bg-[#111214] focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400 last:border-0">
+                <td data-label="Vendor Name" className="px-2 py-2"><span className="flex min-w-0 items-center gap-1.5">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#292B30] text-[9px] font-semibold text-[#A4A6AE]">{avatarCode(vendor.name)}</span>
                   <span className="truncate font-semibold text-white" title={vendor.name}>{vendor.name}</span>
                 </span></td>
-                <td data-label="Type" className="px-1.5 py-2"><Badge variant="cold" compact><span className="truncate uppercase">{vendor.vendorType}</span></Badge></td>
-                <td data-label="Country" className="px-1.5 py-2"><span className="block truncate" title={vendor.country}>{vendor.country || '—'}</span></td>
-                <td data-label="Currency" className="px-2.5 py-2">{vendor.currency || '—'}</td>
-                <td data-label="Contact" className="px-2.5 py-2"><span className="block min-w-0 truncate" title={[contact.name, contact.phone, contact.email].filter(Boolean).join(' · ')}>
+                <td data-label="Type" className="px-2 py-2"><Badge variant="cold" subtle>{vendor.vendorType.toUpperCase()}</Badge></td>
+                <td data-label="Country" className="px-2 py-2"><span className="block truncate" title={vendor.country}>{vendor.country || '—'}</span></td>
+                <td data-label="Currency" className="px-2 py-2">{vendor.currency || '—'}</td>
+                <td data-label="Contact" className="px-2 py-2"><span className="block min-w-0 truncate" title={[contact.name, contact.phone, contact.email].filter(Boolean).join(' · ')}>
                   {contact.name && <span className="block truncate text-white">{contact.name}</span>}
                   {!contact.name && !contact.phone && !contact.email ? '—' : <span className="block truncate text-[10px] text-muted">{[contact.phone, contact.email].filter(Boolean).join(' · ')}</span>}
                 </span></td>
-                <td data-label="Linked Deals" className="px-1.5 py-2"><button type="button" className="text-left text-brand-300 hover:text-white" title={vendorDeals.map((deal) => deal.client).join(', ') || 'No linked deals'} aria-label={`${vendorDeals.length} linked deals for ${vendor.name}`} onClick={(event) => openRowDetails(event.currentTarget)}>{vendorDeals.length} linked {vendorDeals.length === 1 ? 'deal' : 'deals'}</button></td>
-                <td data-label="Quotation Requests" className="px-1.5 py-2"><button type="button" className="text-left text-brand-300 hover:text-white" title={vendorRequests.map(({ line }) => line.reference).join(', ') || 'No quotation requests'} aria-label={`${vendorRequests.length} quotation request lines for ${vendor.name}`} onClick={(event) => openRowDetails(event.currentTarget)}>{vendorRequests.length} lines</button></td>
-                <td data-label="Status" className="px-1.5 py-2"><Badge variant={statusVariant} compact>{vendor.status}</Badge></td>
+                <td data-label="Linked Deals" className="px-2 py-2"><button type="button" className="text-left text-brand-300 hover:text-white" title={vendorDeals.map((deal) => deal.client).join(', ') || 'No linked deals'} aria-label={`${vendorDeals.length} linked deals for ${vendor.name}`} onClick={(event) => openRowDetails(event.currentTarget)}>{vendorDeals.length} linked {vendorDeals.length === 1 ? 'deal' : 'deals'}</button></td>
+                <td data-label="Quotation Requests" className="px-2 py-2"><button type="button" className="text-left text-brand-300 hover:text-white" title={vendorRequests.map(({ line }) => line.reference).join(', ') || 'No quotation requests'} aria-label={`${vendorRequests.length} quotation request lines for ${vendor.name}`} onClick={(event) => openRowDetails(event.currentTarget)}>{vendorRequests.length} lines</button></td>
+                <td data-label="Status" className="px-2 py-2"><Badge variant={statusVariant} subtle>{vendor.status}</Badge></td>
                 <td data-label="Actions" className="px-1 py-2 text-right" onClick={(event) => event.stopPropagation()}>
                   <button type="button" aria-label={`Actions for ${vendor.name}`} aria-haspopup="menu" aria-expanded={actionMenu?.id === vendor.id && Boolean(actionMenu.anchor.closest('table[aria-label="Vendors"]'))} className="btn-ghost !p-1.5" onClick={(event) => setActionMenu(actionMenu?.id === vendor.id ? null : { id: vendor.id, anchor: event.currentTarget })}><MoreHorizontal size={15} /></button>
                   <TableRowActionsMenu open={actionMenu?.id === vendor.id && Boolean(actionMenu.anchor.closest('table[aria-label="Vendors"]'))} anchor={actionMenu?.id === vendor.id ? actionMenu.anchor : null} label={`${vendor.name} actions`}>
@@ -452,11 +452,11 @@ export default function VendorsPage() {
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#292B30] text-[10px] font-semibold text-[#A4A6AE]">{avatarCode(vendor.name)}</span>
                   <div className="min-w-0">
                     <h3 className="break-words text-sm font-bold text-white">{vendor.name}</h3>
-                    <div className="mt-1"><Badge variant="cold" compact>{vendor.vendorType.toUpperCase()}</Badge></div>
+                    <div className="mt-1"><Badge variant="cold" compact><span className="text-[11px]">{vendor.vendorType.toUpperCase()}</span></Badge></div>
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <Badge variant={statusVariant} compact>{vendor.status}</Badge>
+                  <Badge variant={statusVariant} compact><span className="text-[11px]">{vendor.status}</span></Badge>
                   <button type="button" aria-label={`Actions for ${vendor.name}`} aria-haspopup="menu" aria-expanded={actionMenu?.id === vendor.id && Boolean(actionMenu.anchor.closest('[data-testid="vendors-card-grid"]'))} className="btn-ghost !p-1" onClick={(event) => setActionMenu(actionMenu?.id === vendor.id ? null : { id: vendor.id, anchor: event.currentTarget })}><MoreHorizontal size={15} /></button>
                   <TableRowActionsMenu open={actionMenu?.id === vendor.id && Boolean(actionMenu.anchor.closest('[data-testid="vendors-card-grid"]'))} anchor={actionMenu?.id === vendor.id ? actionMenu.anchor : null} label={`${vendor.name} actions`}>
                     <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { drawerTriggerRef.current = actionMenu?.anchor ?? null; setSelectedVendorId(vendor.id); setActionMenu(null); }}><Eye size={13} /> View Details</button>
@@ -475,23 +475,23 @@ export default function VendorsPage() {
                   ['Email', contact.email || '—'],
                   ['Linked Deals', <button type="button" className="text-left text-brand-300 hover:text-white" title={vendorDeals.map((deal) => deal.client).join(', ') || 'No linked deals'} onClick={(event) => { event.stopPropagation(); openDetails(event.currentTarget); }}>{vendorDeals.length} linked {vendorDeals.length === 1 ? 'deal' : 'deals'}</button>],
                   ['Quotation Requests', <button type="button" className="text-left text-brand-300 hover:text-white" title={vendorRequests.map(({ line }) => line.reference).join(', ') || 'No quotation requests'} onClick={(event) => { event.stopPropagation(); openDetails(event.currentTarget); }}>{vendorRequests.length} {vendorRequests.length === 1 ? 'line' : 'lines'}</button>],
-                  ['Status', <Badge variant={statusVariant} compact>{vendor.status}</Badge>],
+                  ['Status', <Badge variant={statusVariant} compact><span className="text-[11px]">{vendor.status}</span></Badge>],
                   ...(vendor.address ? [['Address', vendor.address] as const] : []),
                   ...(vendor.taxId ? [['Tax ID', vendor.taxId] as const] : []),
                   ...(vendor.licenseNo ? [['License', vendor.licenseNo] as const] : []),
                 ] as const).map(([label, value]) => <div key={label} className="min-w-0">
-                  <dt className="mb-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted">{label}</dt>
-                  <dd className="break-words text-xs text-[#E1E2E5]">{value}</dd>
+                  <dt className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</dt>
+                  <dd className="break-words text-[13px] text-[#E1E2E5]">{value}</dd>
                 </div>)}
               </dl>
             </article>;
           })}
         </div>}
       </div>
-      </> : <div className="min-h-[24rem] overflow-x-auto rounded-lg border border-[#1B1E22] bg-ink-950 p-3">
-        <div className="mb-3 flex justify-end">
-          <label className="flex items-center gap-2 text-xs text-muted">Group by
-            <select aria-label="Group vendors by" className="input !w-auto !py-1.5 !text-xs" value={groupBy} onChange={(event) => setGroupBy(event.target.value as VendorGroupBy)}>
+      </> : <div className="min-w-0 min-h-[24rem] overflow-x-auto rounded-lg border border-[#1B1E22] bg-ink-950 p-3">
+        <div className="mb-2 flex min-w-0 items-center justify-end">
+          <label className="flex min-w-0 items-center gap-2 text-xs text-muted">Group by
+            <select aria-label="Group vendors by" className="input !w-auto max-w-full !py-1.5 !text-xs" value={groupBy} onChange={(event) => setGroupBy(event.target.value as VendorGroupBy)}>
               <option value="vendorType">Type</option><option value="status">Status</option><option value="country">Country</option>
             </select>
           </label>
@@ -508,44 +508,40 @@ export default function VendorsPage() {
             event.preventDefault();
             const vendorId = event.dataTransfer.getData('text/vendor-id');
             if (vendorId) updateVendorGroup(vendorId, value);
-          }} className="flex min-h-[22rem] w-[min(82vw,360px)] min-w-[280px] flex-col rounded-xl border border-ink-700 bg-ink-900/55 p-2.5">
-            <header className="mb-2 flex min-h-11 items-start justify-between gap-2 px-1">
-              <h2 className="truncate text-sm font-semibold text-white" title={label}>{label}</h2><Badge variant="muted">{columnVendors.length}</Badge>
+          }} className="flex min-h-[22rem] w-[min(82vw,360px)] min-w-[280px] shrink-0 flex-col rounded-xl border border-ink-700 bg-ink-900/55 px-3 py-2">
+            <header className="mb-2 flex items-center justify-between gap-2">
+              <h2 className="truncate text-sm font-semibold text-white" title={label}>{label}</h2><Badge variant="muted"><span className="text-xs">{columnVendors.length}</span></Badge>
             </header>
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1">
               {columnVendors.map((vendor) => {
-                const contact = getVendorContact(vendor);
                 const vendorDeals = getVendorDeals(vendor, deals);
                 const vendorRequests = getVendorRequests(vendor, quotationRequests);
                 return <article key={vendor.id} draggable={activeRole !== 'finance'} onDragStart={(event) => {
                   setDraggedVendorId(vendor.id);
                   event.dataTransfer.setData('text/vendor-id', vendor.id);
                   event.dataTransfer.effectAllowed = 'move';
-                }} onDragEnd={() => setDraggedVendorId('')} className={`rounded-lg border border-ink-700 bg-ink-800/80 p-3 shadow-sm transition hover:border-brand-400/50 ${draggedVendorId === vendor.id ? 'opacity-50' : ''}`}>
-                  <div className="mb-2 flex min-w-0 items-start gap-2">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#292B30] text-[10px] font-semibold text-[#A4A6AE]">{avatarCode(vendor.name)}</span>
-                    <button type="button" onClick={(event) => { drawerTriggerRef.current = event.currentTarget; setSelectedVendorId(vendor.id); }} className="min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400">
-                      <span className="block truncate text-xs font-semibold text-white" title={vendor.name}>{vendor.name}</span>
-                      <span className="mt-1 block"><Badge variant="cold" compact>{vendor.vendorType.toUpperCase()}</Badge></span>
-                    </button>
-                    <Badge variant={vendor.status === 'active' ? 'win' : 'muted'} compact>{vendor.status}</Badge>
-                  </div>
-                  <div className="space-y-1 text-[10px] text-muted">
-                    <div className="truncate">{vendor.country} · {vendor.currency}</div>
-                    {contact.name && <div className="truncate">{contact.name}</div>}
-                    {contact.phone && <div className="truncate">{contact.phone}</div>}
-                    {contact.email && <div className="truncate">{contact.email}</div>}
-                  </div>
-                  <div className="mt-2 flex items-center justify-between border-t border-ink-700 pt-2 text-[10px] text-muted">
-                    <span>{vendorDeals.length} linked deals · {vendorRequests.length} requests</span>
-                    <div className="flex gap-2">
-                      {activeRole !== 'finance' && <button type="button" aria-label={`Edit vendor ${vendor.name}`} className="text-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400" onClick={() => openEditVendor(vendor)}><Pencil size={14} /></button>}
-                      {activeRole === 'admin' && <button type="button" aria-label={`Delete vendor ${vendor.name}`} className="text-hot focus-visible:outline focus-visible:outline-2 focus-visible:outline-hot" onClick={() => deleteVendor(vendor)}><Trash2 size={14} /></button>}
-                    </div>
-                  </div>
+                }} onDragEnd={() => setDraggedVendorId('')} className={`rounded-lg border border-ink-700 bg-ink-800/80 shadow-sm transition hover:border-brand-400/50 ${draggedVendorId === vendor.id ? 'opacity-50' : ''}`}>
+                  <button type="button" onClick={(event) => { drawerTriggerRef.current = event.currentTarget; setSelectedVendorId(vendor.id); }} className="flex w-full min-w-0 flex-col gap-2 px-3 py-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400">
+                    <span className="flex w-full min-w-0 items-center gap-1.5">
+                      <Badge variant={vendor.status === 'active' ? 'win' : 'muted'} subtle>{vendor.status.toUpperCase()}</Badge>
+                      <Badge variant="cold" subtle>{vendor.vendorType.toUpperCase()}</Badge>
+                    </span>
+                    <span className="block min-w-0 truncate text-[10px] text-muted" title={`${vendor.country} · ${vendor.currency}`}>
+                      {[vendor.country, vendor.currency].filter(Boolean).join(' · ') || 'Location and currency not set'}
+                    </span>
+                    <span className="block min-w-0 whitespace-normal break-words text-xs font-semibold text-white" title={vendor.name}>{vendor.name}</span>
+                    <span className="flex w-full min-w-0 items-center justify-between gap-2 border-t border-ink-700/70 pt-2">
+                      <span className="min-w-0 truncate text-[10px] text-muted" title={`${vendorDeals.length} linked deals`}>
+                        {vendorDeals.length} linked {vendorDeals.length === 1 ? 'deal' : 'deals'}
+                      </span>
+                      <span className="shrink-0 whitespace-nowrap text-[10px] font-medium text-brand-300" title={`${vendorRequests.length} quotation requests`}>
+                        {vendorRequests.length} {vendorRequests.length === 1 ? 'request' : 'requests'}
+                      </span>
+                    </span>
+                  </button>
                 </article>;
               })}
-              {columnVendors.length === 0 && <p className="py-7 text-center text-[11px] text-muted/60">Drop vendors here</p>}
+              {columnVendors.length === 0 && <p className="py-7 text-center text-xs text-muted/60">Drop vendors here</p>}
             </div>
           </section>)}
         </div>}

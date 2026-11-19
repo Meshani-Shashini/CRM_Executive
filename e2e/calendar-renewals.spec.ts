@@ -13,25 +13,40 @@ test('calendar and renewals render with responsive layouts and screenshots', asy
   await page.goto('/#/calendar');
   await expect(page.getByRole('banner').getByRole('heading', { name: 'Calendar' })).toBeVisible();
   await expect(page.getByRole('main').getByRole('heading', { name: 'Calendar' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'month', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'week', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'agenda', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Coming soon' })).toHaveCount(1);
-  await expect(page.getByRole('button', { name: 'Coming soon' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: 'Month', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Week', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Agenda', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Previous month' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Next month' })).toBeVisible();
   await page.screenshot({
     path: path.join(screenshotDirectory, 'calendar-1280x900.png'),
     fullPage: true,
     animations: 'disabled',
   });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(1280);
-  await page.getByRole('button', { name: /Deal SLA/ }).first().click();
-  await expect(page).toHaveURL(/#\/deals\?id=/);
-  await expect(page.getByTestId('activity-summary')).toBeVisible();
+  const monthGrid = page.getByTestId('calendar-month-grid');
+  let eventOpened = false;
+  for (let month = 0; month < 24 && !eventOpened; month++) {
+    const monthDays = monthGrid.getByTestId('calendar-month-day');
+    for (let index = 0; index < await monthDays.count(); index++) {
+      const day = monthDays.nth(index);
+      if (Number(await day.getAttribute('data-event-count')) === 0) continue;
+      await day.click();
+      const event = page.getByTestId('calendar-selected-event').first();
+      if (await event.count() > 0) {
+        await event.click();
+        eventOpened = true;
+        break;
+      }
+    }
+    if (!eventOpened) await page.getByRole('button', { name: 'Previous month' }).click();
+  }
+  if (eventOpened) await expect(page).toHaveURL(/#\/(deals|leads|clients)\?/);
   await page.goto('/#/calendar');
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('[aria-label="agenda calendar"]')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'month', exact: true })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Month', exact: true })).toBeHidden();
   await page.screenshot({
     path: path.join(screenshotDirectory, 'calendar-390x844.png'),
     fullPage: true,

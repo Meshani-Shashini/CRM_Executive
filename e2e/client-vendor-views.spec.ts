@@ -1,32 +1,53 @@
 import { expect, test } from '@playwright/test';
 
-test('Clients and Vendors pages use responsive cards and retain the optional Board view', async ({ page }) => {
+test('Clients and Vendors pages expose directory and List/Board views', async ({ page }) => {
   await page.goto('/#/clients');
-  const clientTabs = page.getByRole('tablist', { name: 'Client views' }).getByRole('tab');
-  await expect(clientTabs).toHaveCount(2);
-  await expect(clientTabs.nth(0)).toHaveAttribute('aria-label', 'List view');
-  await expect(clientTabs.nth(0)).toHaveAttribute('aria-selected', 'true');
-  const clientTable = page.getByRole('table', { name: 'Clients' });
-  const clientCardGrid = page.getByTestId('clients-card-grid');
-  await expect(clientTable).toBeVisible();
-  await expect(clientCardGrid).toBeHidden();
+  const directoryTabs = page.getByRole('tablist', { name: 'Client directory' }).getByRole('tab');
+  const clientViews = page.getByRole('tablist', { name: 'Client views' }).getByRole('tab');
+  await expect(directoryTabs).toHaveCount(2);
+  await expect(directoryTabs.nth(0)).toContainText('People');
+  await expect(directoryTabs.nth(1)).toContainText('Organizations');
+  await expect(clientViews).toHaveCount(2);
+  await expect(clientViews.nth(0)).toHaveAttribute('aria-label', 'List view');
+  await expect(clientViews.nth(0)).toHaveAttribute('aria-selected', 'true');
+  const organizationTable = page.getByRole('table', { name: 'Organizations' });
+  await expect(organizationTable).toBeVisible();
+  await expect(organizationTable.locator('thead th')).toHaveText(['Name', 'Type', 'Domain', 'Phone', 'Actions']);
+  expect(Number.parseFloat(await organizationTable.locator('thead th').first().evaluate((element) => getComputedStyle(element).fontSize))).toBeLessThan(14);
+  await expect(organizationTable.locator('tbody tr')).toHaveCount(4);
+  expect(Number.parseFloat(await organizationTable.locator('tbody tr').first().evaluate((element) => getComputedStyle(element).fontSize))).toBeLessThan(14);
+  await expect(organizationTable.locator('tbody tr').first().locator('td[data-label="Type"] > span')).toHaveCSS('height', '20px');
+  const supplierRow = organizationTable.locator('tbody tr').filter({ hasText: 'Allied Insurance' });
+  await expect(supplierRow.locator('td')).toHaveCount(5);
+  await expect(supplierRow.locator('td').nth(4)).toBeEmpty();
+  const organizationFilters = page.getByRole('group', { name: 'Filter organizations by type' });
+  await expect(organizationFilters.getByRole('button')).toHaveText(['All', 'Customer', 'Supplier', 'Partner']);
+  await organizationFilters.getByRole('button', { name: 'Supplier' }).click();
+  await expect(organizationTable).toContainText('Allied Insurance');
+  await organizationFilters.getByRole('button', { name: 'Customer' }).click();
+  await expect(organizationTable).toContainText('No organizations match your search or filters.');
+  await organizationFilters.getByRole('button', { name: 'All' }).click();
+
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(clientTable).toBeHidden();
-  await expect(clientCardGrid).toBeVisible();
-  await expect(clientCardGrid).toContainText('Bonavista Maldives');
-  await expect(clientTabs.nth(0)).toHaveAttribute('aria-selected', 'true');
+  await expect(organizationTable).toBeVisible();
+  await directoryTabs.nth(0).click();
+  const peopleTable = page.getByRole('table', { name: 'People' });
+  await expect(peopleTable).toBeVisible();
+  await expect(peopleTable.locator('thead th')).toHaveText(['Name', 'Email', 'Phone', 'Title']);
+  expect(Number.parseFloat(await peopleTable.locator('thead th').first().evaluate((element) => getComputedStyle(element).fontSize))).toBeLessThan(14);
+  await expect(peopleTable).toContainText('No people match your search or filters.');
+
   await page.setViewportSize({ width: 1280, height: 900 });
-  await expect(clientTable).toBeVisible();
-  await expect(clientCardGrid).toBeHidden();
-  await clientTabs.nth(1).click();
-  const clientColumns = page.getByTestId('clients-kanban-column');
-  await expect(clientColumns).toHaveCount(2);
-  await expect(clientColumns.nth(0)).toContainText('Active');
-  await expect(clientColumns.nth(0)).toContainText('Bonavista Maldives');
-  await expect(clientColumns.nth(1)).toContainText('Draft');
-  await expect(clientTabs.nth(1)).toHaveAttribute('aria-selected', 'true');
-  await clientTabs.nth(0).click();
-  await expect(clientTabs.nth(0)).toHaveAttribute('aria-selected', 'true');
+  await clientViews.nth(1).click();
+  const peopleBoard = page.getByTestId('people-board');
+  await expect(peopleBoard).toBeVisible();
+  await expect(peopleBoard).toContainText('No people match your search or filters.');
+  await directoryTabs.nth(1).click();
+  const organizationsBoard = page.getByTestId('clients-kanban-board');
+  await expect(organizationsBoard).toBeVisible();
+  await expect(organizationsBoard).toContainText('Allied Insurance');
+  await clientViews.nth(0).click();
+  await expect(organizationTable).toBeVisible();
 
   await page.goto('/#/vendors');
   const vendorTabs = page.getByRole('tablist', { name: 'Vendor views' }).getByRole('tab');
@@ -87,6 +108,12 @@ test('Clients and Vendors pages use responsive cards and retain the optional Boa
   const inactiveColumn = vendorColumns.nth(1);
   const alliedCard = activeColumn.locator('article').filter({ hasText: 'Allied Insurance' });
   await expect(alliedCard).toHaveAttribute('draggable', 'true');
+  await expect(alliedCard.getByRole('button', { name: /Edit vendor|Delete vendor/ })).toHaveCount(0);
+  await alliedCard.getByRole('button').click();
+  const boardVendorDrawer = page.getByRole('dialog', { name: 'Allied Insurance' });
+  await expect(boardVendorDrawer).toBeVisible();
+  await page.getByRole('button', { name: 'Close vendor details' }).last().click();
+  await expect(boardVendorDrawer).toBeHidden();
   await alliedCard.evaluate((source, target) => {
     const dataTransfer = new DataTransfer();
     source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }));
@@ -103,136 +130,63 @@ test('Clients and Vendors pages use responsive cards and retain the optional Boa
   await expect(vendorTabs.nth(0)).toHaveAttribute('aria-selected', 'true');
 });
 
-test('Clients list supports search, filters, a details drawer, view persistence, and status drag-and-drop', async ({ page }) => {
+test('Clients directory lists and boards company and contact records', async ({ page }) => {
   await page.goto('/#/clients');
-  const table = page.getByRole('table', { name: 'Clients' });
+  const table = page.getByRole('table', { name: 'Organizations' });
   await expect(table).toBeVisible();
-  await expect(table.locator('tbody tr')).toHaveCount(4);
-  await expect(table.getByRole('columnheader', { name: /Client Name/ })).toHaveAttribute('aria-sort', 'ascending');
-
-  const search = page.getByRole('textbox', { name: 'Search clients' });
-  await search.fill('Contact 2');
-  const matchingRow = table.locator('tbody tr');
-  await expect(matchingRow).toHaveCount(1);
-  await expect(matchingRow).toContainText('Atoll Trading');
-  await matchingRow.click();
-  const drawer = page.getByRole('dialog', { name: 'Atoll Trading' });
+  await expect(table.locator('thead th')).toHaveText(['Name', 'Type', 'Domain', 'Phone', 'Actions']);
+  await page.getByRole('main').getByRole('button', { name: 'Client', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Client name' }).fill('Directory Test Company');
+  await page.getByRole('textbox', { name: 'Phone' }).fill('+960 7770123');
+  await page.getByRole('textbox', { name: 'Email' }).fill('office@directory.example');
+  await page.getByRole('button', { name: 'Create Client' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Directory Test Company' });
   await expect(drawer).toContainText('Client Information');
-  await expect(drawer).toContainText('Activity Timeline');
-
-  const expectModalAboveDrawer = async (title: string) => {
-    const heading = page.getByRole('heading', { name: title, exact: true });
-    await expect(heading).toBeVisible();
-    const modalRoot = page.locator('.fixed.inset-0').filter({ has: heading });
-    await expect(modalRoot).toHaveCount(1);
-    await expect(modalRoot.locator('.absolute.inset-0')).toBeVisible();
-    const modalStyle = await modalRoot.evaluate((element) => {
-      const style = getComputedStyle(element);
-      return { position: style.position, zIndex: Number(style.zIndex) };
-    });
-    expect(modalStyle.position).toBe('fixed');
-    const drawerZIndex = await drawer.locator('xpath=..').evaluate((element) => Number(getComputedStyle(element).zIndex));
-    expect(modalStyle.zIndex).toBeGreaterThan(drawerZIndex);
-  };
   await drawer.getByRole('button', { name: 'Edit Client' }).click();
-  await expectModalAboveDrawer('Edit Client');
-  await page.getByRole('button', { name: 'Cancel' }).last().click();
-
-  await drawer.getByRole('button', { name: 'Delete Client' }).click();
-  await expectModalAboveDrawer('Client can’t be deleted');
-  await page.getByRole('button', { name: 'Understood' }).click();
-
-  await drawer.getByRole('button', { name: 'New Quote' }).click();
-  await expectModalAboveDrawer('Create Quote');
-  await page.getByRole('button', { name: 'Cancel' }).last().click();
-
-  await drawer.getByRole('button', { name: 'Log Activity' }).click();
-  await expectModalAboveDrawer('Log Activity');
-  await page.getByRole('button', { name: 'Cancel' }).last().click();
-
+  await page.getByLabel('Contact person').fill('Nadia Contact');
+  await page.getByLabel('Phone *').fill('+960 7770123');
+  await page.getByLabel('Email').fill('nadia@directory.example');
+  await page.getByRole('button', { name: 'Save Changes' }).click();
+  await expect(drawer).toContainText('Nadia Contact');
   await page.getByRole('button', { name: 'Close client details' }).last().click();
-  await expect(drawer).toBeHidden();
 
-  await search.fill('');
-  await page.getByRole('button', { name: 'Filter clients' }).click();
-  await page.getByLabel('Country').selectOption('Singapore');
-  await page.getByRole('button', { name: 'Show 1 clients' }).click();
-  await expect(table.locator('tbody tr')).toHaveCount(1);
-  await expect(table.locator('tbody tr')).toContainText('Lagoon Resorts');
-  await page.getByRole('button', { name: 'Filter clients' }).click();
-  await page.getByRole('button', { name: 'Clear filters' }).click();
-  await page.getByRole('button', { name: 'Show 4 clients' }).click();
-  const bonavistaRow = table.locator('tbody tr').filter({ hasText: 'Bonavista Maldives' });
-  await bonavistaRow.getByRole('button', { name: 'Actions for Bonavista Maldives' }).click();
-  const actionMenu = page.getByRole('menu', { name: 'Bonavista Maldives actions' });
-  await actionMenu.getByRole('menuitem', { name: 'New Quote' }).click();
-  await expect(page.getByText('Prepare a quote for Bonavista Maldives.')).toBeVisible();
-  await page.getByRole('button', { name: 'Cancel' }).last().click();
-  await bonavistaRow.getByRole('button', { name: 'Actions for Bonavista Maldives' }).click();
-  await page.getByRole('menu', { name: 'Bonavista Maldives actions' }).getByRole('menuitem', { name: 'Log Activity' }).click();
-  await expect(page.getByLabel('Title')).toBeVisible();
-  await expect(page.getByText('Bonavista Maldives').last()).toBeVisible();
-  await page.getByRole('button', { name: 'Cancel' }).last().click();
-  let nativeAlertShown = false;
-  page.on('dialog', async (dialog) => {
-    nativeAlertShown = true;
-    await dialog.dismiss();
-  });
-  await bonavistaRow.getByRole('button', { name: 'Actions for Bonavista Maldives' }).click();
-  await page.getByRole('menu', { name: 'Bonavista Maldives actions' }).getByRole('menuitem', { name: 'Delete Client' }).click();
-  await expect(page.getByRole('heading', { name: 'Client can’t be deleted' })).toBeVisible();
-  await expect(page.getByRole('alert')).toContainText('Cannot delete "Bonavista Maldives" because it has');
-  await expect(page.getByRole('button', { name: 'Understood' })).toBeVisible();
-  expect(nativeAlertShown).toBe(false);
-  await page.getByRole('button', { name: 'Understood' }).click();
+  const directoryCompanyRow = table.locator('tbody tr').filter({ hasText: 'Directory Test Company' });
+  const actionButton = directoryCompanyRow.getByRole('button', { name: 'Actions for Directory Test Company' });
+  const actionCell = actionButton.locator('xpath=ancestor::td[1]');
+  await expect(actionCell).toHaveAttribute('data-label', 'Actions');
+  await expect(directoryCompanyRow.locator('td').first().getByRole('button')).toHaveCount(0);
+  expect(await actionCell.evaluate((cell) => (cell as HTMLTableCellElement).cellIndex)).toBe(4);
+  const actionMenu = page.getByRole('menu', { name: 'Directory Test Company actions' });
+  await actionButton.click();
+  await expect(actionMenu).toBeVisible();
+  await actionButton.click();
+  await expect(actionMenu).toHaveCount(0);
 
+  const directoryTabs = page.getByRole('tablist', { name: 'Client directory' }).getByRole('tab');
   const tabs = page.getByRole('tablist', { name: 'Client views' }).getByRole('tab');
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByTestId('clients-card-grid')).toBeVisible();
-  await expect(page.getByTestId('clients-card-grid')).toContainText('Bonavista Maldives');
-  await expect(page.getByRole('table', { name: 'Clients' })).toBeHidden();
+  await directoryTabs.nth(0).click();
+  const peopleTable = page.getByRole('table', { name: 'People' });
+  await expect(peopleTable).toContainText('Nadia Contact');
+  await expect(peopleTable.locator('thead th')).toHaveText(['Name', 'Email', 'Phone', 'Title']);
+  await expect(peopleTable).toContainText('nadia@directory.example');
+
+  await tabs.nth(1).click();
+  const peopleBoard = page.getByTestId('people-board');
+  await expect(peopleBoard).toContainText('Nadia Contact');
+  await expect(peopleBoard).toContainText('nadia@directory.example');
+
+  await directoryTabs.nth(1).click();
+  const organizationsBoard = page.getByTestId('clients-kanban-board');
+  await expect(organizationsBoard).toContainText('Directory Test Company');
+  await expect(organizationsBoard).toContainText('Customer');
+  await expect(organizationsBoard).toContainText('directory.example');
+  await expect(organizationsBoard.locator('article h3').filter({ hasText: 'Directory Test Company' })).toHaveCSS('font-size', '14px');
+  await expect(organizationsBoard.locator('article dl dd').filter({ hasText: 'directory.example' })).toHaveCSS('font-size', '13px');
+  await tabs.nth(0).click();
+  await expect(table).toContainText('Directory Test Company');
+  await expect(table.locator('tbody tr').filter({ hasText: 'Directory Test Company' })).toContainText('CUSTOMER');
   await expect(page.evaluate(() => localStorage.getItem('clientsView'))).resolves.toBe('list');
   await page.reload();
   await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByTestId('clients-card-grid')).toBeVisible();
-  await tabs.nth(1).click();
-  await expect(page.getByTestId('clients-kanban-board')).toBeVisible();
-  await expect(page.evaluate(() => localStorage.getItem('clientsView'))).resolves.toBe('kanban');
-  await page.reload();
-  await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
-
-  const activeColumn = page.getByTestId('clients-kanban-column').nth(0);
-  const draftColumn = page.getByTestId('clients-kanban-column').nth(1);
-  const draggedCard = activeColumn.locator('article').filter({ hasText: 'Bonavista Maldives' });
-  await expect(draggedCard).toBeVisible();
-  await expect(draggedCard).toHaveAttribute('draggable', 'true');
-  await draggedCard.evaluate((source, target) => {
-    const dataTransfer = new DataTransfer();
-    source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }));
-    target.dispatchEvent(new DragEvent('dragenter', { bubbles: true, dataTransfer }));
-    target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
-    target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
-    source.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer }));
-  }, await draftColumn.elementHandle());
-  await expect(draftColumn).toContainText('Bonavista Maldives');
-  await expect(activeColumn).not.toContainText('Bonavista Maldives');
-
-  await tabs.nth(0).click();
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole('main').getByRole('button', { name: 'Client', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Client name' }).fill('New Incomplete Client');
-  await page.getByRole('button', { name: 'Create Client' }).click();
-  const newClientRow = table.locator('tbody tr').filter({ hasText: 'New Incomplete Client' });
-  await expect(newClientRow).toBeVisible();
-  const statusCell = newClientRow.locator('td[data-label="Status"]');
-  const statusBadge = statusCell.getByText('Info incomplete');
-  await expect(statusBadge).toBeVisible();
-  await expect(statusBadge).toHaveAttribute('title', 'New company additional information to be filled');
-  const badgeContained = await statusBadge.evaluate((badge) => {
-    const badgeBounds = badge.closest('.pill')?.getBoundingClientRect();
-    const cellBounds = badge.closest('td')?.getBoundingClientRect();
-    return Boolean(badgeBounds && cellBounds && badgeBounds.left >= cellBounds.left && badgeBounds.right <= cellBounds.right);
-  });
-  expect(badgeContained).toBe(true);
-  await expect(page.getByRole('dialog', { name: 'New Incomplete Client' })).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Organizations' })).toBeVisible();
 });

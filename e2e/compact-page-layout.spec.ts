@@ -71,14 +71,15 @@ test('compact page toolbars fit responsively and Calendar stays in the viewport'
         expect(rowTops, `Calendar month rows at ${size}`).toHaveLength(Number(monthWeekCount));
 
         for (const view of ['week', 'agenda']) {
-          await page.getByRole('button', { name: view, exact: true }).click();
+          const viewLabel = `${view[0].toUpperCase()}${view.slice(1)}`;
+          await page.getByRole('button', { name: viewLabel, exact: true }).click();
           const internalScroller = page.locator('.calendar-view-panel > .overflow-y-auto');
           await expect(internalScroller).toBeVisible();
           await expect(internalScroller).toHaveCSS('overflow-y', 'auto');
           expect(await page.evaluate(() => document.documentElement.scrollHeight), `Calendar ${view} page scroll at ${size}`)
             .toBeLessThanOrEqual(viewport.height);
         }
-        await page.getByRole('button', { name: 'month', exact: true }).click();
+        await page.getByRole('button', { name: 'Month', exact: true }).click();
       }
 
       await page.screenshot({

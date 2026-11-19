@@ -18,6 +18,7 @@ import RenewalsPage from './pages/RenewalsPage';
 import Placeholder from './pages/Placeholder';
 import PipelinesPage from './pages/PipelinesPage';
 import FunnelsPage from './pages/FunnelsPage';
+import ReportsPage from './pages/ReportsPage';
 import LoginPage from './pages/LoginPage';
 import { useApp } from './store/AppContext';
 import type { Role } from './types';
@@ -58,7 +59,6 @@ function pageFromHash(hash: string): NavKey | null {
 
 const placeholders: Partial<Record<NavKey, { title: string; subtitle: string }>> = {
   plans: { title: 'My Plans', subtitle: 'Sales targets and personal plan tracking.' },
-  reports: { title: 'Reports', subtitle: 'Custom brokerage performance reports.' },
   documents: { title: 'Documents', subtitle: 'Policy documents, endorsements and certificates.' },
   'internal-slips': { title: 'Internal Slips', subtitle: 'Internal underwriting slips and cover notes.' },
   'pay-requests': { title: 'Payment Requests', subtitle: 'Outbound payment requests to finance.' },
@@ -149,6 +149,7 @@ function Shell() {
       case 'settings': return <SettingsPage />;
       case 'audit-log': return <SettingsPage initialTab="audit" />;
       case 'calendar': return <CalendarPage />;
+      case 'reports': return <ReportsPage />;
       case 'renewals': return <RenewalsPage />;
       case 'pipelines': return <PipelinesPage />;
       case 'funnels': return <FunnelsPage />;

@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
-const minimumStageColumnWidth = 160;
+const minimumStageColumnWidth = 320;
 
 const viewports = [
   { width: 1024, height: 768 },
@@ -12,6 +12,25 @@ const viewports = [
   { width: 768, height: 1024 },
   { width: 390, height: 844 },
 ];
+
+test('Pipelines stage header dividers align across wrapped titles and viewports', async ({ page }) => {
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    await page.goto('/#/pipelines');
+    await page.getByLabel('Select pipeline').selectOption('');
+
+    const headers = page.getByTestId('pipelines-stage-header');
+    await expect(headers).toHaveCount(9);
+    const headerBounds = await headers.evaluateAll((elements) =>
+      elements.map((element) => {
+        const bounds = element.getBoundingClientRect();
+        return { height: Math.round(bounds.height), bottom: Math.round(bounds.bottom) };
+      }),
+    );
+    expect(new Set(headerBounds.map(({ height }) => height)).size, `stage header heights align at ${viewport.width}x${viewport.height}`).toBe(1);
+    expect(new Set(headerBounds.map(({ bottom }) => bottom)).size, `stage header dividers align at ${viewport.width}x${viewport.height}`).toBe(1);
+  }
+});
 
 test('Pipelines board keeps all stage columns in one viewport-filling row', async ({ page }) => {
   const screenshotDirectory = path.resolve('e2e/screenshots');
@@ -65,11 +84,16 @@ test('Pipelines board keeps all stage columns in one viewport-filling row', asyn
     )).toBe(true);
     const cards = page.getByTestId('pipeline-deal-card');
     expect(await cards.count(), `seeded deal cards exist at ${viewport.width}x${viewport.height}`).toBeGreaterThan(0);
-    await expect(page.getByTestId('pipeline-deal-card-pipeline').first()).toBeVisible();
+    await expect(page.getByTestId('pipeline-deal-card-title').first()).toBeVisible();
+    await expect(page.getByTestId('pipeline-deal-card-subtitle').first()).toBeVisible();
+    expect(await cards.evaluateAll((elements) => elements.every((card) =>
+      card.querySelectorAll('select').length === 0
+      && card.querySelectorAll('[data-testid="pipeline-deal-card-badges"] .pill').length <= 2,
+    )), 'cards use at most two compact badges and no move selector').toBe(true);
     const cardOverflow = await cards.evaluateAll((elements) => elements.flatMap((card) => {
       const cardBounds = card.getBoundingClientRect();
       const containedParts = [...card.querySelectorAll<HTMLElement>(
-        '[data-testid="pipeline-deal-card-badges"], [data-testid="pipeline-deal-card-value"], [data-testid="pipeline-deal-card-action"]',
+        '[data-testid="pipeline-deal-card-badges"], [data-testid="pipeline-deal-card-value"]',
       )];
       const overflowingParts = containedParts
         .filter((part) => {
@@ -77,23 +101,12 @@ test('Pipelines board keeps all stage columns in one viewport-filling row', asyn
           return bounds.left < cardBounds.left - 1 || bounds.right > cardBounds.right + 1 || part.scrollWidth > part.clientWidth + 1;
         })
         .map((part) => part.dataset.testid);
-      const value = card.querySelector<HTMLElement>('[data-testid="pipeline-deal-card-value"]');
-      const stageAge = card.querySelector<HTMLElement>('[data-testid="pipeline-deal-card-stage-age"]');
-      const action = card.querySelector<HTMLElement>('[data-testid="pipeline-deal-card-action"]');
-      if (value && stageAge && action) {
-        const valueBounds = value.getBoundingClientRect();
-        const actionBounds = action.getBoundingClientRect();
-        const ageBounds = stageAge.getBoundingClientRect();
-        if (valueBounds.bottom > ageBounds.top + 1 || ageBounds.bottom > actionBounds.top + 1) {
-          overflowingParts.push('vertical card sections overlap');
-        }
-      }
       return overflowingParts;
     }));
-    expect(cardOverflow, `deal card sections stay inside cards at ${viewport.width}x${viewport.height}`).toEqual([]);
+    expect(cardOverflow, `compact card sections stay inside cards at ${viewport.width}x${viewport.height}`).toEqual([]);
     expect(await page.getByTestId('pipeline-deal-card-badges').evaluateAll((containers) =>
       containers.every((container) => [...container.querySelectorAll('.pill')].every((pill) =>
-        getComputedStyle(pill).whiteSpace === 'normal',
+        getComputedStyle(pill).whiteSpace === 'nowrap',
       )),
     )).toBe(true);
     if (viewport.width >= 1024) {

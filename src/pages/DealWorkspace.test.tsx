@@ -40,7 +40,10 @@ describe('Deal list row accessibility', () => {
       activities: [], setActivities: vi.fn(), clients: [], setClients: vi.fn(),
       deals: [testDeal], setDeals: vi.fn(), leads: [], setLeads: vi.fn(),
       products: [], pipelines: [{ id: 'pipeline-1', tenantId: 'tenant-1', name: 'Commercial', code: 'COMMERCIAL', isActive: true }],
-      pipelineStages: [{ id: 'stage-1', pipelineId: 'pipeline-1', name: 'New', stageOrder: 1, winProbabilityPct: 10, stagnationDaysThreshold: 5 }],
+      pipelineStages: [
+        { id: 'stage-1', pipelineId: 'pipeline-1', name: 'New', stageOrder: 1, winProbabilityPct: 10, stagnationDaysThreshold: 5 },
+        { id: 'stage-2', pipelineId: 'pipeline-1', name: 'Key Person Identified', shortLabel: 'Key Person Identified', stageOrder: 2, winProbabilityPct: 30, stagnationDaysThreshold: 5 },
+      ],
       stageHistory: [], setStageHistory: vi.fn(), invoices: [], setInvoices: vi.fn(),
       user: { id: 'user-1', name: 'QA User', email: 'qa@example.com', role: 'sales' },
       users: [], vendors: [], viewAsRole: null, quotationRequests: [], clientQuotations: [],
@@ -134,7 +137,7 @@ describe('Deal list row accessibility', () => {
 
   it('renders the requested Deals list fields in order', () => {
     window.location.hash = '#/deals?view=list';
-    act(() => root.render(<DealWorkspace deals={[testDeal]} dealsPageMode />));
+    act(() => root.render(<DealWorkspace deals={[{ ...testDeal, stage: 'Key Person Identified' }]} dealsPageMode />));
 
     expect([...container.querySelectorAll('thead th')].map((cell) => cell.textContent?.trim().replace(/[↑↓]/g, ''))).toEqual([
       'Deal',
@@ -151,6 +154,13 @@ describe('Deal list row accessibility', () => {
     expect(container.querySelector('thead th[aria-sort="ascending"]')?.textContent).toContain('Expected Close');
     expect(container.querySelector('thead th[aria-sort="ascending"] [aria-hidden="true"]')).toBeNull();
     expect(container.querySelector('thead th[aria-sort="ascending"] button')?.getAttribute('aria-label')).toBe('Sort by Expected Close Date');
+    const stageBadge = container.querySelector<HTMLSpanElement>('td[data-label="Stage"] .deal-stage-trigger > span:first-child');
+    const pipelineBadge = container.querySelector<HTMLSpanElement>('td[data-label="Pipeline"] > span');
+    expect(stageBadge?.textContent).toBe('Key Person Identified');
+    expect(stageBadge?.className).toContain('px-1.5 py-0.5 text-[10px] font-normal leading-tight');
+    expect(stageBadge?.className).toContain('break-words');
+    expect(pipelineBadge?.className).toContain('px-1.5 py-0.5 text-[10px] font-normal leading-tight');
+    expect(container.querySelector('.deal-stage-sla')?.textContent).toContain('/5d');
   });
 
   it('shows a sort arrow only after sorting is changed by the user', () => {
@@ -223,8 +233,23 @@ describe('Deal list row accessibility', () => {
     const identifiedColumn = container.querySelector<HTMLElement>('section[data-stage-name="Identified"]');
     expect(identifiedColumn?.getAttribute('data-total-mvr')).toBe('3000');
     expect(identifiedColumn?.querySelectorAll('article[data-deal-id]')).toHaveLength(2);
-    expect(identifiedColumn?.textContent).toContain('Commercial');
-    expect(identifiedColumn?.textContent).toContain('SME');
+    const commercialCard = identifiedColumn?.querySelector<HTMLElement>('article[data-deal-id="deal-commercial"]');
+    expect(commercialCard?.textContent).toContain('OPEN');
+    expect(commercialCard?.textContent).toContain('PR');
+    expect(commercialCard?.textContent).toContain('Acme');
+    expect(commercialCard?.textContent).toContain('Property placement');
+    expect(commercialCard?.textContent).toContain('01 Dec 2025');
+    expect(commercialCard?.textContent).toContain('MVR 1,000.00');
+    expect(commercialCard?.textContent).not.toContain('Commercial');
+    expect(commercialCard?.getAttribute('draggable')).toBe('true');
+    expect(commercialCard?.querySelector('[aria-label="Next activity"]')).toBeNull();
+    expect(commercialCard?.className).toContain('w-full');
+    const cardButton = commercialCard?.querySelector<HTMLButtonElement>('button');
+    expect(cardButton?.className).toContain('w-full');
+    expect(cardButton?.className).toContain('px-4');
+    expect(cardButton?.className).toContain('py-3.5');
+    expect(cardButton?.querySelector('span:nth-child(3)')?.className).toContain('break-words');
+    expect(cardButton?.querySelector('.whitespace-nowrap')?.className).toContain('shrink-0');
 
     const pipelineFilter = container.querySelector<HTMLSelectElement>('select[aria-label="Filter deals by pipeline"]');
     act(() => {
@@ -236,6 +261,6 @@ describe('Deal list row accessibility', () => {
     const filteredColumn = container.querySelector<HTMLElement>('section[data-stage-name="Identified"]');
     expect(filteredColumn?.getAttribute('data-total-mvr')).toBe('1000');
     expect(filteredColumn?.querySelectorAll('article[data-deal-id]')).toHaveLength(1);
-    expect(filteredColumn?.textContent).not.toContain('SME');
+    expect(filteredColumn?.querySelector('article[data-deal-id="deal-sme"]')).toBeNull();
   });
 });

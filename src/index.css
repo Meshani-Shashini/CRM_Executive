@@ -529,8 +529,8 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
   min-width: 0;
   align-items: center;
   gap: 0.25em;
-  overflow: hidden;
-  white-space: nowrap;
+  overflow: visible;
+  white-space: normal;
   text-align: left;
 }
 
@@ -1035,7 +1035,7 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
 
 .deals-board-compact {
   gap: 0.375rem;
-  grid-auto-columns: minmax(120px, min(160px, calc((100cqw - 1.875rem) / 6)));
+  grid-auto-columns: minmax(320px, 320px);
 }
 
 .deals-board-compact > section {
@@ -1058,8 +1058,7 @@ button, input, optgroup, select, textarea, code, kbd, samp, pre {
 }
 
 .deals-board-compact article {
-  gap: 0.375rem;
-  padding: 0.5rem;
+  padding: 0;
 }
 
 .deals-board > section,

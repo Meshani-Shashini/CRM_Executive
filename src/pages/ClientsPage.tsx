@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { PRODUCT_CODES } from '../data/catalogs';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
@@ -8,9 +8,9 @@ import { supabase } from '../lib/supabase';
 import {
   Phone, Mail, MapPin, Calendar, List, Columns3,
   Building2, Briefcase, ShieldCheck, Plus, Search, Pencil, Trash2,
-  Filter, MoreHorizontal, X, ArrowUpDown,
+  Filter, MoreHorizontal, X,
 } from 'lucide-react';
-import type { Activity, Client, CompanyContactProfile } from '../types';
+import type { Activity, Client, CompanyContactProfile, Vendor } from '../types';
 import { DEFAULT_USD_TO_MVR_RATE, toMvr } from '../utils/currency';
 import { formatDate } from '../utils/date';
 import DateInput from '../components/ui/DateInput';
@@ -19,20 +19,46 @@ import { findMatchingContactProfile, linkContactProfile, mergeContactProfiles } 
 import { formatStaffIdentifier } from '../utils/staff';
 import { hashParams } from '../utils/navigation';
 import TableShell from '../components/table/TableShell';
-import { OwnerCell, ProductCodePill } from '../components/table/TableCells';
 import { avatarCode } from '../components/table/avatar';
 import TableRowActionsMenu from '../components/ui/TableRowActionsMenu';
 import PageToolbar from '../components/ui/PageToolbar';
 import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 
 type ClientStatus = 'Active' | 'Draft' | 'Renewal Due' | 'Info incomplete';
-type ClientSortKey = 'name' | 'tin' | 'country' | 'class' | 'contactPerson' | 'phone' | 'email' | 'address' | 'owner' | 'activity' | 'status';
+type DirectoryTab = 'people' | 'organizations';
+type OrganizationType = 'Customer' | 'Supplier' | 'Partner';
+
+function emailDomain(email?: string) {
+  const atIndex = email?.lastIndexOf('@') ?? -1;
+  return atIndex >= 0 ? email?.slice(atIndex + 1).trim().toLowerCase() ?? '' : '';
+}
+
+interface PersonDirectoryRow {
+  id: string;
+  name: string;
+  title: string;
+  email: string;
+  phone: string;
+  client: Client;
+}
+
+interface OrganizationDirectoryRow {
+  id: string;
+  name: string;
+  type: OrganizationType;
+  domain: string;
+  phone: string;
+  client?: Client;
+  vendor?: Vendor;
+}
 
 export default function ClientsPage() {
-  const { clients, setClients, leads, setLeads, deals, setDeals, invoices, activities, setActivities, user, users, dataReady, settingsCatalogs } = useApp();
+  const { clients, setClients, leads, setLeads, deals, setDeals, invoices, activities, setActivities, vendors = [], user, users, dataReady, settingsCatalogs } = useApp();
   const [selectedId, setSelectedId] = useState('');
   const [portalClientId, setPortalClientId] = useState(user.clientId ?? '');
   const [view, setView] = useState<'list' | 'kanban'>(() => localStorage.getItem('clientsView') === 'kanban' ? 'kanban' : 'list');
+  const [directoryTab, setDirectoryTab] = useState<DirectoryTab>('organizations');
+  const [organizationTypeFilter, setOrganizationTypeFilter] = useState<'all' | OrganizationType>('all');
   const [query, setQuery] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -40,11 +66,7 @@ export default function ClientsPage() {
   const [ownerFilter, setOwnerFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<ClientStatus | ''>('');
   const [countryFilter, setCountryFilter] = useState('');
-  const [sortKey, setSortKey] = useState<ClientSortKey>('name');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [actionMenu, setActionMenu] = useState<{ id: string; anchor: HTMLElement } | null>(null);
-  const [draggedClientId, setDraggedClientId] = useState('');
-  const draggedClientIdRef = useRef('');
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
   const drawerTriggerRef = useRef<HTMLElement | null>(null);
@@ -225,14 +247,12 @@ export default function ClientsPage() {
     renewalLimit.setMonth(renewalLimit.getMonth() + 3);
     return Number.isFinite(expiry) && expiry >= now.getTime() && expiry <= renewalLimit.getTime() ? 'Renewal Due' : 'Active';
   };
-  const getLastActivity = (client: Client) => activities
-    .filter((activity) => activity.clientId === client.id && isTimelineActivity(activity))
-    .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))[0];
   const searchTerm = query.trim().toLowerCase();
   const filtered = visibleClients.filter((client) => {
     const contactName = client.contactPerson || client.insuredEntity?.primaryStakeholder.fullName || '';
     const matchesSearch = !searchTerm || [
       client.name, client.tin, client.email, contactName, client.phone,
+      ...(client.contacts ?? []).flatMap((contact) => [contact.name, contact.email, contact.phone, contact.role]),
     ].some((value) => value.toLowerCase().includes(searchTerm));
     return matchesSearch
       && (!insuranceFilter || client.productCode === insuranceFilter || client.class === insuranceFilter)
@@ -240,32 +260,76 @@ export default function ClientsPage() {
       && (!statusFilter || getClientStatus(client) === statusFilter)
       && (!countryFilter || client.country === countryFilter);
   });
-  const sortedClients = [...filtered].sort((a, b) => {
-    const ownerName = (client: Client) => users.find((item) => item.id === client.ownerId)?.name ?? formatStaffIdentifier(client.ownerId);
-    const activityDate = (client: Client) => getLastActivity(client)?.date ?? '';
-    const value = (client: Client) => {
-      switch (sortKey) {
-        case 'name': return client.name;
-        case 'tin': return client.tin;
-        case 'country': return client.country;
-        case 'class': return `${client.class} ${client.productCode}`;
-        case 'contactPerson': return client.contactPerson || client.insuredEntity?.primaryStakeholder.fullName || '';
-        case 'phone': return client.phone;
-        case 'email': return client.email;
-        case 'address': return client.address;
-        case 'owner': return ownerName(client);
-        case 'activity': return activityDate(client);
-        case 'status': return getClientStatus(client);
-      }
-    };
-    return value(a).localeCompare(value(b), undefined, { numeric: true, sensitivity: 'base' }) * (sortDirection === 'asc' ? 1 : -1);
-  });
+  const sortedClients = [...filtered].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
   const filterActiveCount = [insuranceFilter, ownerFilter, statusFilter, countryFilter].filter(Boolean).length;
   const insuranceOptions = [...new Set(visibleClients.map((client) => client.productCode).filter(Boolean))].sort();
   const countryOptions = [...new Set(visibleClients.map((client) => client.country).filter(Boolean))].sort();
+  const peopleRows = useMemo<PersonDirectoryRow[]>(() => sortedClients.flatMap((client) => {
+    const profiles = mergeContactProfiles(client.contacts)
+      .filter((contact) => contact.name.trim() || contact.email.trim() || contact.phone.trim());
+    if (profiles.length > 0) {
+      return profiles.map((contact) => ({
+        id: `${client.id}:${contact.id}`,
+        name: contact.name || 'Unnamed contact',
+        title: contact.role,
+        email: contact.email,
+        phone: contact.phone,
+        client,
+      }));
+    }
+    const name = client.contactPerson || client.insuredEntity?.primaryStakeholder.fullName || '';
+    return name ? [{
+      id: `${client.id}:primary`,
+      name,
+      title: client.insuredEntity?.primaryStakeholder.designation ?? '',
+      email: client.email,
+      phone: client.phone,
+      client,
+    }] : [];
+  }), [sortedClients]);
+  const organizationRows = useMemo<OrganizationDirectoryRow[]>(() => {
+    const customers = sortedClients.map((client) => ({
+      id: `client:${client.id}`,
+      name: client.name,
+      type: client.tags.some((tag) => tag.trim().toLowerCase() === 'partner') ? 'Partner' as const : 'Customer' as const,
+      domain: emailDomain(client.email),
+      phone: client.phone,
+      client,
+    }));
+    const hasCustomerFilters = Boolean(insuranceFilter || ownerFilter || statusFilter || countryFilter);
+    const suppliers = user.role === 'client' || hasCustomerFilters ? [] : vendors
+      .filter((vendor) => !searchTerm || [vendor.name, vendor.email ?? '', vendor.phone ?? ''].some((value) => value.toLowerCase().includes(searchTerm)))
+      .map((vendor) => ({
+        id: `vendor:${vendor.id}`,
+        name: vendor.name,
+        type: 'Supplier' as const,
+        domain: emailDomain(vendor.email),
+        phone: vendor.phone ?? '',
+        vendor,
+      }));
+    return [...customers, ...suppliers]
+      .filter((organization) => organizationTypeFilter === 'all' || organization.type === organizationTypeFilter)
+      .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' }));
+  }, [countryFilter, insuranceFilter, organizationTypeFilter, ownerFilter, searchTerm, sortedClients, statusFilter, user.role, vendors]);
+  const directoryCount = directoryTab === 'people' ? peopleRows.length : organizationRows.length;
   const openClient = (client: Client, trigger: HTMLElement) => {
     drawerTriggerRef.current = trigger;
     setSelectedId(client.id);
+  };
+  const renderClientActions = (client: Client) => {
+    const menuOpen = actionMenu?.id === client.id
+      && Boolean(actionMenu.anchor.closest('table[aria-label="Organizations"]'));
+    return <span className="inline-flex" onClick={(event) => event.stopPropagation()}>
+      <button type="button" aria-label={`Actions for ${client.name}`} aria-haspopup="menu" aria-expanded={menuOpen}
+        className="btn-ghost !p-1.5" onClick={(event) => setActionMenu(actionMenu?.id === client.id ? null : { id: client.id, anchor: event.currentTarget })}>
+        <MoreHorizontal size={15} />
+      </button>
+      <TableRowActionsMenu open={menuOpen} anchor={actionMenu?.id === client.id ? actionMenu.anchor : null} label={`${client.name} actions`}>
+        {(user.role === 'admin' || user.role === 'client') && <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { setIsPortalEdit(user.role === 'client'); setEditingClient(client); setActionMenu(null); }}><Pencil size={13} /> {user.role === 'client' ? 'Edit My Profile' : 'Edit Client'}</button>}
+        {user.role !== 'client' && <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { setActivityClientId(client.id); setActivityOpen(true); setActionMenu(null); }}><Plus size={13} /> Log Activity</button>}
+        {user.role === 'admin' && <button type="button" role="menuitem" className="table-row-actions-item text-hot" onClick={() => { deleteClient(client); setActionMenu(null); }}><Trash2 size={13} /> Delete Client</button>}
+      </TableRowActionsMenu>
+    </span>;
   };
   const createClient = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -293,13 +357,6 @@ export default function ClientsPage() {
     setCreateOpen(false);
     setSelectedId(client.id);
   };
-  const updateClientStatus = (clientId: string, accountStatus: 'active' | 'draft') => {
-    if (user.role !== 'admin') return;
-    setClients((current) => current.map((client) => client.id === clientId ? { ...client, accountStatus } : client));
-    draggedClientIdRef.current = '';
-    setDraggedClientId('');
-  };
-
   const deleteClient = (client: Client) => {
     if (user.role !== 'admin') return;
     const linkedLeads = leads.filter((lead) => lead.clientId === client.id
@@ -515,6 +572,14 @@ export default function ClientsPage() {
     <div className="space-y-3">
       <PageToolbar name="clients" className="justify-between">
         <div className="flex flex-wrap items-center gap-2">
+          <div role="tablist" aria-label="Client directory" className="inline-flex items-center gap-1 rounded-lg border border-[#1B1E22] bg-[#0B0C0E] p-0.5">
+            {([
+              ['people', 'People'],
+              ['organizations', 'Organizations'],
+            ] as const).map(([tab, label]) => <button key={tab} type="button" role="tab" aria-selected={directoryTab === tab}
+              onClick={() => setDirectoryTab(tab)}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400 ${directoryTab === tab ? 'bg-[#1B1E22] text-white' : 'text-muted hover:text-white'}`}>{label}</button>)}
+          </div>
           <ViewModeSwitcher label="Client views" value={view} onChange={setView} options={[
             { value: 'list', label: 'List view', Icon: List },
             { value: 'kanban', label: 'Board view', Icon: Columns3 },
@@ -525,248 +590,136 @@ export default function ClientsPage() {
           </>}
         </div>
         <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
-          <Badge variant="brand"><span className="font-semibold">{filtered.length}</span> {filtered.length === 1 ? 'client' : 'clients'}</Badge>
+          <Badge variant="brand"><span className="font-semibold">{directoryCount}</span> {directoryTab === 'people' ? (directoryCount === 1 ? 'person' : 'people') : (directoryCount === 1 ? 'organization' : 'organizations')}</Badge>
           <label className="relative w-full max-w-64">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search clients" aria-label="Search clients" className="input !py-1.5 pl-9 !text-xs" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={directoryTab === 'people' ? 'Search people' : 'Search organizations'} aria-label={directoryTab === 'people' ? 'Search people' : 'Search organizations'} className="input !py-1.5 pl-9 !text-xs" />
           </label>
-          <button type="button" className="btn-ghost !py-1.5" aria-label="Filter clients" onClick={() => setFilterOpen(true)}>
+          <button type="button" className="btn-ghost !py-1.5" aria-label={`Filter ${directoryTab === 'people' ? 'people' : 'organizations'}`} onClick={() => setFilterOpen(true)}>
             <Filter size={14} /> Filter{filterActiveCount > 0 && <Badge variant="brand" compact>{filterActiveCount}</Badge>}
           </button>
         </div>
         </PageToolbar>
 
-        {view === 'list' ? (
-        <>
-        <TableShell className="clients-table-fit hidden max-h-[calc(100vh-12rem)] overflow-auto md:block">
-          {!dataReady ? <div aria-label="Loading clients" role="status" className="space-y-2 p-3">
-            {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-10 animate-pulse rounded-md bg-ink-800/80" />)}
-          </div> : <table aria-label="Clients" className="clients-table w-full leading-tight">
-            <colgroup>
-              <col style={{ width: '13%' }} />
-              <col style={{ width: '6%' }} />
-              <col style={{ width: '7%' }} />
-              <col style={{ width: '12%' }} />
-              <col style={{ width: '8%' }} />
-              <col style={{ width: '8%' }} />
-              <col style={{ width: '9%' }} />
-              <col style={{ width: '9%' }} />
-              <col style={{ width: '8%' }} />
-              <col style={{ width: '9%' }} />
-              <col style={{ width: '8%' }} />
-              <col style={{ width: '3%' }} />
-            </colgroup>
-            <thead className="sticky top-0 z-10 bg-[#111214] font-semibold text-[#D0D3D9]">
-              <tr>
-                {([
-                  ['name', 'Client Name'], ['tin', 'TIN'], ['country', 'Location'],
-                  ['class', 'Insurance Type'], ['contactPerson', 'Contact Person'], ['phone', 'Phone'],
-                  ['email', 'Email'], ['address', 'Address'], ['owner', 'Account Owner'],
-                  ['activity', 'Last Activity'], ['status', 'Status'],
-                ] as const).map(([key, label]) => (
-                  <th key={key} scope="col" aria-sort={sortKey === key ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'} className="border-b border-[#1B1E22] px-2 py-2 text-left">
-                    <button type="button" className="inline-flex items-center gap-1 text-left hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400" onClick={() => {
-                      if (sortKey === key) setSortDirection((direction) => direction === 'asc' ? 'desc' : 'asc');
-                      else { setSortKey(key); setSortDirection('asc'); }
-                    }}>{label}<ArrowUpDown size={11} className="shrink-0 text-muted" /></button>
-                  </th>
-                ))}
-                <th scope="col" className="w-10 border-b border-[#1B1E22] px-2 py-2 text-right"><span className="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedClients.map((client) => {
-                const ownerName = users.find((item) => item.id === client.ownerId)?.name ?? formatStaffIdentifier(client.ownerId);
-                const contactName = client.contactPerson || client.insuredEntity?.primaryStakeholder.fullName || '';
-                const lastActivity = getLastActivity(client);
-                const status = getClientStatus(client);
-                const tags = client.tags.filter((tag) => tag !== INCOMPLETE_COMPANY_TAG);
-                const statusVariant = status === 'Active' ? 'win' : status === 'Renewal Due' || status === 'Info incomplete' ? 'warm' : 'muted';
-                return <tr key={client.id} tabIndex={0} aria-label={`Open ${client.name}`} onClick={(event) => {
-                  if ((event.target as HTMLElement).closest('button')) return;
-                  openClient(client, event.currentTarget);
-                }} onKeyDown={(event) => {
-                  if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
-                    event.preventDefault();
-                    openClient(client, event.currentTarget);
-                  }
-                }} className="cursor-pointer border-b border-[#1B1E22] text-[#D0D3D9] transition hover:bg-[#111214] focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400">
-                  <td data-label="Client Name" className="px-2 py-2">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#292B30] text-[10px] font-semibold text-[#A4A6AE]">{avatarCode(client.name)}</span>
-                      <span className="truncate font-semibold text-white" title={client.name}>{client.name}</span>
-                    </span>
+        {directoryTab === 'organizations' && <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter organizations by type">
+          {([
+            ['all', 'All'],
+            ['Customer', 'Customer'],
+            ['Supplier', 'Supplier'],
+            ['Partner', 'Partner'],
+          ] as const).map(([type, label]) => <button key={type} type="button" aria-pressed={organizationTypeFilter === type}
+            onClick={() => setOrganizationTypeFilter(type)}
+            className={`rounded-full border px-3 py-1 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400 ${organizationTypeFilter === type ? 'border-brand-400/40 bg-brand-400/10 text-brand-200' : 'border-ink-700 bg-ink-900/40 text-muted hover:text-white'}`}>{label}</button>)}
+        </div>}
+
+        {view === 'list' ? (directoryTab === 'people' ? (
+          <TableShell className="max-h-[calc(100vh-12rem)] overflow-auto">
+            {!dataReady ? <div role="status" aria-label="Loading people" className="space-y-2 p-3">
+              {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-10 animate-pulse rounded-md bg-ink-800/80" />)}
+            </div> : <table aria-label="People" className="w-full min-w-[640px] leading-tight">
+              <thead className="sticky top-0 z-10 bg-[#111214] font-semibold text-[#D0D3D9]">
+                <tr>{['Name', 'Email', 'Phone', 'Title'].map((label) => <th key={label} scope="col" className="border-b border-[#1B1E22] px-1 py-2 text-left">{label}</th>)}</tr>
+              </thead>
+              <tbody>
+                {peopleRows.map((person) => <tr key={person.id} tabIndex={0} aria-label={`Open contact ${person.name}`}
+                  onClick={(event) => openClient(person.client, event.currentTarget)}
+                  onKeyDown={(event) => {
+                    if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
+                      event.preventDefault();
+                      openClient(person.client, event.currentTarget);
+                    }
+                  }}
+                  className="cursor-pointer border-b border-[#1B1E22] text-[#D0D3D9] transition hover:bg-[#111214] focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400">
+                  <td data-label="Name" className="px-2 py-2 font-medium text-white">{person.name}</td>
+                  <td data-label="Email" className="px-2 py-2"><span className="block truncate" title={person.email}>{person.email || '—'}</span></td>
+                  <td data-label="Phone" className="whitespace-nowrap px-2 py-2">{person.phone || '—'}</td>
+                  <td data-label="Title" className="px-2 py-2">{person.title || '—'}</td>
+                </tr>)}
+                {peopleRows.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-sm text-muted">{dataReady ? 'No people match your search or filters.' : 'Loading people…'}</td></tr>}
+              </tbody>
+            </table>}
+          </TableShell>
+        ) : (
+          <TableShell className="max-h-[calc(100vh-12rem)] overflow-auto">
+            {!dataReady ? <div role="status" aria-label="Loading organizations" className="space-y-2 p-3">
+              {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-10 animate-pulse rounded-md bg-ink-800/80" />)}
+            </div> : <table aria-label="Organizations" className="w-full min-w-[720px] leading-tight">
+              <thead className="sticky top-0 z-10 bg-[#111214] font-semibold text-[#D0D3D9]">
+                <tr>{['Name', 'Type', 'Domain', 'Phone', 'Actions'].map((label) => <th key={label} scope="col" className={`border-b border-[#1B1E22] px-1 py-2 ${label === 'Actions' ? 'text-right' : 'text-left'}`}>{label}</th>)}</tr>
+              </thead>
+              <tbody>
+                {organizationRows.map((organization) => {
+                  const client = organization.client;
+                  return <tr key={organization.id} tabIndex={client ? 0 : undefined}
+                  aria-label={client ? `Open ${organization.name}` : undefined}
+                  onClick={client ? (event) => openClient(client, event.currentTarget) : undefined}
+                  onKeyDown={client ? (event) => {
+                    if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
+                      event.preventDefault();
+                      openClient(client, event.currentTarget);
+                    }
+                  } : undefined}
+                  className={`border-b border-[#1B1E22] text-[#D0D3D9] transition hover:bg-[#111214] ${client ? 'cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400' : ''}`}>
+                  <td data-label="Name" className="px-2 py-2 font-medium text-white">
+                    <span className="min-w-0 break-words">{organization.name}</span>
                   </td>
-                  <td data-label="TIN" className="px-2 py-2">{client.tin || '—'}</td>
-                  <td data-label="Country / Location" className="px-2 py-2">{client.country || '—'}</td>
-                  <td data-label="Insurance Type" className="px-2 py-2">
-                    <span className="flex min-w-0 flex-wrap items-center gap-1 overflow-hidden">
-                      {client.productCode && <ProductCodePill code={client.productCode} name={productName(client.productCode)} />}
-                      {tags.slice(0, 2).map((tag) => <Badge key={tag} variant="muted" compact><span className="block min-w-0 truncate" title={tag}>{tag}</span></Badge>)}
-                      {tags.length > 2 && <Badge variant="muted" compact>+{tags.length - 2}</Badge>}
-                      {!client.productCode && tags.length === 0 && '—'}
-                    </span>
+                  <td data-label="Type" className="px-2 py-2">
+                    <Badge variant={organization.type === 'Customer' ? 'brand' : organization.type === 'Supplier' ? 'muted' : 'warm'} subtle>{organization.type.toUpperCase()}</Badge>
                   </td>
-                  <td data-label="Contact Person" className="px-2 py-2">{contactName || '—'}</td>
-                  <td data-label="Phone" className="px-2 py-2">{client.phone || '—'}</td>
-                  <td data-label="Email" className="px-2 py-2"><span className="block truncate" title={client.email}>{client.email || '—'}</span></td>
-                  <td data-label="Address" className="px-2 py-2"><span className="block truncate" title={client.address}>{client.address || '—'}</span></td>
-                  <td data-label="Account Owner" className="px-2 py-2"><OwnerCell name={ownerName} /></td>
-                  <td data-label="Last Activity" className="px-2 py-2">
-                    {lastActivity ? <span className="block min-w-0">
-                      <span className="block whitespace-nowrap text-[10px] text-muted">{formatDate(lastActivity.date)}</span>
-                      <span className="block truncate text-white" title={lastActivity.title}>{lastActivity.title}</span>
-                    </span> : '—'}
-                  </td>
-                  <td data-label="Status" className="px-2 py-2">
-                    <span className="flex min-w-0 max-w-full items-center">
-                      <Badge variant={statusVariant} compact>
-                        <span
-                          className="block min-w-0 truncate"
-                          title={status === 'Info incomplete' ? INCOMPLETE_COMPANY_TAG : status}
-                          aria-label={status === 'Info incomplete' ? INCOMPLETE_COMPANY_TAG : status}
-                        >
-                          {status}
-                        </span>
-                      </Badge>
-                    </span>
-                  </td>
-                  <td data-label="Actions" className="px-2 py-2 text-right" onClick={(event) => event.stopPropagation()}>
-                    <button type="button" aria-label={`Actions for ${client.name}`} aria-haspopup="menu" aria-expanded={actionMenu?.id === client.id && Boolean(actionMenu.anchor.closest('table[aria-label="Clients"]'))} className="btn-ghost !p-1.5" onClick={(event) => setActionMenu(actionMenu?.id === client.id ? null : { id: client.id, anchor: event.currentTarget })}><MoreHorizontal size={15} /></button>
-                    <TableRowActionsMenu open={actionMenu?.id === client.id && Boolean(actionMenu.anchor.closest('table[aria-label="Clients"]'))} anchor={actionMenu?.id === client.id ? actionMenu.anchor : null} label={`${client.name} actions`}>
-                      {(user.role === 'admin' || user.role === 'client') && <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { setIsPortalEdit(user.role === 'client'); setEditingClient(client); setActionMenu(null); }}><Pencil size={13} /> {user.role === 'client' ? 'Edit My Profile' : 'Edit Client'}</button>}
-                      {user.role !== 'client' && <>
-                        <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { setActivityClientId(client.id); setActivityOpen(true); setActionMenu(null); }}><Plus size={13} /> Log Activity</button>
-                      </>}
-                      {user.role === 'admin' && <button type="button" role="menuitem" className="table-row-actions-item text-hot" onClick={() => { deleteClient(client); setActionMenu(null); }}><Trash2 size={13} /> Delete Client</button>}
-                    </TableRowActionsMenu>
-                  </td>
+                  <td data-label="Domain" className="px-2 py-2"><span className="block truncate" title={organization.domain}>{organization.domain || '—'}</span></td>
+                  <td data-label="Phone" className="whitespace-nowrap px-2 py-2">{organization.phone || '—'}</td>
+                  <td data-label="Actions" className="px-1 py-2 text-right">{client ? renderClientActions(client) : null}</td>
                 </tr>;
-              })}
-              {sortedClients.length === 0 && <tr><td colSpan={12} className="p-8 text-center text-sm text-muted">{dataReady ? 'No clients match your search or filters.' : 'Loading clients…'}</td></tr>}
-            </tbody>
-          </table>}
-        </TableShell>
-        <div className="min-h-[12rem] md:hidden">
-        {!dataReady ? <div role="status" aria-label="Loading clients" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-52 animate-pulse rounded-xl border border-ink-700 bg-ink-800/80" />)}
-        </div> : sortedClients.length === 0 ? <div className="rounded-xl border border-ink-700 bg-ink-950 px-4 py-12 text-center text-sm text-muted">No clients match your search or filters.</div> : <div data-testid="clients-card-grid" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {sortedClients.map((client) => {
-            const ownerName = users.find((item) => item.id === client.ownerId)?.name ?? formatStaffIdentifier(client.ownerId);
-            const contactName = client.contactPerson || client.insuredEntity?.primaryStakeholder.fullName || '';
-            const lastActivity = getLastActivity(client);
-            const status = getClientStatus(client);
-            const tags = client.tags.filter((tag) => tag !== INCOMPLETE_COMPANY_TAG);
-            const statusVariant = status === 'Active' ? 'win' : status === 'Renewal Due' || status === 'Info incomplete' ? 'warm' : 'muted';
-            const openDetails = (element: HTMLElement) => openClient(client, element);
-            return <article key={client.id} tabIndex={0} aria-label={`Open ${client.name}`} onClick={(event) => {
-              if ((event.target as HTMLElement).closest('button')) return;
-              openDetails(event.currentTarget);
-            }} onKeyDown={(event) => {
-              if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
-                event.preventDefault();
-                openDetails(event.currentTarget);
-              }
-            }} className="cursor-pointer rounded-lg border border-ink-700 bg-ink-800/80 p-3 shadow-sm transition hover:border-brand-400/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400">
-              <div className="mb-3 flex items-start justify-between gap-2 border-b border-ink-700/80 pb-2">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#292B30] text-[10px] font-semibold text-[#A4A6AE]">{avatarCode(client.name)}</span>
-                  <div className="min-w-0">
-                    <h3 className="break-words text-sm font-bold text-white">{client.name}</h3>
-                    <p className="mt-0.5 truncate text-[10px] text-muted">{client.country || 'Country not set'}</p>
-                  </div>
+                })}
+                {organizationRows.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-sm text-muted">{dataReady ? 'No organizations match your search or filters.' : 'Loading organizations…'}</td></tr>}
+              </tbody>
+            </table>}
+          </TableShell>
+        )) : (directoryTab === 'people' ? (
+          !dataReady ? <div role="status" aria-label="Loading people" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-40 animate-pulse rounded-xl border border-ink-700 bg-ink-800/80" />)}
+          </div> : <div data-testid="people-board" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {peopleRows.length === 0 && <p className="col-span-full rounded-xl border border-ink-700 bg-ink-950 px-4 py-12 text-center text-sm text-muted">No people match your search or filters.</p>}
+            {peopleRows.map((person) => <article key={person.id} className="min-w-0 rounded-lg border border-ink-700 bg-ink-800/80 p-4 shadow-sm transition hover:border-brand-400/50">
+              <button type="button" onClick={(event) => openClient(person.client, event.currentTarget)} className="w-full min-w-0 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400">
+                <h3 className="break-words text-sm font-bold text-white">{person.name}</h3>
+                <p className="mt-1 truncate text-[13px] text-muted">{person.title || 'Title not set'}</p>
+                <div className="mt-3 space-y-2 border-t border-ink-700/80 pt-3 text-[13px] text-[#D0D3D9]">
+                  <p className="flex min-w-0 items-center gap-2"><Mail size={13} className="shrink-0 text-muted" /><span className="min-w-0 break-all">{person.email || '—'}</span></p>
+                  <p className="flex min-w-0 items-center gap-2"><Phone size={13} className="shrink-0 text-muted" /><span className="min-w-0 break-all">{person.phone || '—'}</span></p>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <Badge variant={statusVariant} compact>{status}</Badge>
-                  <button type="button" aria-label={`Actions for ${client.name}`} aria-haspopup="menu" aria-expanded={actionMenu?.id === client.id && Boolean(actionMenu.anchor.closest('[data-testid="clients-card-grid"]'))} className="btn-ghost !p-1" onClick={(event) => setActionMenu(actionMenu?.id === client.id ? null : { id: client.id, anchor: event.currentTarget })}><MoreHorizontal size={15} /></button>
-                  <TableRowActionsMenu open={actionMenu?.id === client.id && Boolean(actionMenu.anchor.closest('[data-testid="clients-card-grid"]'))} anchor={actionMenu?.id === client.id ? actionMenu.anchor : null} label={`${client.name} actions`}>
-                    {(user.role === 'admin' || user.role === 'client') && <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { setIsPortalEdit(user.role === 'client'); setEditingClient(client); setActionMenu(null); }}><Pencil size={13} /> {user.role === 'client' ? 'Edit My Profile' : 'Edit Client'}</button>}
-                    {user.role !== 'client' && <>
-                      <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { setActivityClientId(client.id); setActivityOpen(true); setActionMenu(null); }}><Plus size={13} /> Log Activity</button>
-                    </>}
-                    {user.role === 'admin' && <button type="button" role="menuitem" className="table-row-actions-item text-hot" onClick={() => { deleteClient(client); setActionMenu(null); }}><Trash2 size={13} /> Delete Client</button>}
-                  </TableRowActionsMenu>
-                </div>
+              </button>
+            </article>)}
+          </div>
+        ) : (
+          !dataReady ? <div role="status" aria-label="Loading organizations" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-40 animate-pulse rounded-xl border border-ink-700 bg-ink-800/80" />)}
+          </div> : <div data-testid="clients-kanban-board" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {organizationRows.length === 0 && <p className="col-span-full rounded-xl border border-ink-700 bg-ink-950 px-4 py-12 text-center text-sm text-muted">No organizations match your search or filters.</p>}
+            {organizationRows.map((organization) => {
+              const client = organization.client;
+              return <article key={organization.id}
+              tabIndex={client ? 0 : undefined}
+              onClick={client ? (event) => openClient(client, event.currentTarget) : undefined}
+              onKeyDown={client ? (event) => {
+                if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
+                  event.preventDefault();
+                  openClient(client, event.currentTarget);
+                }
+              } : undefined}
+              className={`min-w-0 rounded-lg border border-ink-700 bg-ink-800/80 p-4 shadow-sm transition hover:border-brand-400/50 ${client ? 'cursor-pointer' : ''}`}>
+              <div className="flex min-w-0 items-start justify-between gap-3">
+                <h3 className="min-w-0 break-words text-sm font-bold text-white">{organization.name}</h3>
+                <Badge variant={organization.type === 'Customer' ? 'brand' : organization.type === 'Supplier' ? 'muted' : 'warm'} compact><span className="text-[11px]">{organization.type}</span></Badge>
               </div>
-              <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5">
-                {([
-                  ['TIN', client.tin || '—'],
-                  ['Country / Location', client.country || '—'],
-                  ['Insurance Type', <span className="flex flex-wrap items-center gap-1">
-                    {client.productCode && <ProductCodePill code={client.productCode} name={productName(client.productCode)} />}
-                    {tags.slice(0, 2).map((tag) => <Badge key={tag} variant="muted" compact>{tag}</Badge>)}
-                    {tags.length > 2 && <Badge variant="muted" compact>+{tags.length - 2}</Badge>}
-                    {!client.productCode && tags.length === 0 && '—'}
-                  </span>],
-                  ['Contact Person', contactName || '—'],
-                  ['Phone', client.phone || '—'],
-                  ['Email', client.email || '—'],
-                  ['Address', client.address || '—'],
-                  ['Account Owner', ownerName],
-                  ['Last Activity', lastActivity ? `${formatDate(lastActivity.date)} · ${lastActivity.title}` : '—'],
-                  ['Status', <Badge variant={statusVariant} compact>{status === 'Info incomplete' ? INCOMPLETE_COMPANY_TAG : status}</Badge>],
-                ] as const).map(([label, value]) => <div key={label} className="min-w-0">
-                  <dt className="mb-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted">{label}</dt>
-                  <dd className="break-words text-xs text-[#E1E2E5]">{value}</dd>
-                </div>)}
+              <dl className="mt-3 grid grid-cols-1 gap-2 border-t border-ink-700/80 pt-3 text-xs">
+                <div className="min-w-0"><dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">Domain</dt><dd className="mt-0.5 truncate text-[13px] text-[#E1E2E5]" title={organization.domain}>{organization.domain || '—'}</dd></div>
+                <div><dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">Phone</dt><dd className="mt-0.5 text-[13px] text-[#E1E2E5]">{organization.phone || '—'}</dd></div>
               </dl>
             </article>;
-          })}
-        </div>}
-      </div>
-      </> ) : <div className="min-h-[24rem] overflow-x-auto rounded-lg border border-[#1B1E22] bg-ink-950 p-3">
-        {!dataReady ? <div role="status" aria-label="Loading clients" className="grid min-w-[560px] grid-cols-2 gap-3">
-          {[0, 1].map((column) => <div key={column} className="h-64 animate-pulse rounded-xl bg-ink-800/80" />)}
-        </div> : <div data-testid="clients-kanban-board" className="grid min-h-[24rem] min-w-[560px] grid-cols-2 gap-3">
-          {([
-            { status: 'active' as const, label: 'Active' },
-            { status: 'draft' as const, label: 'Draft' },
-          ]).map(({ status, label }) => {
-            const stageClients = sortedClients.filter((client) => (client.accountStatus ?? 'active') === status);
-            const handleDrop = (event: React.DragEvent<HTMLElement>) => {
-              event.preventDefault();
-              const clientId = event.dataTransfer.getData('text/plain') || draggedClientIdRef.current || draggedClientId;
-              if (clientId) updateClientStatus(clientId, status);
-            };
-            return <section key={status} data-testid="clients-kanban-column" aria-label={`${label} clients`} onDragOver={(event) => {
-              if (user.role === 'admin') {
-                event.preventDefault();
-                event.dataTransfer.dropEffect = 'move';
-              }
-            }} onDrop={handleDrop} className="flex min-h-0 min-w-0 flex-col rounded-xl border border-ink-700 bg-ink-900/45">
-              <header className="flex items-center justify-between gap-2 border-b border-ink-700 px-3 py-2">
-                <h3 className="text-sm font-semibold text-white">{label}</h3><Badge variant="muted">{stageClients.length}</Badge>
-              </header>
-              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
-                {stageClients.map((client) => {
-                  const ownerName = users.find((item) => item.id === client.ownerId)?.name ?? formatStaffIdentifier(client.ownerId);
-                  const contactName = client.contactPerson || client.insuredEntity?.primaryStakeholder.fullName || '';
-                  return <article key={client.id} draggable={user.role === 'admin'} onDragStart={(event) => { draggedClientIdRef.current = client.id; setDraggedClientId(client.id); event.dataTransfer.setData('text/plain', client.id); event.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => {
-                    draggedClientIdRef.current = '';
-                    setDraggedClientId('');
-                  }} className={`rounded-lg border p-3 transition ${draggedClientId === client.id ? 'opacity-50' : ''} border-ink-700 bg-ink-800/70 hover:border-ink-500`}>
-                    <button type="button" onClick={(event) => openClient(client, event.currentTarget)} className="w-full min-w-0 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#292B30] text-[10px] font-semibold text-[#A4A6AE]">{avatarCode(client.name)}</span>
-                        <span className="min-w-0 break-words text-xs font-semibold text-white">{client.name}</span>
-                      </span>
-                      <span className="mt-2 block truncate text-[10px] text-muted">TIN: {client.tin || '—'}</span>
-                      <span className="mt-1 block truncate text-[10px] text-muted">{contactName || 'No contact'} · {client.phone || 'No phone'}</span>
-                      <span className="mt-2 flex flex-wrap items-center gap-1">
-                        {client.productCode && <ProductCodePill code={client.productCode} name={productName(client.productCode)} />}
-                        {client.tags.filter((tag) => tag !== INCOMPLETE_COMPANY_TAG).slice(0, 2).map((tag) => <Badge key={tag} variant="muted" compact>{tag}</Badge>)}
-                      </span>
-                      <span className="mt-2 block"><OwnerCell name={ownerName} /></span>
-                      {!hasCompleteClientProfile(client) && <span className="mt-2 inline-flex"><Badge variant="warm">{INCOMPLETE_COMPANY_TAG}</Badge></span>}
-                    </button>
-                  </article>;
-                })}
-                {stageClients.length === 0 && <p className="py-6 text-center text-[11px] text-muted/60">No clients</p>}
-              </div>
-            </section>;
-          })}
-        </div>}
-      </div>}
+            })}
+          </div>
+        ))}
 
       {selected && <div className="fixed inset-0 z-[70] flex justify-end" role="presentation">
         <button type="button" aria-label="Close client details" className="absolute inset-0 bg-black/60" onClick={closeDrawer} />
