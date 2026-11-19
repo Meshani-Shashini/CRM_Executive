@@ -23,10 +23,13 @@ import { avatarCode } from '../components/table/avatar';
 import TableRowActionsMenu from '../components/ui/TableRowActionsMenu';
 import PageToolbar from '../components/ui/PageToolbar';
 import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
+import { KanbanBoard, KanbanCard, KanbanColumn, KanbanPill } from '../components/kanban';
 
 type ClientStatus = 'Active' | 'Draft' | 'Renewal Due' | 'Info incomplete';
 type DirectoryTab = 'people' | 'organizations';
 type OrganizationType = 'Customer' | 'Supplier' | 'Partner';
+type PeopleGroupBy = 'role' | 'organization';
+type OrganizationGroupBy = 'status' | 'type' | 'country';
 
 function emailDomain(email?: string) {
   const atIndex = email?.lastIndexOf('@') ?? -1;
@@ -52,12 +55,40 @@ interface OrganizationDirectoryRow {
   vendor?: Vendor;
 }
 
+function getPeopleDirectoryRows(sourceClients: Client[]): PersonDirectoryRow[] {
+  return sourceClients.flatMap((client) => {
+    const profiles = mergeContactProfiles(client.contacts)
+      .filter((contact) => contact.name.trim() || contact.email.trim() || contact.phone.trim());
+    if (profiles.length > 0) {
+      return profiles.map((contact) => ({
+        id: `${client.id}:${contact.id}`,
+        name: contact.name || 'Unnamed contact',
+        title: contact.role,
+        email: contact.email,
+        phone: contact.phone,
+        client,
+      }));
+    }
+    const name = client.contactPerson || client.insuredEntity?.primaryStakeholder.fullName || '';
+    return name ? [{
+      id: `${client.id}:primary`,
+      name,
+      title: client.insuredEntity?.primaryStakeholder.designation ?? '',
+      email: client.email,
+      phone: client.phone,
+      client,
+    }] : [];
+  });
+}
+
 export default function ClientsPage() {
   const { clients, setClients, leads, setLeads, deals, setDeals, invoices, activities, setActivities, vendors = [], user, users, dataReady, settingsCatalogs } = useApp();
   const [selectedId, setSelectedId] = useState('');
   const [portalClientId, setPortalClientId] = useState(user.clientId ?? '');
   const [view, setView] = useState<'list' | 'kanban'>(() => localStorage.getItem('clientsView') === 'kanban' ? 'kanban' : 'list');
   const [directoryTab, setDirectoryTab] = useState<DirectoryTab>('organizations');
+  const [peopleGroupBy, setPeopleGroupBy] = useState<PeopleGroupBy>('role');
+  const [organizationGroupBy, setOrganizationGroupBy] = useState<OrganizationGroupBy>('status');
   const [organizationTypeFilter, setOrganizationTypeFilter] = useState<'all' | OrganizationType>('all');
   const [query, setQuery] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
@@ -264,29 +295,8 @@ export default function ClientsPage() {
   const filterActiveCount = [insuranceFilter, ownerFilter, statusFilter, countryFilter].filter(Boolean).length;
   const insuranceOptions = [...new Set(visibleClients.map((client) => client.productCode).filter(Boolean))].sort();
   const countryOptions = [...new Set(visibleClients.map((client) => client.country).filter(Boolean))].sort();
-  const peopleRows = useMemo<PersonDirectoryRow[]>(() => sortedClients.flatMap((client) => {
-    const profiles = mergeContactProfiles(client.contacts)
-      .filter((contact) => contact.name.trim() || contact.email.trim() || contact.phone.trim());
-    if (profiles.length > 0) {
-      return profiles.map((contact) => ({
-        id: `${client.id}:${contact.id}`,
-        name: contact.name || 'Unnamed contact',
-        title: contact.role,
-        email: contact.email,
-        phone: contact.phone,
-        client,
-      }));
-    }
-    const name = client.contactPerson || client.insuredEntity?.primaryStakeholder.fullName || '';
-    return name ? [{
-      id: `${client.id}:primary`,
-      name,
-      title: client.insuredEntity?.primaryStakeholder.designation ?? '',
-      email: client.email,
-      phone: client.phone,
-      client,
-    }] : [];
-  }), [sortedClients]);
+  const peopleRows = useMemo(() => getPeopleDirectoryRows(sortedClients), [sortedClients]);
+  const allPeopleRows = useMemo(() => getPeopleDirectoryRows(visibleClients), [visibleClients]);
   const organizationRows = useMemo<OrganizationDirectoryRow[]>(() => {
     const customers = sortedClients.map((client) => ({
       id: `client:${client.id}`,
@@ -312,6 +322,53 @@ export default function ClientsPage() {
       .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' }));
   }, [countryFilter, insuranceFilter, organizationTypeFilter, ownerFilter, searchTerm, sortedClients, statusFilter, user.role, vendors]);
   const directoryCount = directoryTab === 'people' ? peopleRows.length : organizationRows.length;
+  const peopleGroupLabels = [...new Set(allPeopleRows.map((person) =>
+    (peopleGroupBy === 'role' ? person.title : person.client.name).trim() || 'Unspecified',
+  ))].sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }));
+  const peopleGroups = peopleGroupLabels.map((label) => ({
+    label,
+    people: peopleRows.filter((person) =>
+      ((peopleGroupBy === 'role' ? person.title : person.client.name).trim() || 'Unspecified') === label),
+  }));
+  const organizationGroupValue = (organization: OrganizationDirectoryRow) => {
+    if (organizationGroupBy === 'status') return organization.client ? getClientStatus(organization.client) : 'Supplier';
+    if (organizationGroupBy === 'type') return organization.type;
+    return organization.client?.country || organization.vendor?.country || 'Unspecified';
+  };
+  const organizationGroupLabels = organizationGroupBy === 'status'
+    ? ['Active', 'Draft', 'Renewal Due', 'Info incomplete', 'Supplier']
+    : organizationGroupBy === 'type'
+      ? ['Customer', 'Supplier', 'Partner']
+      : [...new Set([
+        ...visibleClients.map((client) => client.country || 'Unspecified'),
+        ...(user.role === 'client' ? [] : vendors.map((vendor) => vendor.country || 'Unspecified')),
+      ])]
+        .sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }));
+  const organizationGroups = organizationGroupLabels.map((label) => ({
+    label,
+    organizations: organizationRows.filter((organization) => organizationGroupValue(organization) === label),
+  }));
+  const linkedDealsForPerson = (person: PersonDirectoryRow) => {
+    const profileId = person.id.slice(person.client.id.length + 1);
+    const profile = person.client.contacts?.find((contact) => contact.id === profileId);
+    const linkedIds = new Set(profile?.linkedDealIds ?? []);
+    deals.filter((deal) => {
+      const belongsToClient = deal.clientId === person.client.id
+        || deal.client.trim().toLowerCase() === person.client.name.trim().toLowerCase();
+      const belongsToContact = (profile && deal.contactProfileId === profile.id)
+        || (person.email && deal.contactEmail?.trim().toLowerCase() === person.email.trim().toLowerCase())
+        || (person.name && deal.contactName?.trim().toLowerCase() === person.name.trim().toLowerCase());
+      return belongsToClient && belongsToContact;
+    }).forEach((deal) => linkedIds.add(deal.id));
+    return linkedIds.size;
+  };
+  const linkedDealsForOrganization = (organization: OrganizationDirectoryRow) => organization.client
+    ? deals.filter((deal) => deal.clientId === organization.client?.id
+      || deal.client.trim().toLowerCase() === organization.name.trim().toLowerCase()).length
+    : organization.vendor
+      ? deals.filter((deal) => deal.vendorId === organization.vendor?.id
+        || deal.insurer.trim().toLowerCase() === organization.name.trim().toLowerCase()).length
+      : 0;
   const openClient = (client: Client, trigger: HTMLElement) => {
     drawerTriggerRef.current = trigger;
     setSelectedId(client.id);
@@ -612,6 +669,18 @@ export default function ClientsPage() {
             className={`rounded-full border px-3 py-1 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400 ${organizationTypeFilter === type ? 'border-brand-400/40 bg-brand-400/10 text-brand-200' : 'border-ink-700 bg-ink-900/40 text-muted hover:text-white'}`}>{label}</button>)}
         </div>}
 
+        {view === 'kanban' && <div className="flex min-w-0 justify-end">
+          <label className="flex min-w-0 items-center gap-2 text-xs text-muted">Group by
+            {directoryTab === 'people'
+              ? <select aria-label="Group people by" className="input !w-auto max-w-full !py-1.5 !text-xs" value={peopleGroupBy} onChange={(event) => setPeopleGroupBy(event.target.value as PeopleGroupBy)}>
+                <option value="role">Role</option><option value="organization">Organization</option>
+              </select>
+              : <select aria-label="Group organizations by" className="input !w-auto max-w-full !py-1.5 !text-xs" value={organizationGroupBy} onChange={(event) => setOrganizationGroupBy(event.target.value as OrganizationGroupBy)}>
+                <option value="status">Account status</option><option value="type">Type</option><option value="country">Country</option>
+              </select>}
+          </label>
+        </div>}
+
         {view === 'list' ? (directoryTab === 'people' ? (
           <TableShell className="max-h-[calc(100vh-12rem)] overflow-auto">
             {!dataReady ? <div role="status" aria-label="Loading people" className="space-y-2 p-3">
@@ -678,47 +747,75 @@ export default function ClientsPage() {
         )) : (directoryTab === 'people' ? (
           !dataReady ? <div role="status" aria-label="Loading people" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-40 animate-pulse rounded-xl border border-ink-700 bg-ink-800/80" />)}
-          </div> : <div data-testid="people-board" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {peopleRows.length === 0 && <p className="col-span-full rounded-xl border border-ink-700 bg-ink-950 px-4 py-12 text-center text-sm text-muted">No people match your search or filters.</p>}
-            {peopleRows.map((person) => <article key={person.id} className="min-w-0 rounded-lg border border-ink-700 bg-ink-800/80 p-4 shadow-sm transition hover:border-brand-400/50">
-              <button type="button" onClick={(event) => openClient(person.client, event.currentTarget)} className="w-full min-w-0 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400">
-                <h3 className="break-words text-sm font-bold text-white">{person.name}</h3>
-                <p className="mt-1 truncate text-[13px] text-muted">{person.title || 'Title not set'}</p>
-                <div className="mt-3 space-y-2 border-t border-ink-700/80 pt-3 text-[13px] text-[#D0D3D9]">
-                  <p className="flex min-w-0 items-center gap-2"><Mail size={13} className="shrink-0 text-muted" /><span className="min-w-0 break-all">{person.email || '—'}</span></p>
-                  <p className="flex min-w-0 items-center gap-2"><Phone size={13} className="shrink-0 text-muted" /><span className="min-w-0 break-all">{person.phone || '—'}</span></p>
-                </div>
-              </button>
-            </article>)}
-          </div>
+          </div> : peopleGroupLabels.length === 0
+            ? <div className="rounded-xl border border-ink-700 bg-ink-950 px-4 py-12 text-center text-sm text-muted">No people match your search or filters.</div>
+            : <KanbanBoard ariaLabel={`People grouped by ${peopleGroupBy}`} testId="people-board">
+              {peopleGroups.map((group) => <KanbanColumn
+                key={group.label}
+                name={group.label}
+                count={group.people.length}
+                summary={`${group.people.length} ${group.people.length === 1 ? 'person' : 'people'}`}
+                emptyLabel="people"
+                testId="people-kanban-column"
+              >
+                {group.people.map((person) => <KanbanCard
+                  key={person.id}
+                  testId="people-kanban-card"
+                  ariaLabel={`Open contact ${person.name}`}
+                  pills={[<KanbanPill tone="muted">{person.title || 'Unspecified role'}</KanbanPill>]}
+                  meta={person.client.name}
+                  metaTitle={person.email ? `${person.client.name} · ${person.email}` : person.client.name}
+                  title={person.name}
+                  titleTitle={person.name}
+                  footerLeft={person.phone || 'No phone'}
+                  footerRight={`${linkedDealsForPerson(person)} linked deals`}
+                  onActivate={(card) => openClient(person.client, card)}
+                />)}
+              </KanbanColumn>)}
+            </KanbanBoard>
         ) : (
           !dataReady ? <div role="status" aria-label="Loading organizations" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-40 animate-pulse rounded-xl border border-ink-700 bg-ink-800/80" />)}
-          </div> : <div data-testid="clients-kanban-board" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {organizationRows.length === 0 && <p className="col-span-full rounded-xl border border-ink-700 bg-ink-950 px-4 py-12 text-center text-sm text-muted">No organizations match your search or filters.</p>}
-            {organizationRows.map((organization) => {
-              const client = organization.client;
-              return <article key={organization.id}
-              tabIndex={client ? 0 : undefined}
-              onClick={client ? (event) => openClient(client, event.currentTarget) : undefined}
-              onKeyDown={client ? (event) => {
-                if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
-                  event.preventDefault();
-                  openClient(client, event.currentTarget);
-                }
-              } : undefined}
-              className={`min-w-0 rounded-lg border border-ink-700 bg-ink-800/80 p-4 shadow-sm transition hover:border-brand-400/50 ${client ? 'cursor-pointer' : ''}`}>
-              <div className="flex min-w-0 items-start justify-between gap-3">
-                <h3 className="min-w-0 break-words text-sm font-bold text-white">{organization.name}</h3>
-                <Badge variant={organization.type === 'Customer' ? 'brand' : organization.type === 'Supplier' ? 'muted' : 'warm'} compact><span className="text-[11px]">{organization.type}</span></Badge>
-              </div>
-              <dl className="mt-3 grid grid-cols-1 gap-2 border-t border-ink-700/80 pt-3 text-xs">
-                <div className="min-w-0"><dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">Domain</dt><dd className="mt-0.5 truncate text-[13px] text-[#E1E2E5]" title={organization.domain}>{organization.domain || '—'}</dd></div>
-                <div><dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">Phone</dt><dd className="mt-0.5 text-[13px] text-[#E1E2E5]">{organization.phone || '—'}</dd></div>
-              </dl>
-            </article>;
-            })}
-          </div>
+          </div> : organizationGroupLabels.length === 0
+            ? <div className="rounded-xl border border-ink-700 bg-ink-950 px-4 py-12 text-center text-sm text-muted">No organizations match your search or filters.</div>
+            : <KanbanBoard ariaLabel="Organizations grouped by account status" testId="clients-kanban-board">
+              {organizationGroups.map((group) => {
+                const noun = group.label === 'Supplier' ? 'supplier' : group.label === 'Partner' ? 'partner' : 'customer';
+                const summaryNoun = organizationGroupBy === 'status'
+                  ? noun
+                  : organizationGroupBy === 'type' ? group.label.toLowerCase().replace(/s$/, '') : 'organization';
+                return <KanbanColumn
+                  key={group.label}
+                  name={group.label}
+                  count={group.organizations.length}
+                  summary={`${group.organizations.length} ${summaryNoun}${group.organizations.length === 1 ? '' : 's'}`}
+                  emptyLabel={summaryNoun === 'customer' ? 'customers' : `${summaryNoun}s`}
+                  testId="clients-kanban-column"
+                >
+                  {group.organizations.map((organization) => {
+                    const status = organization.client ? getClientStatus(organization.client) : 'Supplier';
+                    const statusTone = status === 'Active' ? 'green' : status === 'Info incomplete' ? 'red' : 'amber';
+                    const statusPill = <KanbanPill tone={statusTone}>{status}</KanbanPill>;
+                    const typePill = <KanbanPill tone={organization.type === 'Customer' ? 'blue' : organization.type === 'Supplier' ? 'muted' : 'purple'}>{organization.type}</KanbanPill>;
+                    return <KanbanCard
+                      key={organization.id}
+                      testId="organization-kanban-card"
+                      ariaLabel={organization.client ? `Open ${organization.name}` : organization.name}
+                      pills={[statusPill, typePill]}
+                      meta={organization.domain || organization.client?.country || organization.vendor?.country || 'No organization detail'}
+                      metaTitle={organization.domain || organization.client?.country || organization.vendor?.country || 'No organization detail'}
+                      title={organization.name}
+                      titleTitle={organization.name}
+                      footerLeft={organization.phone || 'No phone'}
+                      footerRight={`${linkedDealsForOrganization(organization)} linked deals`}
+                      onActivate={(card) => {
+                        if (organization.client) openClient(organization.client, card);
+                      }}
+                    />;
+                  })}
+                </KanbanColumn>;
+              })}
+            </KanbanBoard>
         ))}
 
       {selected && <div className="fixed inset-0 z-[70] flex justify-end" role="presentation">

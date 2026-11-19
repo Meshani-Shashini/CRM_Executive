@@ -1,24 +1,26 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { ArrowDown, ArrowUp, Check, Clock3, Plus, Settings2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, CalendarDays, Check, Clock3, Plus, Settings2 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { DEAL_PIPELINE_STAGES, getPipelineLossReasons, PIPELINE_TEMPLATES } from '../data/pipelineStageTemplates';
 import { AUTH_BYPASS, TENANT_ID } from '../lib/supabase';
 import Modal from '../components/ui/Modal';
-import Badge from '../components/ui/Badge';
+import { KanbanBoard, KanbanCard, KanbanColumn, KanbanPill } from '../components/kanban';
+import { avatarCode } from '../components/table/avatar';
 import PageToolbar from '../components/ui/PageToolbar';
 import type { Deal, Pipeline, PipelineStage, StageHistoryAudit } from '../types';
 import { formatAmount, toMvr } from '../utils/currency';
-import { formatDate } from '../utils/date';
+import { formatDate, formatShortDate } from '../utils/date';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile } from '../utils/customerProfile';
 import {
   getStageSlaElapsedDays, isLostPipelineStage, isTerminalDealStage, isWonPipelineStage,
 } from '../utils/stageSla';
-import { promptQuotationRequestForDeal } from '../utils/navigation';
+import { dashboardHref, promptQuotationRequestForDeal } from '../utils/navigation';
 import { linkDealToLead } from '../utils/dealFactory';
 import { getNextActivity } from '../utils/nextActivity';
 import { nextLocalReference } from '../utils/references';
 import { validateDealBaseForProgression } from '../utils/monthlyDealSummary';
+import { formatStaffIdentifier } from '../utils/staff';
 
 const legacyStageNames: Record<string, string> = {
   'Lead Identified': 'Identified',
@@ -108,28 +110,10 @@ function dealHealth(elapsed: number | null, threshold: number): HealthState {
   return 'Healthy';
 }
 
-const healthVariants: Record<HealthState, 'win' | 'warm' | 'hot'> = {
-  Healthy: 'win',
-  'At Risk': 'warm',
-  Rotting: 'hot',
-};
-
 const healthFilterClasses: Record<HealthState, string> = {
   Healthy: 'bg-win/15 text-win border-win/40',
   'At Risk': 'bg-warm/15 text-warm border-warm/40',
   Rotting: 'bg-hot/15 text-hot border-hot/40',
-};
-
-const intentLabels: Record<IntentTier, string> = {
-  P1: 'Ready to Buy',
-  P2: 'Evaluating',
-  P3: 'Nurture',
-};
-
-const intentVariants: Record<IntentTier, 'win' | 'brand' | 'muted'> = {
-  P1: 'win',
-  P2: 'brand',
-  P3: 'muted',
 };
 
 function makeId() {
@@ -138,7 +122,7 @@ function makeId() {
 
 export default function PipelinesPage() {
   const {
-    user, deals, setDeals, setLeads, clients, pipelines, setPipelines, pipelineStages, setPipelineStages,
+    user, users, deals, setDeals, setLeads, clients, pipelines, setPipelines, pipelineStages, setPipelineStages,
     stageHistory, setStageHistory, invoices, setInvoices, quotationRequests, clientQuotations, activities, company, leads,
   } = useApp();
   const [pipelineId, setPipelineId] = useState(pipelines.find((pipeline) => pipeline.isActive)?.id ?? '');
@@ -586,8 +570,6 @@ export default function PipelinesPage() {
       const intent = intentForDeal(deal);
       return (!healthFilter || health === healthFilter) && (!intentFilter || intent === intentFilter);
     });
-  const visibleBoardDeals = boardStages.flatMap(visibleDealsForStage);
-  const showBoardPipelineLabels = new Set(visibleBoardDeals.map((deal) => deal.pipelineId ?? defaultPipelineId)).size > 1;
   const canDragDeals = user.role === 'admin' || user.role === 'sales';
 
   const moveTitle = activityWarningOnly
@@ -697,25 +679,31 @@ export default function PipelinesPage() {
         </div>
       ) : (
         <>
-        <div
-          data-testid="pipelines-board"
-          className="grid min-w-0 grid-flow-col grid-rows-1 auto-cols-[minmax(320px,1fr)] gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain [contain:layout] lg:min-h-0 lg:flex-1"
+        <KanbanBoard
+          ariaLabel="Deals by pipeline stage"
+          testId="pipelines-board"
+          className="lg:min-h-0 lg:flex-1"
         >
           {boardStages.map((stage) => {
             const stageDeals = visibleDealsForStage(stage);
             const totalMvr = stageDeals.reduce((total, deal) =>
               total + toMvr(deal.value, deal.currency, deal.exchangeRate), 0);
-            return (
-              <section
-                key={stage.id}
-                data-testid="pipelines-board-column"
-                onDragOver={(event) => {
+            return <KanbanColumn
+              key={stage.id}
+              name={stage.name}
+              count={stageDeals.length}
+              emptyLabel="deals"
+              summary={`${formatAmount(totalMvr, 'MVR')} - ${stageDeals.length} ${stageDeals.length === 1 ? 'deal' : 'deals'}`}
+              testId="pipelines-board-column"
+              headerTestId="pipelines-stage-header"
+              bodyTestId="pipelines-column-body"
+              onDragOver={(event) => {
                   if (canDragDeals) {
                     event.preventDefault();
                     event.dataTransfer.dropEffect = 'move';
                   }
                 }}
-                onDrop={(event) => {
+              onDrop={(event) => {
                   if (!canDragDeals) return;
                   event.preventDefault();
                   const deal = pipelineDeals.find((item) => item.id === event.dataTransfer.getData('text/deal-id'));
@@ -724,78 +712,64 @@ export default function PipelinesPage() {
                     item.pipelineId === targetPipelineId && item.name === stage.name);
                   if (target) moveDeal(deal.id, target);
                 }}
-                className="flex min-w-0 flex-col border-r border-ink-700 bg-ink-900/40 last:border-r-0"
-              >
-                <div data-testid="pipelines-stage-header" className="flex h-20 shrink-0 flex-col justify-between border-b border-ink-700 px-2 py-2">
-                  <div className="flex items-start gap-2">
-                    <h3 className="min-w-0 flex-1 line-clamp-2 text-sm font-semibold text-white">{stage.name}</h3>
-                    <Badge variant="muted">{stageDeals.length}</Badge>
-                  </div>
-                  <div className="min-w-0 truncate whitespace-nowrap text-[10px] text-muted">
-                    {stage.winProbabilityPct}% win · {formatAmount(totalMvr, 'MVR')} · {stageDeals.length} deal{stageDeals.length === 1 ? '' : 's'}
-                  </div>
-                </div>
-                <div
-                  data-testid="pipelines-column-body"
-                  className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-y-contain p-2"
-                >
-                  {stageDeals.map((deal) => {
+            >
+              {stageDeals.map((deal) => {
                     const dealStage = stageForDeal(deal);
-                    const elapsed = dealStage ? stageElapsedDays(deal.id, dealStage) : null;
-                    const targetDays = isTerminalDealStage(deal.stage, deal.disposition, dealStage) ? 0 : dealStage?.stagnationDaysThreshold ?? stage.stagnationDaysThreshold;
-                    const health = dealHealth(elapsed, targetDays);
-                    const intent = intentForDeal(deal);
-                    const healthLabel = health === 'Healthy' ? 'On track' : health === 'At Risk' ? 'At risk' : 'Overdue';
                     const pipelineName = pipelineShortLabel(pipelines.find((pipeline) =>
                       pipeline.id === (deal.pipelineId ?? defaultPipelineId)));
                     const displayDate = deal.renewalExpiry ?? deal.closeDate;
-                    const dateLabel = deal.renewalExpiry ? 'Renewal' : 'Close';
                     const formattedAmount = formatAmount(deal.value, deal.currency);
                     const canDragDeal = canDragDeals && !isTerminalDealStage(deal.stage, deal.disposition, dealStage);
-                    return (
-                      <article
-                        key={deal.id}
-                        data-testid="pipeline-deal-card"
-                        draggable={canDragDeal}
-                        onDragStart={(event) => {
-                          event.dataTransfer.setData('text/deal-id', deal.id);
-                          event.dataTransfer.effectAllowed = 'move';
-                        }}
-                        className={`min-w-0 space-y-2 rounded-xl border bg-ink-800/80 p-4 ${health === 'Rotting' ? 'border-hot/50' : health === 'At Risk' ? 'border-warm/50' : 'border-ink-600'} ${canDragDeal ? 'cursor-grab active:cursor-grabbing' : ''}`}
-                      >
-                        <div
-                          data-testid="pipeline-deal-card-badges"
-                          className="flex min-w-0 items-center gap-1.5 [&_.pill]:max-w-full [&_.pill]:min-w-0 [&_.pill]:!whitespace-nowrap [&_.pill]:!px-2 [&_.pill]:!py-1 [&_.pill]:!text-[11px] [&_.pill]:!leading-tight"
-                        >
-                          <Badge variant={healthVariants[health]}>{healthLabel}</Badge>
-                          <Badge variant={showBoardPipelineLabels ? 'muted' : intentVariants[intent]}>
-                            <span className="block min-w-0 truncate" title={showBoardPipelineLabels ? pipelineName : `Priority ${intent}: ${intentLabels[intent]}`}>
-                              {showBoardPipelineLabels ? pipelineName : intent}
-                            </span>
-                          </Badge>
-                        </div>
-                        <div data-testid="pipeline-deal-card-title" className="min-w-0 break-words text-sm font-semibold leading-snug text-white" title={deal.client}>
-                          {deal.client}
-                        </div>
-                        <div data-testid="pipeline-deal-card-subtitle" className="min-w-0 line-clamp-2 break-words text-xs leading-snug text-muted" title={`${deal.product} · ${deal.insurer}`}>
-                          {deal.product} · {deal.insurer}
-                        </div>
-                        <div data-testid="pipeline-deal-card-value" className="flex min-w-0 items-center justify-between gap-3 border-t border-ink-700/80 pt-2">
-                          <span className="min-w-0 shrink-0 whitespace-nowrap text-xs font-semibold leading-tight tabular-nums text-white" title={formattedAmount} aria-label={formattedAmount}>
-                            {formattedAmount}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate whitespace-nowrap text-right text-[11px] leading-tight text-muted" title={`${dateLabel} ${formatDate(displayDate)}`}>
-                            {dateLabel} {formatDate(displayDate)}
-                          </span>
-                        </div>
-                      </article>
-                    );
+                    const ownerName = users.find((person) => person.id === deal.ownerId)?.name
+                      ?? formatStaffIdentifier(deal.ownerId);
+                    const linkedLeadId = leads.find((lead) => lead.id === deal.leadId || lead.dealId === deal.id)?.id;
+                    const activity = getNextActivity(activities, { dealId: deal.id, leadId: linkedLeadId ?? deal.leadId });
+                    const terminal = isTerminalDealStage(deal.stage, deal.disposition, dealStage);
+                    const status = !terminal ? 'OPEN'
+                      : isWonStage(dealStage ?? deal.stage) ? 'WON'
+                        : deal.disposition === 'lost' || isLostStage(dealStage ?? deal.stage) ? 'LOST' : 'CLOSED';
+                    const productCode = deal.productCode ?? deal.product;
+                    const dealTitle = leads.find((lead) => lead.id === deal.leadId || lead.dealId === deal.id)?.title
+                      ?? deal.proposalSummary
+                      ?? `${deal.product} placement`;
+                    const statusTone = status === 'OPEN' ? 'blue' : status === 'WON' ? 'green' : 'red';
+                    return <KanbanCard
+                      key={deal.id}
+                      testId="pipeline-deal-card"
+                      titleTestId="pipeline-deal-card-title"
+                      metaTestId="pipeline-deal-card-subtitle"
+                      pillsTestId="pipeline-deal-card-badges"
+                      footerTestId="pipeline-deal-card-value"
+                      dataAttributes={{
+                        'data-deal-id': deal.id,
+                        'data-deal-value-mvr': toMvr(deal.value, deal.currency, deal.exchangeRate),
+                      }}
+                      ariaLabel={`Open deal ${dealTitle}`}
+                      pills={[
+                        <KanbanPill tone={statusTone}>{status}</KanbanPill>,
+                        <KanbanPill tone="muted">{productCode}</KanbanPill>,
+                      ]}
+                      meta={deal.client}
+                      metaTitle={`${deal.client} · ${pipelineName}`}
+                      title={dealTitle}
+                      titleTitle={dealTitle}
+                      footerLeft={<span className="inline-flex min-w-0 items-center gap-1" title={formatDate(displayDate)}><CalendarDays size={13} aria-hidden="true" /><span className="truncate">{formatShortDate(displayDate)}</span></span>}
+                      footerRight={<span title={formattedAmount}>{formattedAmount}</span>}
+                      avatar={{ initials: avatarCode(ownerName), label: ownerName }}
+                      activity={{ state: activity.state, label: activity.title ?? (activity.date ? formatDate(activity.date) : 'No activity scheduled') }}
+                      draggable={canDragDeal}
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData('text/deal-id', deal.id);
+                        event.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onActivate={() => {
+                        window.location.hash = dashboardHref('deals', { id: deal.id, view: 'inspection' });
+                      }}
+                    />;
                   })}
-                </div>
-              </section>
-            );
+              </KanbanColumn>;
           })}
-        </div>
+        </KanbanBoard>
         </>
       )}
       </div>

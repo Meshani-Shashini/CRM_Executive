@@ -8,6 +8,7 @@ import Badge from '../components/ui/Badge';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
 import LeadContactSlaBadge from '../components/LeadContactSlaBadge';
 import StageStepper from '../components/deal/StageStepper';
+import { KanbanBoard, KanbanCard, KanbanColumn, KanbanPill } from '../components/kanban';
 import Modal from '../components/ui/Modal';
 import PageToolbar from '../components/ui/PageToolbar';
 import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
@@ -25,7 +26,7 @@ import type {
   StageHistoryAudit,
 } from '../types';
 import { formatAmount, toMvr } from '../utils/currency';
-import { formatDate, formatSlashDateInput } from '../utils/date';
+import { formatDate, formatShortDate, formatSlashDateInput } from '../utils/date';
 import { hasCompleteCommunicationChannels, requiresCommunicationChannels } from '../utils/communication';
 import { hasCompleteClientProfile } from '../utils/customerProfile';
 import {
@@ -952,15 +953,6 @@ export default function DealWorkspace({
       pipelineId: kanbanStagePipelineId ?? '',
       stageOrder: index + 1,
     });
-  const pipelineLabelForDeal = (deal: Deal) => {
-    const pipeline = pipelines.find((item) => item.id === deal.pipelineId);
-    return pipeline?.code.toUpperCase() === 'COMMERCIAL' ? 'Commercial'
-      : pipeline?.code.toUpperCase() === 'SME_VELOCITY' ? 'SME'
-        : pipeline?.code.toUpperCase() === 'RENEWALS' ? 'Renewals'
-          : pipeline?.name ?? 'Unknown pipeline';
-  };
-  const showKanbanPipelineChips = !selectedPipelineFilter
-    && new Set(listDeals.map((deal) => deal.pipelineId).filter(Boolean)).size > 1;
   const pipelineDealsByStage = (stage: PipelineStage) => listDeals
     .filter((deal) => deal.stage === stage.name)
     .sort((left, right) => {
@@ -2222,102 +2214,106 @@ export default function DealWorkspace({
         </div>
       ) : dealsPageMode && workspaceView === 'pipeline' && !selectedItem ? (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-white">{kanbanPipeline?.name ?? 'All pipelines'}</h2>
-              <p className="mt-1 text-xs text-muted">Drag a deal between stages to use the existing stage-change flow.</p>
-            </div>
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              <label className="flex items-center gap-2 text-xs text-muted">
-                Sort
-                <select className="input !w-auto !py-1.5 !text-xs" value={pipelineSort} onChange={(event) => setPipelineSort(event.target.value as typeof pipelineSort)} aria-label="Sort pipeline deals">
-                  <option value="activity">Next activity</option><option value="value">Value</option>
-                  <option value="close">Expected close</option><option value="created">Created</option>
-                </select>
-              </label>
-            </div>
+          <div className="flex min-w-0 justify-end">
+            <label className="flex items-center gap-2 text-xs text-muted">
+              Sort
+              <select className="input !w-auto !py-1.5 !text-xs" value={pipelineSort} onChange={(event) => setPipelineSort(event.target.value as typeof pipelineSort)} aria-label="Sort pipeline deals">
+                <option value="activity">Next activity</option><option value="value">Value</option>
+                <option value="close">Expected close</option><option value="created">Created</option>
+              </select>
+            </label>
           </div>
-          {kanbanStages.length ? <div className="deals-fit min-w-0 overscroll-x-contain scroll-smooth pb-2">
-            <div className="deals-board deals-board-compact grid gap-2">
-              {kanbanStages.map((stage) => {
-                const stageDeals = pipelineDealsByStage(stage);
-                const totalMvr = stageDeals.reduce((total, deal) =>
-                  total + toMvr(deal.value, deal.currency, deal.exchangeRate), 0);
-                const canMoveStage = activeRole === 'admin' || activeRole === 'sales';
-                return <section key={stage.id} data-stage-name={stage.name} data-total-mvr={totalMvr}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    const dealId = event.dataTransfer.getData('text/deal-id');
-                    const droppedDeal = listDeals.find((deal) => deal.id === dealId);
-                    const targetPipelineId = droppedDeal?.pipelineId ?? kanbanPipelines[0]?.id;
-                    const targetStage = droppedDeal && pipelineStages.find((item) =>
-                      item.pipelineId === targetPipelineId && item.name === stage.name);
-                    if (canMoveStage && droppedDeal && targetStage) requestStageChange(targetStage, droppedDeal);
-                  }}
-                  className="flex min-w-0 flex-col rounded-xl border border-ink-700 bg-ink-900/55 p-2.5">
-                  <header className="mb-2 min-w-0 px-1">
-                    <h3 className="truncate text-sm font-semibold text-white">{stage.name}</h3>
-                    <p className="mt-1 truncate text-[10px] text-muted">{formatAmount(totalMvr, 'MVR')} · {stageDeals.length} {stageDeals.length === 1 ? 'deal' : 'deals'}</p>
-                  </header>
-                  <div className="max-h-[calc(100vh-330px)] min-h-40 space-y-3 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
-                    {stageDeals.map((deal) => {
-                      const dealStage = pipelineStages.find((item) =>
-                        item.pipelineId === deal.pipelineId && item.name === deal.stage);
-                      const terminal = isClosedDeal(deal, dealStage);
-                      const status = !terminal ? 'OPEN'
-                        : isWonDeal(deal, dealStage) ? 'WON'
-                          : deal.disposition === 'lost' || dealStage?.isClosedLost ? 'LOST' : 'CLOSED';
-                      const statusClass = status === 'OPEN'
-                        ? 'border-blue-400/20 bg-blue-400/10 text-blue-300'
-                        : status === 'WON'
-                          ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300'
-                          : 'border-red-400/20 bg-red-400/10 text-red-300';
-                      const productCode = products.find((item) => item.code === deal.productCode)?.code ?? deal.productCode;
-                      return <article key={deal.id} draggable={canMoveStage} data-deal-id={deal.id}
-                        data-deal-value-mvr={toMvr(deal.value, deal.currency, deal.exchangeRate)}
-                        onDragStart={(event) => { event.dataTransfer.setData('text/deal-id', deal.id); event.dataTransfer.effectAllowed = 'move'; }}
-                        className="w-full min-w-0 cursor-grab rounded-lg border border-ink-700 bg-ink-800/80 shadow-sm transition hover:border-brand-400/50 active:cursor-grabbing">
-                        <button type="button" onClick={() => openDealRecord(deal)} className="flex w-full min-w-0 flex-col gap-2 px-4 py-3.5 text-left">
-                          <span className="flex w-full min-w-0 items-center gap-1.5">
-                            <span className={`inline-flex h-5 items-center rounded-full border px-2 text-[9px] font-semibold leading-none tracking-wide ${statusClass}`}>{status}</span>
-                            {productCode && <span className="inline-flex h-5 items-center rounded-full border border-ink-600 bg-ink-900/50 px-1.5 text-[9px] font-medium leading-none text-muted">{productCode}</span>}
-                          </span>
-                          <span className="block truncate text-[10px] text-muted" title={deal.client}>{deal.client}</span>
-                          <span className="block min-w-0 whitespace-normal break-words text-xs font-semibold text-white" title={dealTitle(deal)}>{dealTitle(deal)}</span>
-                          <span className="flex w-full min-w-0 items-center justify-between gap-2 border-t border-ink-700/70 pt-2">
-                            <span className="flex min-w-0 items-center gap-1 text-[10px] text-muted" title={formatDate(deal.closeDate)}>
-                              <CalendarDays size={11} className="shrink-0" aria-hidden="true" />
-                              <span className="truncate">{formatDate(deal.closeDate).replace(/-/g, ' ')}</span>
-                            </span>
-                            <span className="shrink-0 whitespace-nowrap text-[10px] font-medium text-brand-300">{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
-                          </span>
-                        </button>
-                      </article>;
-                    })}
-                    {!stageDeals.length && <p className="py-7 text-center text-[11px] text-muted/60">Drop deals here</p>}
-                  </div>
-                </section>;
-              })}
-            </div>
+          {kanbanStages.length ? <div className="deals-fit min-w-0">
+            <KanbanBoard
+              ariaLabel="Deals by pipeline stage"
+              testId="deals-kanban-board"
+              className="deals-board"
+            >
+            {kanbanStages.map((stage) => {
+              const stageDeals = pipelineDealsByStage(stage);
+              const totalMvr = stageDeals.reduce((total, deal) =>
+                total + toMvr(deal.value, deal.currency, deal.exchangeRate), 0);
+              const canMoveStage = activeRole === 'admin' || activeRole === 'sales';
+              return <KanbanColumn key={stage.id}
+                name={stage.name}
+                count={stageDeals.length}
+                emptyLabel="deals"
+                summary={`${formatAmount(totalMvr, 'MVR')} - ${stageDeals.length} ${stageDeals.length === 1 ? 'deal' : 'deals'}`}
+                testId="deals-kanban-column"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const dealId = event.dataTransfer.getData('text/deal-id');
+                  const droppedDeal = listDeals.find((deal) => deal.id === dealId);
+                  const targetPipelineId = droppedDeal?.pipelineId ?? kanbanPipelines[0]?.id;
+                  const targetStage = droppedDeal && pipelineStages.find((item) =>
+                    item.pipelineId === targetPipelineId && item.name === stage.name);
+                  if (canMoveStage && droppedDeal && targetStage) requestStageChange(targetStage, droppedDeal);
+                }}
+              >
+                {stageDeals.map((deal) => {
+                  const dealStage = pipelineStages.find((item) =>
+                    item.pipelineId === deal.pipelineId && item.name === deal.stage);
+                  const terminal = isClosedDeal(deal, dealStage);
+                  const status = !terminal ? 'OPEN'
+                    : isWonDeal(deal, dealStage) ? 'WON'
+                      : deal.disposition === 'lost' || dealStage?.isClosedLost ? 'LOST' : 'CLOSED';
+                  const statusTone = status === 'OPEN' ? 'blue' : status === 'WON' ? 'green' : 'red';
+                  const productCode = products.find((item) => item.code === deal.productCode)?.code ?? deal.productCode;
+                  const ownerName = ownerNameForDeal(deal);
+                  const activity = activityForDeal(deal);
+                  return <KanbanCard key={deal.id}
+                    testId="deal-kanban-card"
+                    ariaLabel={`Open deal ${dealTitle(deal)}`}
+                    dataAttributes={{
+                      'data-deal-id': deal.id,
+                      'data-deal-value-mvr': toMvr(deal.value, deal.currency, deal.exchangeRate),
+                    }}
+                    pills={[
+                      <KanbanPill tone={statusTone}>{status}</KanbanPill>,
+                      ...(productCode ? [<KanbanPill tone="muted">{productCode}</KanbanPill>] : []),
+                    ]}
+                    meta={deal.client}
+                    metaTitle={deal.client}
+                    title={dealTitle(deal)}
+                    titleTitle={dealTitle(deal)}
+                    footerLeft={<span className="inline-flex min-w-0 items-center gap-1" title={formatDate(deal.closeDate)}><CalendarDays size={13} aria-hidden="true" /><span className="truncate">{formatShortDate(deal.closeDate)}</span></span>}
+                    footerRight={formatAmount(deal.value, deal.currency ?? 'USD')}
+                    avatar={{ initials: avatarCode(ownerName), label: ownerName }}
+                    activity={{ state: activity.state, label: activity.title ?? (activity.date ? formatDate(activity.date) : 'No activity scheduled') }}
+                    draggable={canMoveStage}
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData('text/deal-id', deal.id);
+                      event.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onActivate={() => openDealRecord(deal)}
+                  />;
+                })}
+              </KanbanColumn>;
+            })}
+            </KanbanBoard>
           </div> : <div className="glass rounded-xl p-6 text-center text-sm text-muted">Choose an active pipeline with configured stages to view its pipeline.</div>}
         </div>
       ) : !dealsPageMode && workspaceView === 'kanban' ? (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div><h2 className="text-sm font-semibold text-white">Deals pipeline</h2><p className="mt-1 text-xs text-muted">Drag a deal to another stage to review and save the change.</p></div>
+          <div className="flex min-w-0 justify-end">
             <select className="input !w-auto" value={selectedPipelineFilter} onChange={(event) => changePipelineFilter(event.target.value)} aria-label="Select deal pipeline">
               <option value="">All pipelines</option>
               {activePipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
             </select>
           </div>
-          {kanbanStages.length ? <div className="deals-fit">
-            <div className="deals-board grid gap-3">
-              {kanbanStages.map((stage) => {
-                const stageDeals = listDeals.filter((deal) => deal.stage === stage.name);
-                const totalMvr = stageDeals.reduce((total, deal) =>
-                  total + toMvr(deal.value, deal.currency, deal.exchangeRate), 0);
-                return <section key={stage.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
+          {kanbanStages.length ? <KanbanBoard ariaLabel="Deals by pipeline stage" className="deals-board">
+            {kanbanStages.map((stage) => {
+              const stageDeals = listDeals.filter((deal) => deal.stage === stage.name);
+              const totalMvr = stageDeals.reduce((total, deal) =>
+                total + toMvr(deal.value, deal.currency, deal.exchangeRate), 0);
+              return <KanbanColumn key={stage.id}
+                name={stage.name}
+                count={stageDeals.length}
+                emptyLabel="deals"
+                summary={`${formatAmount(totalMvr, 'MVR')} - ${stageDeals.length} ${stageDeals.length === 1 ? 'deal' : 'deals'}`}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
                   event.preventDefault();
                   const dealId = event.dataTransfer.getData('text/deal-id');
                   const droppedDeal = deals.find((deal) => deal.id === dealId);
@@ -2325,27 +2321,40 @@ export default function DealWorkspace({
                   const targetStage = droppedDeal && pipelineStages.find((item) =>
                     item.pipelineId === targetPipelineId && item.name === stage.name);
                   if (droppedDeal && targetStage) requestStageChange(targetStage, droppedDeal);
-                }} className="min-w-0 rounded-xl border border-ink-700 bg-ink-900/55 p-2.5">
-                  <header className="mb-2 flex items-center justify-between gap-2 px-1">
-                    <h3 className="min-w-0 break-words text-sm font-semibold text-white">{stage.name}</h3><Badge variant="muted">{stageDeals.length}</Badge>
-                  </header>
-                <p className="mb-2 px-1 text-[10px] text-muted">{formatAmount(totalMvr, 'MVR')} · {stageDeals.length} {stageDeals.length === 1 ? 'deal' : 'deals'}</p>
-                  <div className="max-h-[calc(100vh-310px)] min-h-48 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
-                    {stageDeals.map((deal) => <button key={deal.id} type="button" draggable
-                      onDragStart={(event) => { event.dataTransfer.setData('text/deal-id', deal.id); event.dataTransfer.effectAllowed = 'move'; }}
-                      onClick={() => openDealRecord(deal)}
-                      className="w-full cursor-grab rounded-lg border border-ink-700 bg-ink-800/80 p-3 text-left shadow-sm transition hover:border-brand-400/50 active:cursor-grabbing">
-                      <span className="block truncate text-sm font-semibold text-white">{deal.client}</span>
-                      <span className="mt-1 block truncate text-xs text-muted">{deal.product} · {deal.insurer}</span>
-                      {showKanbanPipelineChips && <span className="mt-1 inline-flex max-w-full truncate rounded-full border border-ink-600 px-1.5 py-0.5 text-[9px] leading-tight text-muted" title={pipelines.find((pipeline) => pipeline.id === deal.pipelineId)?.name ?? 'Unknown pipeline'}>{pipelineLabelForDeal(deal)}</span>}
-                      <span className="mt-2 block text-xs text-brand-300">{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
-                    </button>)}
-                    {!stageDeals.length && <p className="py-7 text-center text-[11px] text-muted/60">Drop deals here</p>}
-                  </div>
-                </section>;
-              })}
-            </div>
-          </div> : <div className="glass rounded-xl p-6 text-center text-sm text-muted">Choose a pipeline with configured stages to view its Kanban board.</div>}
+                }}
+              >
+                {stageDeals.map((deal) => {
+                  const dealStage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
+                  const terminal = isClosedDeal(deal, dealStage);
+                  const status = !terminal ? 'OPEN'
+                    : isWonDeal(deal, dealStage) ? 'WON'
+                      : deal.disposition === 'lost' || dealStage?.isClosedLost ? 'LOST' : 'CLOSED';
+                  const productCode = products.find((item) => item.code === deal.productCode)?.code ?? deal.productCode;
+                  const activity = activityForDeal(deal);
+                  const ownerName = ownerNameForDeal(deal);
+                  return <KanbanCard key={deal.id}
+                    ariaLabel={`Open deal ${dealTitle(deal)}`}
+                    pills={[
+                      <KanbanPill tone={status === 'OPEN' ? 'blue' : status === 'WON' ? 'green' : 'red'}>{status}</KanbanPill>,
+                      ...(productCode ? [<KanbanPill tone="muted">{productCode}</KanbanPill>] : []),
+                    ]}
+                    meta={deal.client}
+                    title={dealTitle(deal)}
+                    footerLeft={<span className="inline-flex min-w-0 items-center gap-1" title={formatDate(deal.closeDate)}><CalendarDays size={13} aria-hidden="true" /><span className="truncate">{formatShortDate(deal.closeDate)}</span></span>}
+                    footerRight={formatAmount(deal.value, deal.currency ?? 'USD')}
+                    avatar={{ initials: avatarCode(ownerName), label: ownerName }}
+                    activity={{ state: activity.state, label: activity.title ?? (activity.date ? formatDate(activity.date) : 'No activity scheduled') }}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData('text/deal-id', deal.id);
+                      event.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onActivate={() => openDealRecord(deal)}
+                  />;
+                })}
+              </KanbanColumn>;
+            })}
+          </KanbanBoard> : <div className="glass rounded-xl p-6 text-center text-sm text-muted">Choose a pipeline with configured stages to view its Kanban board.</div>}
         </div>
       ) : dealsPageMode && workspaceView === 'forecast' && !selectedItem ? (
         <section className="min-w-0 space-y-3" aria-label="Deal forecast">
@@ -2377,7 +2386,7 @@ export default function DealWorkspace({
               Deals with a missing or invalid expected close date cannot be grouped into a forecast period.
             </p>
           )}
-          <div className="forecast-periods grid min-w-0 gap-3">
+          <KanbanBoard ariaLabel="Deals by expected close date" className="forecast-periods">
             {forecastData.map((period) => {
               const periodDeals = forecastDeals.filter((deal) => {
                 if (!deal.closeDate) return false;
@@ -2392,62 +2401,54 @@ export default function DealWorkspace({
                 return (forecastOutcomeFilter === 'all' || outcome === forecastOutcomeFilter)
                   && validateDealForMonthlySummary(deal, outcome, summaryContext).length === 0;
               });
-              return <section key={period.key} data-period-start={period.startDate}
+              const periodTotalMvr = summary.wonValueMvr + summary.openValueMvr + summary.lostValueMvr;
+              return <KanbanColumn key={period.key}
+                name={period.label}
+                count={periodDisplayDeals.length}
+                emptyLabel="deals"
+                emptyMessage="No valid deals for this view and period."
+                summary={`${formatAmount(periodTotalMvr, 'MVR')} - ${periodDisplayDeals.length} ${periodDisplayDeals.length === 1 ? 'deal' : 'deals'}`}
+                testId="deal-forecast-column"
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => {
                   event.preventDefault();
                   const deal = forecastDeals.find((item) => item.id === event.dataTransfer.getData('text/deal-id'));
                   if (deal) moveDealForecastPeriod(deal, period.startDate);
                 }}
-                className="min-w-0 rounded-xl border border-ink-700 bg-ink-900/55 p-2.5">
-                <header className="mb-2 min-w-0 border-b border-ink-700 pb-2">
-                  <h3 className="truncate text-sm font-semibold text-white">{period.label}</h3>
-                  {forecastOutcomeFilter !== 'open' && <p className="mt-1 text-[10px] text-emerald-300">Won · closed value {formatAmount(summary.wonValueMvr, 'MVR')}</p>}
-                  {forecastOutcomeFilter !== 'won' && <>
-                    <p className="mt-1 text-[10px] text-brand-300">Open · total value {formatAmount(summary.openValueMvr, 'MVR')}</p>
-                    <p className="mt-1 text-[10px] text-brand-300">Open · weighted {formatAmount(summary.openWeightedValueMvr, 'MVR')}</p>
-                    <ul className="mt-1 space-y-0.5 text-[10px] text-muted">
-                      {summary.open.map((stage) => <li key={stage.stageName} className="flex justify-between gap-2">
-                        <span className="truncate">{stage.stageName} · {stage.probabilityPct}%</span>
-                        <span className="shrink-0">{formatAmount(stage.weightedValueMvr, 'MVR')}</span>
-                      </li>)}
-                    </ul>
-                  </>}
-                  {forecastOutcomeFilter === 'all' && <p className="mt-1 text-[10px] text-hot">Lost · closed value {formatAmount(summary.lostValueMvr, 'MVR')}</p>}
-                  {summary.validationIssues.length > 0 && <p role="status" className="mt-1 text-[10px] text-amber-200">
-                    {summary.validationIssues.length} invalid deal{summary.validationIssues.length === 1 ? '' : 's'} excluded from totals.
-                  </p>}
-                </header>
-                <div className="max-h-[calc(100vh-360px)] min-h-40 space-y-2 overflow-y-auto">
+              >
                   {periodDisplayDeals.map((deal) => {
                     const stage = pipelineStages.find((item) => item.pipelineId === deal.pipelineId && item.name === deal.stage);
-                    const probability = Math.max(0, Math.min(100, stage?.winProbabilityPct ?? deal.probability));
                     const ownerName = ownerNameForDeal(deal);
                     const outcome = classifyDealOutcome(deal, stage);
-                    return <article key={deal.id} draggable data-deal-id={deal.id} data-expected-close={deal.closeDate ?? ''}
-                      onDragStart={(event) => { event.dataTransfer.setData('text/deal-id', deal.id); event.dataTransfer.effectAllowed = 'move'; }}
-                      className="flex min-w-0 items-start gap-2 rounded-lg border border-ink-700 bg-ink-800/80 p-2.5">
-                      <button type="button" onClick={() => openDealRecord(deal)} className="min-w-0 flex-1 text-left">
-                        <span className="block truncate text-xs font-semibold text-white" title={dealTitle(deal)}>{dealTitle(deal)}</span>
-                        <span className="mt-0.5 block truncate text-[10px] text-muted">{deal.client}</span>
-                        <span className={`mt-1 block text-[10px] uppercase ${outcome === 'won' ? 'text-emerald-300' : outcome === 'lost' ? 'text-hot' : 'text-brand-300'}`}>{outcome}</span>
-                        <span className="mt-1 block truncate text-[10px] font-semibold text-brand-300">{formatAmount(deal.value, deal.currency ?? 'USD')}</span>
-                        <span className="mt-1 flex min-w-0 items-center gap-1.5">
-                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#1E2024] text-[9px] font-semibold text-[#D0D3D9]" title={ownerName}>{avatarCode(ownerName)}</span>
-                          <span className="truncate text-[10px] text-muted">{ownerName}</span>
-                        </span>
-                        <span className="mt-2 block h-1 overflow-hidden rounded-full bg-ink-600" aria-label={`${probability}% win probability`}>
-                          <span className="block h-full rounded-full bg-emerald-400" style={{ width: `${probability}%` }} />
-                        </span>
-                      </button>
-                      <span className="mt-0.5 shrink-0"><DealActivityIndicator activity={activityForDeal(deal)} /></span>
-                    </article>;
+                    const productCode = products.find((item) => item.code === deal.productCode)?.code ?? deal.productCode ?? deal.product;
+                    const activity = activityForDeal(deal);
+                    return <KanbanCard key={deal.id}
+                      testId="deal-forecast-card"
+                      dataAttributes={{ 'data-deal-id': deal.id, 'data-expected-close': deal.closeDate ?? '' }}
+                      ariaLabel={`Open deal ${dealTitle(deal)}`}
+                      pills={[
+                        <KanbanPill tone={outcome === 'won' ? 'green' : outcome === 'lost' ? 'red' : 'blue'}>{outcome}</KanbanPill>,
+                        <KanbanPill tone="muted">{productCode}</KanbanPill>,
+                      ]}
+                      meta={deal.client}
+                      metaTitle={deal.client}
+                      title={dealTitle(deal)}
+                      titleTitle={dealTitle(deal)}
+                      footerLeft={<span className="inline-flex min-w-0 items-center gap-1" title={formatDate(deal.closeDate)}><CalendarDays size={13} aria-hidden="true" /><span className="truncate">{formatShortDate(deal.closeDate)}</span></span>}
+                      footerRight={formatAmount(deal.value, deal.currency ?? 'USD')}
+                      avatar={{ initials: avatarCode(ownerName), label: ownerName }}
+                      activity={{ state: activity.state, label: activity.title ?? (activity.date ? formatDate(activity.date) : 'No activity scheduled') }}
+                      draggable
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData('text/deal-id', deal.id);
+                        event.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onActivate={() => openDealRecord(deal)}
+                    />;
                   })}
-                  {!periodDisplayDeals.length && <p className="py-7 text-center text-[11px] text-muted/60">No valid deals for this view and period.</p>}
-                </div>
-              </section>;
+              </KanbanColumn>;
             })}
-          </div>
+          </KanbanBoard>
         </section>
       ) : (
     <main className={`glass min-h-[460px] min-w-0 overflow-y-auto rounded-2xl px-3 py-1.5 sm:px-4 sm:py-1.5 xl:min-h-0 ${selectedLead ? 'flex flex-col' : ''}`}>

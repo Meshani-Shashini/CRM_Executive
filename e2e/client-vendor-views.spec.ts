@@ -40,8 +40,8 @@ test('Clients and Vendors pages expose directory and List/Board views', async ({
   await page.setViewportSize({ width: 1280, height: 900 });
   await clientViews.nth(1).click();
   const peopleBoard = page.getByTestId('people-board');
-  await expect(peopleBoard).toBeVisible();
-  await expect(peopleBoard).toContainText('No people match your search or filters.');
+  await expect(peopleBoard).toHaveCount(0);
+  await expect(page.getByText('No people match your search or filters.')).toBeVisible();
   await directoryTabs.nth(1).click();
   const organizationsBoard = page.getByTestId('clients-kanban-board');
   await expect(organizationsBoard).toBeVisible();
@@ -109,7 +109,7 @@ test('Clients and Vendors pages expose directory and List/Board views', async ({
   const alliedCard = activeColumn.locator('article').filter({ hasText: 'Allied Insurance' });
   await expect(alliedCard).toHaveAttribute('draggable', 'true');
   await expect(alliedCard.getByRole('button', { name: /Edit vendor|Delete vendor/ })).toHaveCount(0);
-  await alliedCard.getByRole('button').click();
+  await alliedCard.click();
   const boardVendorDrawer = page.getByRole('dialog', { name: 'Allied Insurance' });
   await expect(boardVendorDrawer).toBeVisible();
   await page.getByRole('button', { name: 'Close vendor details' }).last().click();
@@ -173,15 +173,17 @@ test('Clients directory lists and boards company and contact records', async ({ 
   await tabs.nth(1).click();
   const peopleBoard = page.getByTestId('people-board');
   await expect(peopleBoard).toContainText('Nadia Contact');
-  await expect(peopleBoard).toContainText('nadia@directory.example');
+  await expect(peopleBoard.locator('.kanban-card__meta')).toHaveAttribute('title', /nadia@directory\.example/);
+  await expect(page.getByLabel('Group people by')).toHaveValue('role');
 
   await directoryTabs.nth(1).click();
   const organizationsBoard = page.getByTestId('clients-kanban-board');
   await expect(organizationsBoard).toContainText('Directory Test Company');
   await expect(organizationsBoard).toContainText('Customer');
   await expect(organizationsBoard).toContainText('directory.example');
-  await expect(organizationsBoard.locator('article h3').filter({ hasText: 'Directory Test Company' })).toHaveCSS('font-size', '14px');
-  await expect(organizationsBoard.locator('article dl dd').filter({ hasText: 'directory.example' })).toHaveCSS('font-size', '13px');
+  await expect(organizationsBoard.locator('.kanban-card__title').filter({ hasText: 'Directory Test Company' })).toHaveCSS('font-size', '14px');
+  await expect(organizationsBoard.locator('.kanban-card__meta').filter({ hasText: 'directory.example' })).toHaveCSS('font-size', '11px');
+  await expect(page.getByLabel('Group organizations by')).toHaveValue('status');
   await tabs.nth(0).click();
   await expect(table).toContainText('Directory Test Company');
   await expect(table.locator('tbody tr').filter({ hasText: 'Directory Test Company' })).toContainText('CUSTOMER');

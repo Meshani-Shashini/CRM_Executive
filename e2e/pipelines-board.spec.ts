@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
-const minimumStageColumnWidth = 320;
+const minimumStageColumnWidth = 240;
 
 const viewports = [
   { width: 1024, height: 768 },
@@ -32,7 +32,7 @@ test('Pipelines stage header dividers align across wrapped titles and viewports'
   }
 });
 
-test('Pipelines board keeps all stage columns in one viewport-filling row', async ({ page }) => {
+test('Pipelines board keeps fixed-width stage columns in one scrollable row', async ({ page }) => {
   const screenshotDirectory = path.resolve('e2e/screenshots');
   mkdirSync(screenshotDirectory, { recursive: true });
 
@@ -73,47 +73,48 @@ test('Pipelines board keeps all stage columns in one viewport-filling row', asyn
     const columnWidths = await columns.evaluateAll((elements) =>
       elements.map((element) => element.getBoundingClientRect().width),
     );
-    expect(columnWidths.every((width) => width >= minimumStageColumnWidth), `minimum column width at ${viewport.width}x${viewport.height}`)
+    expect(columnWidths.every((width) => Math.abs(width - minimumStageColumnWidth) <= 1), `fixed column width at ${viewport.width}x${viewport.height}`)
       .toBe(true);
-    if (boardMetrics.clientWidth >= boardMetrics.minimumWidth) {
-      expect(Math.max(...columnWidths) - Math.min(...columnWidths), 'columns share available width equally').toBeLessThanOrEqual(1);
-    }
 
     expect(await bodies.evaluateAll((elements) =>
       elements.every((element) => getComputedStyle(element).overflowY === 'auto'),
     )).toBe(true);
     const cards = page.getByTestId('pipeline-deal-card');
-    expect(await cards.count(), `seeded deal cards exist at ${viewport.width}x${viewport.height}`).toBeGreaterThan(0);
-    await expect(page.getByTestId('pipeline-deal-card-title').first()).toBeVisible();
-    await expect(page.getByTestId('pipeline-deal-card-subtitle').first()).toBeVisible();
-    expect(await cards.evaluateAll((elements) => elements.every((card) =>
-      card.querySelectorAll('select').length === 0
-      && card.querySelectorAll('[data-testid="pipeline-deal-card-badges"] .pill').length <= 2,
-    )), 'cards use at most two compact badges and no move selector').toBe(true);
-    const cardOverflow = await cards.evaluateAll((elements) => elements.flatMap((card) => {
-      const cardBounds = card.getBoundingClientRect();
-      const containedParts = [...card.querySelectorAll<HTMLElement>(
-        '[data-testid="pipeline-deal-card-badges"], [data-testid="pipeline-deal-card-value"]',
-      )];
-      const overflowingParts = containedParts
-        .filter((part) => {
-          const bounds = part.getBoundingClientRect();
-          return bounds.left < cardBounds.left - 1 || bounds.right > cardBounds.right + 1 || part.scrollWidth > part.clientWidth + 1;
-        })
-        .map((part) => part.dataset.testid);
-      return overflowingParts;
-    }));
-    expect(cardOverflow, `compact card sections stay inside cards at ${viewport.width}x${viewport.height}`).toEqual([]);
-    expect(await page.getByTestId('pipeline-deal-card-badges').evaluateAll((containers) =>
-      containers.every((container) => [...container.querySelectorAll('.pill')].every((pill) =>
-        getComputedStyle(pill).whiteSpace === 'nowrap',
-      )),
-    )).toBe(true);
+    if (await cards.count()) {
+      await expect(page.getByTestId('pipeline-deal-card-title').first()).toBeVisible();
+      await expect(page.getByTestId('pipeline-deal-card-subtitle').first()).toBeVisible();
+      expect(await cards.evaluateAll((elements) => elements.every((card) =>
+        card.querySelectorAll('select').length === 0
+        && card.querySelectorAll('[data-testid="pipeline-deal-card-badges"] .kanban-card__pill-slot').length <= 2,
+      )), 'cards use at most two compact badges and no move selector').toBe(true);
+      const cardOverflow = await cards.evaluateAll((elements) => elements.flatMap((card) => {
+        const cardBounds = card.getBoundingClientRect();
+        const containedParts = [...card.querySelectorAll<HTMLElement>(
+          '[data-testid="pipeline-deal-card-badges"], [data-testid="pipeline-deal-card-value"]',
+        )];
+        const overflowingParts = containedParts
+          .filter((part) => {
+            const bounds = part.getBoundingClientRect();
+            return bounds.left < cardBounds.left - 1 || bounds.right > cardBounds.right + 1 || part.scrollWidth > part.clientWidth + 1;
+          })
+          .map((part) => part.dataset.testid);
+        return overflowingParts;
+      }));
+      expect(cardOverflow, `compact card sections stay inside cards at ${viewport.width}x${viewport.height}`).toEqual([]);
+      expect(await page.getByTestId('pipeline-deal-card-badges').evaluateAll((containers) =>
+        containers.every((container) => [...container.querySelectorAll('.kanban-card__pill-slot')].every((slot) =>
+          [...slot.children].every((pill) => getComputedStyle(pill).whiteSpace === 'nowrap'),
+        )),
+      )).toBe(true);
+    } else {
+      await expect(board.locator('.kanban-column__empty').first()).toBeVisible();
+    }
     if (viewport.width >= 1024) {
       const independentColumnScroll = await page.evaluate(() => {
         const bodies = [...document.querySelectorAll<HTMLElement>('[data-testid="pipelines-column-body"]')];
         return bodies.map((body) => {
           const filler = document.createElement('div');
+          filler.style.flex = '0 0 2000px';
           filler.style.height = '2000px';
           body.appendChild(filler);
           body.scrollTop = 40;

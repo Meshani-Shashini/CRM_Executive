@@ -7,6 +7,7 @@ import TableRowActionsMenu from '../components/ui/TableRowActionsMenu';
 import PageToolbar from '../components/ui/PageToolbar';
 import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 import { avatarCode } from '../components/table/avatar';
+import { KanbanBoard, KanbanCard, KanbanColumn, KanbanPill } from '../components/kanban';
 import { VENDOR_TYPES, normalizeVendorName } from '../data/vendors';
 import { useApp } from '../store/AppContext';
 import type { CompanyContactProfile, Vendor, VendorType } from '../types';
@@ -166,9 +167,9 @@ export default function VendorsPage() {
   }), [visibleVendors, sortKey, sortDirection, deals, quotationRequests]);
   const filterActiveCount = [typeFilter !== 'all', countryFilter !== 'all', statusFilter !== 'all'].filter(Boolean).length;
   const groupOptions = groupBy === 'vendorType'
-    ? [...new Set(vendors.map((vendor) => vendor.vendorType))].sort().map((value) => ({ value, label: value }))
+    ? VENDOR_TYPES.map((value) => ({ value, label: value }))
     : groupBy === 'status'
-      ? [...new Set(vendors.map((vendor) => vendor.status))].sort().map((value) => ({ value, label: value === 'active' ? 'Active' : 'Inactive' }))
+      ? (['active', 'inactive'] as const).map((value) => ({ value, label: value === 'active' ? 'Active' : 'Inactive' }))
       : uniqueCountries.map((value) => ({ value, label: value }));
   const groupedVendors = groupOptions.map(({ value, label }) => ({
     value,
@@ -426,69 +427,44 @@ export default function VendorsPage() {
         </table>}
       </TableShell>
       <div className="min-h-[12rem] md:hidden">
-        {!dataReady ? <div role="status" aria-label="Loading vendors" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-52 animate-pulse rounded-xl border border-ink-700 bg-ink-800/80" />)}
-        </div> : sortedVendors.length === 0 ? <div className="rounded-xl border border-ink-700 bg-ink-950 px-4 py-12 text-center text-sm text-muted">No vendors match your search or filters.</div> : <div data-testid="vendors-card-grid" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {!dataReady ? <div role="status" aria-label="Loading vendors" className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-40 animate-pulse rounded-xl border border-ink-700 bg-ink-800/80" />)}
+        </div> : sortedVendors.length === 0 ? <div className="rounded-xl border border-ink-700 bg-ink-950 px-4 py-12 text-center text-sm text-muted">No vendors match your search or filters.</div> : <div data-testid="vendors-card-grid" className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {sortedVendors.map((vendor) => {
-            const contact = getVendorContact(vendor);
             const vendorDeals = getVendorDeals(vendor, deals);
             const vendorRequests = getVendorRequests(vendor, quotationRequests);
-            const statusVariant = vendor.status === 'active' ? 'win' : 'muted';
             const openDetails = (element: HTMLElement) => {
               drawerTriggerRef.current = element;
               setSelectedVendorId(vendor.id);
             };
-            return <article key={vendor.id} tabIndex={0} aria-label={`Open ${vendor.name}`} onClick={(event) => {
-              if ((event.target as HTMLElement).closest('button')) return;
-              openDetails(event.currentTarget);
-            }} onKeyDown={(event) => {
-              if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
-                event.preventDefault();
-                openDetails(event.currentTarget);
-              }
-            }} className="cursor-pointer rounded-lg border border-ink-700 bg-ink-800/80 p-3 shadow-sm transition hover:border-brand-400/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400">
-              <div className="mb-3 flex items-start justify-between gap-2 border-b border-ink-700/80 pb-2">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#292B30] text-[10px] font-semibold text-[#A4A6AE]">{avatarCode(vendor.name)}</span>
-                  <div className="min-w-0">
-                    <h3 className="break-words text-sm font-bold text-white">{vendor.name}</h3>
-                    <div className="mt-1"><Badge variant="cold" compact><span className="text-[11px]">{vendor.vendorType.toUpperCase()}</span></Badge></div>
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <Badge variant={statusVariant} compact><span className="text-[11px]">{vendor.status}</span></Badge>
-                  <button type="button" aria-label={`Actions for ${vendor.name}`} aria-haspopup="menu" aria-expanded={actionMenu?.id === vendor.id && Boolean(actionMenu.anchor.closest('[data-testid="vendors-card-grid"]'))} className="btn-ghost !p-1" onClick={(event) => setActionMenu(actionMenu?.id === vendor.id ? null : { id: vendor.id, anchor: event.currentTarget })}><MoreHorizontal size={15} /></button>
-                  <TableRowActionsMenu open={actionMenu?.id === vendor.id && Boolean(actionMenu.anchor.closest('[data-testid="vendors-card-grid"]'))} anchor={actionMenu?.id === vendor.id ? actionMenu.anchor : null} label={`${vendor.name} actions`}>
-                    <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { drawerTriggerRef.current = actionMenu?.anchor ?? null; setSelectedVendorId(vendor.id); setActionMenu(null); }}><Eye size={13} /> View Details</button>
-                    {activeRole !== 'finance' && <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { openEditVendor(vendor); setActionMenu(null); }}><Pencil size={13} /> Edit Vendor</button>}
-                    {activeRole === 'admin' && <button type="button" role="menuitem" className="table-row-actions-item text-hot" onClick={() => { deleteVendor(vendor); setActionMenu(null); }}><Trash2 size={13} /> Delete Vendor</button>}
-                  </TableRowActionsMenu>
-                </div>
-              </div>
-              <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5">
-                {([
-                  ['Type', vendor.vendorType],
-                  ['Country', vendor.country || '—'],
-                  ['Currency', vendor.currency || '—'],
-                  ['Contact', contact.name || '—'],
-                  ['Phone', contact.phone || '—'],
-                  ['Email', contact.email || '—'],
-                  ['Linked Deals', <button type="button" className="text-left text-brand-300 hover:text-white" title={vendorDeals.map((deal) => deal.client).join(', ') || 'No linked deals'} onClick={(event) => { event.stopPropagation(); openDetails(event.currentTarget); }}>{vendorDeals.length} linked {vendorDeals.length === 1 ? 'deal' : 'deals'}</button>],
-                  ['Quotation Requests', <button type="button" className="text-left text-brand-300 hover:text-white" title={vendorRequests.map(({ line }) => line.reference).join(', ') || 'No quotation requests'} onClick={(event) => { event.stopPropagation(); openDetails(event.currentTarget); }}>{vendorRequests.length} {vendorRequests.length === 1 ? 'line' : 'lines'}</button>],
-                  ['Status', <Badge variant={statusVariant} compact><span className="text-[11px]">{vendor.status}</span></Badge>],
-                  ...(vendor.address ? [['Address', vendor.address] as const] : []),
-                  ...(vendor.taxId ? [['Tax ID', vendor.taxId] as const] : []),
-                  ...(vendor.licenseNo ? [['License', vendor.licenseNo] as const] : []),
-                ] as const).map(([label, value]) => <div key={label} className="min-w-0">
-                  <dt className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</dt>
-                  <dd className="break-words text-[13px] text-[#E1E2E5]">{value}</dd>
-                </div>)}
-              </dl>
-            </article>;
+            return <KanbanCard
+              key={vendor.id}
+              testId="vendor-card"
+              ariaLabel={`Open ${vendor.name}`}
+              pills={[
+                <KanbanPill tone={vendor.status === 'active' ? 'green' : 'muted'}>{vendor.status}</KanbanPill>,
+                <KanbanPill tone="muted">{vendor.vendorType}</KanbanPill>,
+              ]}
+              meta={[vendor.country, vendor.currency].filter(Boolean).join(' - ') || 'Location and currency not set'}
+              metaTitle={[vendor.country, vendor.currency].filter(Boolean).join(' - ') || 'Location and currency not set'}
+              title={vendor.name}
+              titleTitle={vendor.name}
+              footerLeft={`${vendorDeals.length} linked ${vendorDeals.length === 1 ? 'deal' : 'deals'}`}
+              footerRight={`${vendorRequests.length} ${vendorRequests.length === 1 ? 'request' : 'requests'}`}
+              controls={<>
+                <button type="button" aria-label={`Actions for ${vendor.name}`} aria-haspopup="menu" aria-expanded={actionMenu?.id === vendor.id && Boolean(actionMenu.anchor.closest('[data-testid="vendors-card-grid"]'))} className="btn-ghost !h-6 !w-6 !p-1" onClick={(event) => setActionMenu(actionMenu?.id === vendor.id ? null : { id: vendor.id, anchor: event.currentTarget })}><MoreHorizontal size={15} /></button>
+                <TableRowActionsMenu open={actionMenu?.id === vendor.id && Boolean(actionMenu.anchor.closest('[data-testid="vendors-card-grid"]'))} anchor={actionMenu?.id === vendor.id ? actionMenu.anchor : null} label={`${vendor.name} actions`}>
+                  <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { drawerTriggerRef.current = actionMenu?.anchor ?? null; setSelectedVendorId(vendor.id); setActionMenu(null); }}><Eye size={13} /> View Details</button>
+                  {activeRole !== 'finance' && <button type="button" role="menuitem" className="table-row-actions-item" onClick={() => { openEditVendor(vendor); setActionMenu(null); }}><Pencil size={13} /> Edit Vendor</button>}
+                  {activeRole === 'admin' && <button type="button" role="menuitem" className="table-row-actions-item text-hot" onClick={() => { deleteVendor(vendor); setActionMenu(null); }}><Trash2 size={13} /> Delete Vendor</button>}
+                </TableRowActionsMenu>
+              </>}
+              onActivate={openDetails}
+            />;
           })}
         </div>}
       </div>
-      </> : <div className="min-w-0 min-h-[24rem] overflow-x-auto rounded-lg border border-[#1B1E22] bg-ink-950 p-3">
+      </> : <div className="min-w-0 min-h-[24rem] rounded-lg border border-[#1B1E22] bg-ink-950 p-3">
         <div className="mb-2 flex min-w-0 items-center justify-end">
           <label className="flex min-w-0 items-center gap-2 text-xs text-muted">Group by
             <select aria-label="Group vendors by" className="input !w-auto max-w-full !py-1.5 !text-xs" value={groupBy} onChange={(event) => setGroupBy(event.target.value as VendorGroupBy)}>
@@ -498,53 +474,62 @@ export default function VendorsPage() {
         </div>
         {!dataReady ? <div role="status" aria-label="Loading vendors" className="grid min-w-[560px] grid-cols-2 gap-3">
           {[0, 1].map((column) => <div key={column} className="h-64 animate-pulse rounded-xl bg-ink-800/80" />)}
-        </div> : groupedVendors.length === 0 ? <div className="py-16 text-center text-sm text-muted">No vendors match your search or filters.</div> : <div data-testid="vendors-kanban-board" className="flex min-h-[22rem] min-w-max gap-3">
-          {groupedVendors.map(({ value, label, vendors: columnVendors }) => <section key={value} data-testid="vendors-kanban-column" aria-label={`${label} vendors`} onDragOver={(event) => {
-            if (activeRole !== 'finance') {
+        </div> : groupedVendors.length === 0 ? <div className="py-16 text-center text-sm text-muted">No vendors match your search or filters.</div> : <KanbanBoard
+          ariaLabel="Vendors grouped by category"
+          testId="vendors-kanban-board"
+        >
+          {groupedVendors.map(({ value, label, vendors: columnVendors }) => <KanbanColumn
+            key={value}
+            name={label}
+            count={columnVendors.length}
+            summary={`${columnVendors.length} ${columnVendors.length === 1 ? 'vendor' : 'vendors'}`}
+            emptyLabel="vendors"
+            testId="vendors-kanban-column"
+            onDragOver={(event) => {
+              if (activeRole !== 'finance') {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+              }
+            }}
+            onDrop={(event) => {
               event.preventDefault();
-              event.dataTransfer.dropEffect = 'move';
-            }
-          }} onDrop={(event) => {
-            event.preventDefault();
-            const vendorId = event.dataTransfer.getData('text/vendor-id');
-            if (vendorId) updateVendorGroup(vendorId, value);
-          }} className="flex min-h-[22rem] w-[min(82vw,360px)] min-w-[280px] shrink-0 flex-col rounded-xl border border-ink-700 bg-ink-900/55 px-3 py-2">
-            <header className="mb-2 flex items-center justify-between gap-2">
-              <h2 className="truncate text-sm font-semibold text-white" title={label}>{label}</h2><Badge variant="muted"><span className="text-xs">{columnVendors.length}</span></Badge>
-            </header>
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1">
+              const vendorId = event.dataTransfer.getData('text/vendor-id');
+              if (vendorId) updateVendorGroup(vendorId, value);
+            }}
+          >
               {columnVendors.map((vendor) => {
                 const vendorDeals = getVendorDeals(vendor, deals);
                 const vendorRequests = getVendorRequests(vendor, quotationRequests);
-                return <article key={vendor.id} draggable={activeRole !== 'finance'} onDragStart={(event) => {
-                  setDraggedVendorId(vendor.id);
-                  event.dataTransfer.setData('text/vendor-id', vendor.id);
-                  event.dataTransfer.effectAllowed = 'move';
-                }} onDragEnd={() => setDraggedVendorId('')} className={`rounded-lg border border-ink-700 bg-ink-800/80 shadow-sm transition hover:border-brand-400/50 ${draggedVendorId === vendor.id ? 'opacity-50' : ''}`}>
-                  <button type="button" onClick={(event) => { drawerTriggerRef.current = event.currentTarget; setSelectedVendorId(vendor.id); }} className="flex w-full min-w-0 flex-col gap-2 px-3 py-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400">
-                    <span className="flex w-full min-w-0 items-center gap-1.5">
-                      <Badge variant={vendor.status === 'active' ? 'win' : 'muted'} subtle>{vendor.status.toUpperCase()}</Badge>
-                      <Badge variant="cold" subtle>{vendor.vendorType.toUpperCase()}</Badge>
-                    </span>
-                    <span className="block min-w-0 truncate text-[10px] text-muted" title={`${vendor.country} · ${vendor.currency}`}>
-                      {[vendor.country, vendor.currency].filter(Boolean).join(' · ') || 'Location and currency not set'}
-                    </span>
-                    <span className="block min-w-0 whitespace-normal break-words text-xs font-semibold text-white" title={vendor.name}>{vendor.name}</span>
-                    <span className="flex w-full min-w-0 items-center justify-between gap-2 border-t border-ink-700/70 pt-2">
-                      <span className="min-w-0 truncate text-[10px] text-muted" title={`${vendorDeals.length} linked deals`}>
-                        {vendorDeals.length} linked {vendorDeals.length === 1 ? 'deal' : 'deals'}
-                      </span>
-                      <span className="shrink-0 whitespace-nowrap text-[10px] font-medium text-brand-300" title={`${vendorRequests.length} quotation requests`}>
-                        {vendorRequests.length} {vendorRequests.length === 1 ? 'request' : 'requests'}
-                      </span>
-                    </span>
-                  </button>
-                </article>;
+                return <KanbanCard
+                  key={vendor.id}
+                  testId="vendor-kanban-card"
+                  ariaLabel={`Open ${vendor.name}`}
+                  pills={[
+                    <KanbanPill tone={vendor.status === 'active' ? 'green' : 'muted'}>{vendor.status}</KanbanPill>,
+                    <KanbanPill tone="muted">{vendor.vendorType}</KanbanPill>,
+                  ]}
+                  meta={[vendor.country, vendor.currency].filter(Boolean).join(' - ') || 'Location and currency not set'}
+                  metaTitle={[vendor.country, vendor.currency].filter(Boolean).join(' - ') || 'Location and currency not set'}
+                  title={vendor.name}
+                  titleTitle={vendor.name}
+                  footerLeft={`${vendorDeals.length} linked ${vendorDeals.length === 1 ? 'deal' : 'deals'}`}
+                  footerRight={`${vendorRequests.length} ${vendorRequests.length === 1 ? 'request' : 'requests'}`}
+                  draggable={activeRole !== 'finance'}
+                  onDragStart={(event) => {
+                    setDraggedVendorId(vendor.id);
+                    event.dataTransfer.setData('text/vendor-id', vendor.id);
+                    event.dataTransfer.effectAllowed = 'move';
+                  }}
+                  onDragEnd={() => setDraggedVendorId('')}
+                  onActivate={(card) => {
+                    drawerTriggerRef.current = card;
+                    setSelectedVendorId(vendor.id);
+                  }}
+                  className={draggedVendorId === vendor.id ? 'opacity-50' : ''}
+                />;
               })}
-              {columnVendors.length === 0 && <p className="py-7 text-center text-xs text-muted/60">Drop vendors here</p>}
-            </div>
-          </section>)}
-        </div>}
+          </KanbanColumn>)}
+        </KanbanBoard>}
       </div>}
 
       {selectedVendor && <div className="fixed inset-0 z-[70] flex justify-end" role="presentation">

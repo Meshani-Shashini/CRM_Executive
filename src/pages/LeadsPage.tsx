@@ -7,16 +7,17 @@ import ViewModeSwitcher from '../components/ui/ViewModeSwitcher';
 import TableShell from '../components/table/TableShell';
 import { OwnerCell, ProductCodePill, StagePill, TableDateCell } from '../components/table/TableCells';
 import { avatarCode } from '../components/table/avatar';
+import { KanbanBoard, KanbanCard, KanbanColumn, KanbanPill } from '../components/kanban';
 import LeadTemperatureControl from '../components/LeadTemperatureControl';
 import { useApp } from '../store/AppContext';
-import { AlertTriangle, ArrowLeft, ArrowRight, CalendarDays, CheckCircle2, CircleDot, Columns3, Filter, Flame, List, Mail, MoreHorizontal, Pencil, Plus, Search, ShieldCheck, TrendingUp, UserRound, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, CalendarDays, Columns3, Filter, Flame, List, MoreHorizontal, Pencil, Plus, Search, TrendingUp, X } from 'lucide-react';
 import type { CompanyContactProfile, Lead, LeadTemperature } from '../types';
 import {
   DEFAULT_USD_TO_MVR_RATE, formatAmount, formatCurrencyInput, formatCurrencyInputForDisplay,
   parseCurrencyInput, toMvr, type Currency,
 } from '../utils/currency';
 import { hashParams } from '../utils/navigation';
-import { formatDate, normalizeDateInput } from '../utils/date';
+import { formatDate, formatShortDate, normalizeDateInput } from '../utils/date';
 import DateInput from '../components/ui/DateInput';
 import ProductSelect from '../components/ui/ProductSelect';
 import { calculateBrokerageCommission } from '../utils/insurance';
@@ -79,31 +80,6 @@ function boardStageForLead(
   return lifecycleStageForLead(lead, Boolean(
     (lead.dealId && linkedDealIds.has(lead.dealId)) || linkedLeadIds.has(lead.id),
   ));
-}
-
-function NextActivityIndicator({ state, date, title, compact = false }: {
-  state: 'overdue' | 'today' | 'future' | 'none';
-  date?: string;
-  title?: string;
-  compact?: boolean;
-}) {
-  const tone = state === 'overdue' ? 'text-hot' : state === 'future' ? 'text-emerald-300' : 'text-amber-300';
-  const dot = state === 'overdue' ? 'bg-hot' : state === 'future' ? 'bg-emerald-400' : 'bg-amber-400';
-  const label = date ? formatDate(date) : title ?? 'No activity';
-  return <span className={`inline-flex min-w-0 items-center gap-1.5 ${tone}`} title={`${title ?? label}${date ? ` · ${label}` : ''}`}>
-    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
-    {!compact && <span className="truncate">{label}</span>}
-  </span>;
-}
-
-function boardStageIcon(stage: LeadLifecycleStage) {
-  if (stage === 'Lead Identified') return CircleDot;
-  if (stage === 'Contact Made') return UserRound;
-  if (stage === 'Key Person Identified') return ShieldCheck;
-  if (stage === 'Intro Email Sent') return Mail;
-  if (stage === 'Meetings Ongoing') return CalendarDays;
-  if (stage === 'Lost') return AlertTriangle;
-  return CheckCircle2;
 }
 
 export default function LeadsPage() {
@@ -289,6 +265,54 @@ export default function LeadsPage() {
     if (lead.temperature === temperature || (activeRole !== 'admin' && activeRole !== 'sales')) return;
     const updatedAt = new Date().toISOString();
     setLeads((current) => current.map((item) => item.id === lead.id ? { ...item, temperature, updatedAt } : item));
+  };
+
+  const renderLeadCard = (lead: Lead, canDrag = false) => {
+    const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? formatStaffIdentifier(lead.ownerId);
+    const linkedDeal = deals.find((deal) => deal.id === lead.dealId || deal.leadId === lead.id);
+    const nextActivity = getNextActivity(activities, { leadId: lead.id, dealId: linkedDeal?.id });
+    const currentStage = boardStageForLead(lead, linkedDealIds, linkedLeadIds);
+    const isLinked = Boolean((lead.dealId && linkedDealIds.has(lead.dealId)) || linkedLeadIds.has(lead.id));
+    const isTerminal = isTerminalLeadStage(currentStage);
+    const statusTone = lead.status === 'IN-PROGRESS' ? 'blue'
+      : lead.status === 'TO-DO' ? 'amber'
+        : lead.status === 'COMPLETED' ? 'green' : 'muted';
+    const startDateValue = lead.startDate ?? lead.start_date ?? lead.createdAt ?? lead.created_at;
+    const closeDateValue = lead.closeDate ?? lead.renewalDate;
+    const startDate = formatShortDate(startDateValue);
+    const closeDate = formatShortDate(closeDateValue);
+    const value = lead.value;
+    return <KanbanCard
+      key={lead.id}
+      ariaLabel={`Open lead ${lead.title ?? lead.client}`}
+      pills={[
+        <LeadTemperatureControl
+          leadName={lead.title ?? lead.client}
+          temperature={lead.temperature ?? 'WARM'}
+          disabled={activeRole !== 'admin' && activeRole !== 'sales'}
+          compact
+          onChange={(temperature) => updateLeadTemperature(lead, temperature)}
+        />,
+        <KanbanPill tone={statusTone}>{lead.status}</KanbanPill>,
+      ]}
+      meta={lead.client}
+      metaTitle={lead.client}
+      title={lead.title ?? `${lead.client} lead`}
+      titleTitle={lead.title ?? `${lead.client} lead`}
+      footerLeft={<span className="inline-flex min-w-0 items-center gap-1" title={[formatDate(startDateValue), formatDate(closeDateValue)].filter(Boolean).join(' · ')}><CalendarDays size={13} aria-hidden="true" /><span className="truncate">{startDate}{closeDate ? ` · ${closeDate}` : ''}</span></span>}
+      footerRight={value === undefined ? undefined : formatAmount(value, lead.currency ?? 'MVR')}
+      avatar={{ initials: avatarCode(ownerName), label: ownerName }}
+      activity={{
+        state: nextActivity.state,
+        label: nextActivity.title ?? (nextActivity.date ? formatDate(nextActivity.date) : 'No activity scheduled'),
+      }}
+      onActivate={() => setInspectedLeadId(lead.id)}
+      draggable={canDrag && !isLinked && !isTerminal}
+      onDragStart={canDrag ? (event) => {
+        event.dataTransfer.setData('text/lead-id', lead.id);
+        event.dataTransfer.effectAllowed = 'move';
+      } : undefined}
+    />;
   };
 
   const hasLinkedQuotationRequest = (lead: Lead) => {
@@ -723,106 +747,48 @@ export default function LeadsPage() {
       ) : activePipelines.length === 0 ? (
         <div className="glass rounded-2xl p-8 text-center text-sm text-muted">Create an active pipeline before adding leads.</div>
       ) : view === 'funnel' ? (
-        <div>
+        <div className="min-w-0">
         <div className="mb-2 flex justify-end">
           <button type="button" className="text-xs text-muted hover:text-white" onClick={() => setView('forecast')}><TrendingUp size={13} className="mr-1 inline" />Forecast</button>
         </div>
-        <div className="max-w-full overflow-x-auto overscroll-x-contain pb-3">
-        <div className="grid min-w-[1820px] grid-cols-7 gap-3">
+        <KanbanBoard ariaLabel="Leads by funnel stage" testId="leads-kanban-board">
           {leadsByBoardStage.map(({ stage, leads: stageLeads }) => {
-            const StageIcon = boardStageIcon(stage);
-            return <section key={stage} className="min-w-0 rounded-xl border border-ink-700 bg-ink-900/55 p-2.5"
+            const totalMvr = stageLeads.reduce((total, lead) =>
+              total + (lead.valueMvr ?? toMvr(lead.value ?? lead.premium, lead.currency ?? 'MVR', lead.exchangeRate)), 0);
+            return <KanbanColumn key={stage}
+              name={stage}
+              count={stageLeads.length}
+              emptyLabel="leads"
+              summary={`${formatAmount(totalMvr, 'MVR')} - ${stageLeads.length} ${stageLeads.length === 1 ? 'lead' : 'leads'}`}
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => {
                 event.preventDefault();
                 const leadId = event.dataTransfer.getData('text/lead-id');
                 const lead = searchedLeads.find((item) => item.id === leadId);
                 if (lead) moveLeadToStage(lead, stage);
-              }}>
-              <header className="mb-2 flex min-h-11 items-start justify-between gap-2 px-1">
-                <div className="flex items-center gap-2 text-sm font-semibold text-white"><StageIcon size={15} className="shrink-0 text-brand-300" /><h2>{stage}</h2></div>
-              </header>
-              <div className="max-h-[calc(100vh-300px)] min-h-48 space-y-2 overflow-y-auto rounded-lg bg-ink-950/40 p-1.5">
-                {stageLeads.map((lead) => {
-                  const ownerName = staffOptions.find((item) => item.id === lead.ownerId)?.name ?? formatStaffIdentifier(lead.ownerId);
-                  const isLinked = Boolean((lead.dealId && linkedDealIds.has(lead.dealId)) || linkedLeadIds.has(lead.id));
-                  const currentStage = boardStageForLead(lead, linkedDealIds, linkedLeadIds);
-                  const isTerminal = isTerminalLeadStage(currentStage);
-                  const activityStatusClass = lead.status === 'BACKLOG'
-                    ? 'border-slate-400/20 bg-slate-400/10 text-slate-300'
-                    : lead.status === 'IN-PROGRESS'
-                      ? 'border-blue-400/20 bg-blue-400/10 text-blue-300'
-                      : lead.status === 'TO-DO'
-                        ? 'border-amber-400/20 bg-amber-400/10 text-amber-300'
-                        : 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300';
-                  const firstDate = formatDate(lead.startDate ?? lead.start_date ?? lead.createdAt ?? lead.created_at).replace(/-/g, ' ');
-                  const secondDate = formatDate(lead.closeDate ?? lead.renewalDate).replace(/-/g, ' ');
-                  return <article key={lead.id} draggable={!isLinked && !isTerminal}
-                    onDragStart={(event) => {
-                      event.dataTransfer.setData('text/lead-id', lead.id);
-                      event.dataTransfer.effectAllowed = 'move';
-                    }}
-                    onClick={() => setInspectedLeadId(lead.id)}
-                    className={`rounded-lg border border-ink-700 bg-ink-800/80 p-3 shadow-sm transition hover:border-brand-400/50 ${isLinked ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'}`}>
-                    <div className="mb-3 flex items-center justify-between gap-2">
-                      <LeadTemperatureControl
-                        leadName={lead.title ?? lead.client}
-                        temperature={lead.temperature ?? 'WARM'}
-                        disabled={activeRole !== 'admin' && activeRole !== 'sales'}
-                        compact
-                        onChange={(temperature) => updateLeadTemperature(lead, temperature)}
-                      />
-                      <span className={`inline-flex h-5 items-center rounded-full border px-2 text-[9px] font-semibold leading-none tracking-wide ${activityStatusClass}`}>{lead.status}</span>
-                    </div>
-                    <div className="mb-3 flex min-w-0 items-center justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-[10px] font-medium text-muted">{lead.client}</div>
-                        <h3 className="truncate text-[13px] font-bold leading-5 text-white">{lead.title ?? `${lead.client} lead`}</h3>
-                      </div>
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink-700 text-[10px] font-semibold text-slate-200" aria-label={`Owner: ${ownerName}`} title={ownerName}>{avatarCode(ownerName)}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 border-t border-ink-700/70 pt-2 text-[10px] text-muted">
-                      {[firstDate, secondDate].map((date, index) => (
-                        <span key={index} className="flex min-w-0 items-center gap-1">
-                          <CalendarDays size={11} className="shrink-0 text-muted/80" aria-hidden="true" />
-                          <span className="truncate">{date}</span>
-                        </span>
-                      ))}
-                    </div>
-                  </article>;
-                })}
-                {stageLeads.length === 0 && <div className="py-8 text-center text-[11px] text-muted/60">No leads in this stage.</div>}
-              </div>
-            </section>;
+              }}
+            >
+              {stageLeads.map((lead) => renderLeadCard(lead, true))}
+            </KanbanColumn>;
           })}
-        </div>
-        </div>
+        </KanbanBoard>
         </div>
       ) : view === 'forecast' ? (
         <div className="glass rounded-2xl p-5">
           <div className="mb-4 flex items-start justify-between gap-3"><div><h2 className="font-semibold text-white">Lead Forecast</h2><p className="mt-1 text-xs text-muted">Open lead exposure converted to MVR, grouped by funnel stage. Forecast values are unweighted estimates.</p></div><button type="button" title="Back to Funnels" aria-label="Back to Funnels" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-ink-800 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400" onClick={() => setView('funnel')}><ArrowLeft size={16} /></button></div>
-          <div className="overflow-x-auto pb-2">
-            <div className="flex w-max min-w-full gap-3">
+          <KanbanBoard ariaLabel="Lead forecast by funnel stage">
             {leadsByBoardStage.map(({ stage, leads: stageLeads }) => {
               const total = stageLeads.reduce((sum, lead) => sum + (lead.valueMvr ?? toMvr(lead.value ?? lead.premium, lead.currency ?? 'MVR', lead.exchangeRate)), 0);
-              return <div key={stage} className="w-56 shrink-0 rounded-xl border border-ink-700 bg-ink-900/50 p-4">
-                <div className="flex items-center justify-between gap-2 text-sm text-white"><span className="min-w-0">{stage}</span><Badge variant="muted">{stageLeads.length}</Badge></div>
-                <div className="mt-3 text-sm font-semibold text-brand-200">{formatAmount(total, 'MVR')}</div>
-                <div className="mt-1 text-xs text-muted">Unweighted pipeline value</div>
-                <div className="mt-3 max-h-36 space-y-2 overflow-y-auto border-t border-ink-700 pt-2">
-                  {stageLeads.map((lead) => {
-                    const linkedDeal = deals.find((deal) => deal.id === lead.dealId || deal.leadId === lead.id);
-                    return <div key={lead.id} className="flex items-center justify-between gap-2 text-[10px]">
-                      <span className="min-w-0 truncate text-white">{lead.title ?? lead.client}</span>
-                      <NextActivityIndicator {...getNextActivity(activities, { leadId: lead.id, dealId: linkedDeal?.id })} compact />
-                    </div>;
-                  })}
-                  {!stageLeads.length && <span className="text-[10px] text-muted">No leads in this stage.</span>}
-                </div>
-              </div>;
+              return <KanbanColumn key={stage}
+                name={stage}
+                count={stageLeads.length}
+                emptyLabel="leads"
+                summary={`${formatAmount(total, 'MVR')} - ${stageLeads.length} ${stageLeads.length === 1 ? 'lead' : 'leads'}`}
+              >
+                {stageLeads.map((lead) => renderLeadCard(lead))}
+              </KanbanColumn>;
             })}
-            </div>
-          </div>
+          </KanbanBoard>
         </div>
       ) : (
         <TableShell>

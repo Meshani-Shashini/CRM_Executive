@@ -229,27 +229,26 @@ describe('Deal list row accessibility', () => {
 
     act(() => root.render(<DealWorkspace deals={deals} dealsPageMode />));
 
-    expect(container.querySelectorAll('section[data-stage-name]')).toHaveLength(9);
-    const identifiedColumn = container.querySelector<HTMLElement>('section[data-stage-name="Identified"]');
-    expect(identifiedColumn?.getAttribute('data-total-mvr')).toBe('3000');
+    const findIdentifiedColumn = () => [...container.querySelectorAll<HTMLElement>('section[data-testid="deals-kanban-column"]')]
+      .find((column) => column.querySelector('.kanban-column__name')?.textContent === 'Identified');
+    expect(container.querySelectorAll('section[data-testid="deals-kanban-column"]')).toHaveLength(9);
+    const identifiedColumn = findIdentifiedColumn();
+    expect(identifiedColumn?.querySelector('.kanban-column__summary')?.textContent).toBe('MVR 3,000.00 - 2 deals');
     expect(identifiedColumn?.querySelectorAll('article[data-deal-id]')).toHaveLength(2);
     const commercialCard = identifiedColumn?.querySelector<HTMLElement>('article[data-deal-id="deal-commercial"]');
     expect(commercialCard?.textContent).toContain('OPEN');
     expect(commercialCard?.textContent).toContain('PR');
     expect(commercialCard?.textContent).toContain('Acme');
     expect(commercialCard?.textContent).toContain('Property placement');
-    expect(commercialCard?.textContent).toContain('01 Dec 2025');
+    expect(commercialCard?.textContent).toContain('01-Dec-2025');
     expect(commercialCard?.textContent).toContain('MVR 1,000.00');
     expect(commercialCard?.textContent).not.toContain('Commercial');
     expect(commercialCard?.getAttribute('draggable')).toBe('true');
-    expect(commercialCard?.querySelector('[aria-label="Next activity"]')).toBeNull();
-    expect(commercialCard?.className).toContain('w-full');
-    const cardButton = commercialCard?.querySelector<HTMLButtonElement>('button');
-    expect(cardButton?.className).toContain('w-full');
-    expect(cardButton?.className).toContain('px-4');
-    expect(cardButton?.className).toContain('py-3.5');
-    expect(cardButton?.querySelector('span:nth-child(3)')?.className).toContain('break-words');
-    expect(cardButton?.querySelector('.whitespace-nowrap')?.className).toContain('shrink-0');
+    expect(commercialCard?.getAttribute('role')).toBe('button');
+    expect(commercialCard?.getAttribute('tabindex')).toBe('0');
+    expect(commercialCard?.querySelector('.kanban-card__activity')?.getAttribute('aria-label')).toBe('No activity scheduled');
+    expect(commercialCard?.querySelector('.kanban-card__pill-slot')).not.toBeNull();
+    expect(commercialCard?.querySelector('.kanban-card__footer-right')?.textContent).toBe('MVR 1,000.00');
 
     const pipelineFilter = container.querySelector<HTMLSelectElement>('select[aria-label="Filter deals by pipeline"]');
     act(() => {
@@ -258,8 +257,8 @@ describe('Deal list row accessibility', () => {
       pipelineFilter.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
-    const filteredColumn = container.querySelector<HTMLElement>('section[data-stage-name="Identified"]');
-    expect(filteredColumn?.getAttribute('data-total-mvr')).toBe('1000');
+    const filteredColumn = findIdentifiedColumn();
+    expect(filteredColumn?.querySelector('.kanban-column__summary')?.textContent).toBe('MVR 1,000.00 - 1 deal');
     expect(filteredColumn?.querySelectorAll('article[data-deal-id]')).toHaveLength(1);
     expect(filteredColumn?.querySelector('article[data-deal-id="deal-sme"]')).toBeNull();
   });
